@@ -10,10 +10,10 @@ InTAct computes activation intervals from the **forget set** and protects everyt
 
 ```bash
 # Run with default settings (unlearn classes 0 and 1)
-python simple_experiment.py
+python experiment.py
 
 # Custom unlearning
-python simple_experiment.py \
+python experiment.py \
     --unlearn_classes 0 1 2 \
     --pretrain_epochs 20 \
     --unlearn_epochs 15 \
