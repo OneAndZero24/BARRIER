@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 from torchvision.models import resnet18, ResNet18_Weights
 
-from InTAct.intact import intact_unlearn
+from .intact import intact_unlearn
 
 # Setup logging
 logging.basicConfig(
