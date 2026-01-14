@@ -130,6 +130,8 @@ def main():
                         help='Learning rate for pretraining (default: 0.001)')
     parser.add_argument('--unlearn_lr', type=float, default=0.0001,
                         help='Learning rate for unlearning (default: 0.0001)')
+    parser.add_argument('--reduced_dim', type=int, default=32,
+                        help='Number of principal components (default: 32)')
     parser.add_argument('--lambda_interval', type=float, default=100.0,
                         help='Weight for interval protection loss (default: 100.0)')
     parser.add_argument('--margin_percentile', type=float, default=0.2,
@@ -224,6 +226,7 @@ def main():
         lambda_interval=args.lambda_interval,
         lower_percentile=args.margin_percentile,
         upper_percentile=1.0 - args.margin_percentile,
+        reduced_dim=args.reduced_dim,
         infinity_scale=args.infinity_scale
     )
     
