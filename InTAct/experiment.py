@@ -52,7 +52,7 @@ def pretrain_model(model, train_loader, criterion, device, epochs=10, lr=0.001):
     log.info(f"Pretraining model for {epochs} epochs...")
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    
+   
     for epoch in range(epochs):
         total_loss = 0.0
         correct = 0
@@ -118,8 +118,8 @@ def test_model(model, test_loader, device, all_classes):
 
 def main():
     parser = argparse.ArgumentParser(description='InTAct Unlearning Experiment')
-    parser.add_argument('--unlearn_classes', nargs='+', type=int, default=[0, 1],
-                        help='Classes to unlearn (default: 0 1)')
+    parser.add_argument('--unlearn_classes', nargs='+', type=int, default=[0],
+                        help='Class to unlearn (default: 0)')
     parser.add_argument('--batch_size', type=int, default=128,
                         help='Batch size (default: 128)')
     parser.add_argument('--pretrain_epochs', type=int, default=10,
@@ -207,7 +207,12 @@ def main():
     
     # Unlearning
     log.info("\n=== Starting InTAct Unlearning ===")
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.unlearn_lr)
+    for name, p in model.named_parameters():
+        if "fc" not in name:
+            p.requires_grad = False
+        else:
+            p.requires_grad = True
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.unlearn_lr)
     
     model = intact_unlearn(
         model=model,

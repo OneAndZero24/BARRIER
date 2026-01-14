@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -59,7 +59,7 @@ class UnlearnIntervalProtection:
         # Auto-detect feature layer before classifier
         self.interval_layers = []
         feature_layer = self._find_feature_layer(model)
-        
+
         if feature_layer is not None:
             layer_name, layer_module = feature_layer
             self.interval_layers.append((layer_name, layer_module))
@@ -206,7 +206,7 @@ class UnlearnIntervalProtection:
                     continue
                 
                 prev_param = self.params_snapshot[param_full_name]
-                
+               
                 if "weight" in name:
                     weight_diff = param - prev_param
                     weight_diff_pos = torch.relu(weight_diff)
@@ -241,8 +241,8 @@ class UnlearnIntervalProtection:
             
             if lower_bound_reg_1 is not None:
                 # Add loss from both negative space intervals
-                total_loss += lower_bound_reg_1.sum().pow(2) + upper_bound_reg_1.sum().pow(2)
-                total_loss += lower_bound_reg_2.sum().pow(2) + upper_bound_reg_2.sum().pow(2)
+                total_loss += lower_bound_reg_1.pow(2).mean() + upper_bound_reg_1.pow(2).mean()
+                total_loss += lower_bound_reg_2.pow(2).mean() + upper_bound_reg_2.pow(2).mean()
         
         return self.lambda_interval * total_loss
     
