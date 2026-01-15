@@ -634,7 +634,7 @@ class Diffusion(object):
         
         logging.info(f"InTAct Unlearning: lambda_interval={config.training.lambda_interval}, method={args.method}")
         
-        _, D_forget_loader = get_forget_dataset(
+        D_remain_loader, D_forget_loader = get_forget_dataset(
             args, config, args.label_to_forget
         )
         D_forget_iter = cycle(D_forget_loader)
@@ -664,11 +664,13 @@ class Diffusion(object):
             upper_percentile=config.training.get('upper_percentile', 0.95),
             reduced_dim=config.training.get('reduced_dim', 32),
             infinity_scale=config.training.get('infinity_scale', 20.0),
-            layer_to_protect=config.training.get('layer_to_protect', None)
+            layer_to_protect=config.training.get('layer_to_protect', None),
+            use_actual_bounds=config.training.get('use_actual_bounds', False)
         )
         
         logging.info("Setting up InTAct protection...")
-        protection.setup_protection(model, D_forget_loader, self.device)
+        remain_loader = D_remain_loader if config.training.get('use_actual_bounds', False) else None
+        protection.setup_protection(model, D_forget_loader, self.device, remain_dataloader=remain_loader)
         
         model.train()
         start = time.time()

@@ -22,7 +22,8 @@ class UnlearnIntervalProtection:
         upper_percentile: float = 0.95,
         reduced_dim: int = 32,
         infinity_scale: float = 20.0,
-        layer_to_protect: Optional[str] = None
+        layer_to_protect: Optional[str] = None,
+        use_actual_bounds: bool = False
     ):
         self.lambda_interval = lambda_interval
         self.lower_percentile = lower_percentile
@@ -30,11 +31,12 @@ class UnlearnIntervalProtection:
         self.reduced_dim = reduced_dim
         self.infinity_scale = infinity_scale
         self.layer_to_protect = layer_to_protect
+        self.use_actual_bounds = use_actual_bounds
 
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}
 
-    def setup_protection(self, model: nn.Module, forget_dataloader, device):
+    def setup_protection(self, model: nn.Module, forget_dataloader, device, remain_dataloader=None):
         log.info("Setting up InTAct with Mean Reparametrization...")
         
         feature_layers = self._find_feature_layers(model, self.layer_to_protect)
@@ -44,8 +46,14 @@ class UnlearnIntervalProtection:
         
         log.info(f"Found {len(feature_layers)} layers to protect: {[name for name, _ in feature_layers]}")
 
-        # 1. Collect Activations for all layers
+        # 1. Collect Activations for all layers (forget data)
         acts_dict = self._collect_activations(model, feature_layers, forget_dataloader, device)
+        
+        # 1b. Optionally collect remain data for actual bounds calculation
+        remain_acts_dict = None
+        if self.use_actual_bounds and remain_dataloader is not None:
+            log.info("Collecting remain data activations for actual bounds...")
+            remain_acts_dict = self._collect_activations(model, feature_layers, remain_dataloader, device)
         
         # 2. Process each layer
         self.pca_info = []
@@ -68,6 +76,25 @@ class UnlearnIntervalProtection:
             Z = Xc @ U_forget.T
             z_min = torch.quantile(Z, self.lower_percentile, dim=0)
             z_max = torch.quantile(Z, self.upper_percentile, dim=0)
+            
+            # Calculate actual bounds from remain+forget if requested
+            if self.use_actual_bounds and remain_acts_dict is not None:
+                remain_acts = remain_acts_dict[layer_name]['activations']
+                remain_Xc = remain_acts - mu
+                remain_Z = remain_Xc @ U_forget.T
+                
+                # Combine forget and remain projections
+                combined_Z = torch.cat([Z, remain_Z], dim=0)
+                
+                # Use actual min/max as infinity bounds
+                inf_low = combined_Z.min(dim=0)[0]
+                inf_high = combined_Z.max(dim=0)[0]
+                
+                log.info(f"Layer {layer_name}: Using actual bounds from remain+forget data")
+            else:
+                # Use scaled bounds (original behavior)
+                inf_low = z_min - self.infinity_scale
+                inf_high = z_max + self.infinity_scale
 
             self.pca_info.append({
                 "layer_name": layer_name,
@@ -77,6 +104,8 @@ class UnlearnIntervalProtection:
                 "S_residual": S_residual.detach(),
                 "z_min": z_min.detach(),
                 "z_max": z_max.detach(),
+                "inf_low": inf_low.detach(),
+                "inf_high": inf_high.detach(),
                 "original_shape": original_shape  # Store for Conv2d layers
             })
 
@@ -99,8 +128,9 @@ class UnlearnIntervalProtection:
             Sr = info["S_residual"].to(device)
             z_min, z_max = info["z_min"].to(device), info["z_max"].to(device)
             
-            inf_low = z_min - self.infinity_scale
-            inf_high = z_max + self.infinity_scale
+            # Use precomputed bounds (either actual or scaled)
+            inf_low = info["inf_low"].to(device)
+            inf_high = info["inf_high"].to(device)
 
             w_name = self._resolve_param_name(model, next_layer.weight)
             b_name = self._resolve_param_name(model, next_layer.bias) if next_layer.bias is not None else None
