@@ -25,6 +25,8 @@ from models.ema import EMAHelper
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 
+from InTAct.intact import UnlearnIntervalProtection
+
 
 def torch2hwcuint8(x, clip=False):
     if clip:
@@ -617,6 +619,151 @@ class Diffusion(object):
                 test_model.eval()
                 self.sample_visualization(test_model, step, args.cond_scale)
                 del test_model
+
+    def intact_unlearn(self):
+        """
+        InTAct unlearning.
+        
+        Key components:
+        - D_forget_loader: Forget data (what to unlearn)
+        - model: Conditional diffusion model
+        - optimizer: SGD/Adam optimizer
+        - mask: Optional saliency mask from generate_mask()
+        """
+        args, config = self.args, self.config
+        
+        logging.info(f"InTAct Unlearning: lambda_interval={config.training.lambda_interval}, method={args.method}")
+        
+        _, D_forget_loader = get_forget_dataset(
+            args, config, args.label_to_forget
+        )
+        D_forget_iter = cycle(D_forget_loader)
+        
+        mask = torch.load(args.mask_path) if args.mask_path else None
+        
+        model = Conditional_Model(config)
+        states = torch.load(
+            os.path.join(args.ckpt_folder, "ckpts/ckpt.pth"),
+            map_location=self.device,
+        )
+
+        model = model.to(self.device)
+        model = torch.nn.DataParallel(model)
+        model.load_state_dict(states[0], strict=True)
+        
+        optimizer = get_optimizer(config, model.parameters())
+        criteria = torch.nn.MSELoss()
+        
+        if config.model.ema:
+            ema_helper = EMAHelper(mu=config.model.ema_rate)
+            ema_helper.register(model)
+        
+        protection = UnlearnIntervalProtection(
+            lambda_interval=config.training.lambda_interval,
+            lower_percentile=config.training.get('lower_percentile', 0.05),
+            upper_percentile=config.training.get('upper_percentile', 0.95),
+            reduced_dim=config.training.get('reduced_dim', 32),
+            infinity_scale=config.training.get('infinity_scale', 20.0),
+            layer_to_protect=config.training.get('layer_to_protect', None)
+        )
+        
+        logging.info("Setting up InTAct protection...")
+        protection.setup_protection(model, D_forget_loader, self.device)
+        
+        model.train()
+        start = time.time()
+        for step in range(config.training.n_iters):
+            # === FORGET STAGE ===
+            forget_x, forget_c = next(D_forget_iter)
+            n = forget_x.size(0)
+            forget_x = forget_x.to(self.device)
+            forget_x = data_transform(self.config, forget_x)
+            e = torch.randn_like(forget_x)
+            b = self.betas
+            
+            t = torch.randint(low=0, high=self.num_timesteps, size=(n // 2 + 1,)).to(self.device)
+            t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
+            
+            # Compute forget loss based on method
+            if args.method == "ga":
+                # Gradient Ascent
+                forget_loss = -loss_registry_conditional[config.model.type](
+                    model, forget_x, t, forget_c, e, b
+                )
+            elif args.method == "rl":
+                # Random Label
+                a = (1 - b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                forget_x_noisy = forget_x * a.sqrt() + e * (1.0 - a).sqrt()
+                output = model(forget_x_noisy, t.float(), forget_c, mode="train")
+                
+                pseudo_c = torch.full(
+                    forget_c.shape,
+                    (args.label_to_forget + 1) % 10,
+                    device=forget_c.device,
+                )
+                pseudo = model(forget_x_noisy, t.float(), pseudo_c, mode="train").detach()
+                forget_loss = criteria(pseudo, output)
+            else:
+                # Default: Gradient Ascent
+                forget_loss = -loss_registry_conditional[config.model.type](
+                    model, forget_x, t, forget_c, e, b
+                )
+            
+            # === InTAct PROTECTION ===
+            protection_loss = protection.compute_protection_loss(model, self.device)
+            
+            # === COMBINED LOSS ===
+            loss = forget_loss + protection_loss
+            
+            # Logging
+            if (step + 1) % self.config.training.log_freq == 0:
+                end = time.time()
+                logging.info(
+                    f"step: {step}, forget_loss: {forget_loss.item():.4f}, "
+                    f"protection_loss: {protection_loss.item():.4f}, "
+                    f"total_loss: {loss.item():.4f}, time: {end-start:.2f}s"
+                )
+                start = time.time()
+            
+            # === BACKPROPAGATION ===
+            optimizer.zero_grad()
+            loss.backward()
+            
+            # Apply gradient clipping
+            try:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), config.optim.grad_clip
+                )
+            except Exception:
+                pass
+            
+            # Apply saliency mask to gradients (if provided)
+            if mask:
+                for name, param in model.named_parameters():
+                    if param.grad is not None:
+                        param.grad *= mask[name].to(param.grad.device)
+            
+            optimizer.step()
+            
+            # Update EMA
+            if self.config.model.ema:
+                ema_helper.update(model)
+            
+            # === CHECKPOINTING ===
+            if (step + 1) % self.config.training.snapshot_freq == 0:
+                states = [
+                    model.state_dict(),
+                    optimizer.state_dict(),
+                    step,
+                ]
+                if self.config.model.ema:
+                    states.append(ema_helper.state_dict())
+                
+                torch.save(
+                    states,
+                    os.path.join(self.config.ckpt_dir, "ckpt.pth"),
+                )
+                logging.info(f"Checkpoint saved at step {step}")
 
     def load_ema_model(self):
         model = Conditional_Model(self.config)

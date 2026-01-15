@@ -150,6 +150,9 @@ def main():
         elif args.mode == "saliency_unlearn":
             runner = Diffusion(args, config)
             runner.saliency_unlearn()
+        elif args.mode == "intact":
+            runner = Diffusion(args, config)
+            runner.intact_unlearn()
         elif args.mode == "generate_mask":
             runner = Diffusion(args, config)
             runner.generate_mask()

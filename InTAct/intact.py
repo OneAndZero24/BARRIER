@@ -21,7 +21,8 @@ class UnlearnIntervalProtection:
         lower_percentile: float = 0.05,
         upper_percentile: float = 0.95,
         reduced_dim: int = 32,
-        infinity_scale: float = 20.0
+        infinity_scale: float = 20.0,
+        layer_to_protect: Optional[str] = None
     ):
         self.lambda_interval = lambda_interval
         self.lower_percentile = lower_percentile
@@ -35,7 +36,7 @@ class UnlearnIntervalProtection:
     def setup_protection(self, model: nn.Module, forget_dataloader, device):
         log.info("Setting up InTAct with Mean Reparametrization...")
         
-        feature_layer = self._find_feature_layer(model)
+        feature_layer = self._find_feature_layer(model, self.layer_to_protect)
         if feature_layer is None: return
         layer_name, layer_module = feature_layer
 
@@ -143,8 +144,14 @@ class UnlearnIntervalProtection:
             if found and isinstance(m, nn.Linear): return m
         return None
 
-    def _find_feature_layer(self, model):
-        for name, m in reversed(list(model.named_modules())):
+    def _find_feature_layer(self, model, layer_to_protect=None):
+        I = list(reversed(list(model.named_modules())))
+        if layer_to_protect:
+            for i, (name, m) in enumerate(I):
+                if type(m).__name__ == layer_to_protect:
+                    next_name, next_m = I[i + 1] if i + 1 < len(I) else (None, None)
+                    return next_name, next_m
+        for name, m in I:
             if isinstance(m, (nn.AdaptiveAvgPool2d, nn.AvgPool2d)): return name, m
         return None
 
