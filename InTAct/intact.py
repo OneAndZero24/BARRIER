@@ -29,6 +29,7 @@ class UnlearnIntervalProtection:
         self.upper_percentile = upper_percentile
         self.reduced_dim = reduced_dim
         self.infinity_scale = infinity_scale
+        self.layer_to_protect = layer_to_protect
 
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}
@@ -36,38 +37,50 @@ class UnlearnIntervalProtection:
     def setup_protection(self, model: nn.Module, forget_dataloader, device):
         log.info("Setting up InTAct with Mean Reparametrization...")
         
-        feature_layer = self._find_feature_layer(model, self.layer_to_protect)
-        if feature_layer is None: return
-        layer_name, layer_module = feature_layer
-
-        # 1. Collect Activations
-        acts = self._collect_activations(model, layer_module, forget_dataloader, device)
+        feature_layers = self._find_feature_layers(model, self.layer_to_protect)
+        if not feature_layers:
+            log.warning("No feature layers found for protection")
+            return
         
-        # 2. Centered SVD
-        mu = acts.mean(dim=0)
-        Xc = acts - mu
-        _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
+        log.info(f"Found {len(feature_layers)} layers to protect: {[name for name, _ in feature_layers]}")
+
+        # 1. Collect Activations for all layers
+        acts_dict = self._collect_activations(model, feature_layers, forget_dataloader, device)
         
-        k = min(self.reduced_dim, Vh.size(0))
-        U_forget = Vh[:k] 
-        U_residual = Vh[k:]
-        S_residual = S[k:]
+        # 2. Process each layer
+        self.pca_info = []
+        for layer_name, _ in feature_layers:
+            acts_info = acts_dict[layer_name]
+            acts = acts_info['activations']
+            original_shape = acts_info['original_shape']
+            
+            # Centered SVD
+            mu = acts.mean(dim=0)
+            Xc = acts - mu
+            _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
+            
+            k = min(self.reduced_dim, Vh.size(0))
+            U_forget = Vh[:k] 
+            U_residual = Vh[k:]
+            S_residual = S[k:]
 
-        # 3. Define the Forget Box in centered PCA space
-        Z = Xc @ U_forget.T
-        z_min = torch.quantile(Z, self.lower_percentile, dim=0)
-        z_max = torch.quantile(Z, self.upper_percentile, dim=0)
+            # Define the Forget Box in centered PCA space
+            Z = Xc @ U_forget.T
+            z_min = torch.quantile(Z, self.lower_percentile, dim=0)
+            z_max = torch.quantile(Z, self.upper_percentile, dim=0)
 
-        self.pca_info = [{
-            "layer_name": layer_name,
-            "mu": mu.detach(),
-            "U_forget": U_forget.detach(),
-            "U_residual": U_residual.detach(),
-            "S_residual": S_residual.detach(),
-            "z_min": z_min.detach(),
-            "z_max": z_max.detach()
-        }]
+            self.pca_info.append({
+                "layer_name": layer_name,
+                "mu": mu.detach(),
+                "U_forget": U_forget.detach(),
+                "U_residual": U_residual.detach(),
+                "S_residual": S_residual.detach(),
+                "z_min": z_min.detach(),
+                "z_max": z_max.detach(),
+                "original_shape": original_shape  # Store for Conv2d layers
+            })
 
+        # 3. Snapshot parameters once for all layers
         self.params_snapshot = {
             n: p.detach().clone() for n, p in model.named_parameters() if p.requires_grad
         }
@@ -77,8 +90,8 @@ class UnlearnIntervalProtection:
         total_loss = torch.tensor(0.0, device=device)
 
         for info in self.pca_info:
-            next_linear = self._find_next_linear(model, info["layer_name"])
-            if not next_linear: continue
+            next_layer = self._find_next_layer(model, info["layer_name"])
+            if not next_layer: continue
 
             mu = info["mu"].to(device)
             Uf = info["U_forget"].to(device)
@@ -89,70 +102,205 @@ class UnlearnIntervalProtection:
             inf_low = z_min - self.infinity_scale
             inf_high = z_max + self.infinity_scale
 
-            w_name = self._resolve_param_name(model, next_linear.weight)
-            b_name = self._resolve_param_name(model, next_linear.bias)
+            w_name = self._resolve_param_name(model, next_layer.weight)
+            b_name = self._resolve_param_name(model, next_layer.bias) if next_layer.bias is not None else None
             
-            delta_W = next_linear.weight - self.params_snapshot[w_name]
-            delta_b = next_linear.bias - self.params_snapshot[b_name] if next_linear.bias is not None else 0
+            delta_W = next_layer.weight - self.params_snapshot[w_name]
+            delta_b = (next_layer.bias - self.params_snapshot[b_name]) if b_name else 0
 
-            # --- 1. MEAN TRICK: Global Shift Protection ---
-            global_shift = torch.matmul(delta_W, mu) + delta_b
-            total_loss += global_shift.pow(2).mean()
+            # === Handle Linear vs Conv2d layers ===
+            if isinstance(next_layer, nn.Linear):
+                # --- 1. MEAN TRICK: Global Shift Protection ---
+                global_shift = torch.matmul(delta_W, mu) + delta_b
+                total_loss += global_shift.pow(2).mean()
 
-            # --- 2. RESIDUAL PROTECTION (Energy-Scaled) ---
-            interference = delta_W @ Ur.T
-            weighted_interference = interference * Sr.to(device).unsqueeze(0)
-            total_loss += torch.norm(weighted_interference, p='fro').pow(2)
+                # --- 2. RESIDUAL PROTECTION (Energy-Scaled) ---
+                interference = delta_W @ Ur.T
+                weighted_interference = interference * Sr.to(device).unsqueeze(0)
+                total_loss += torch.norm(weighted_interference, p='fro').pow(2)
 
-            # --- 3. NEGATIVE SPACE IA PROTECTION ---
-            delta_f = delta_W @ Uf.T
-            dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+                # --- 3. NEGATIVE SPACE IA PROTECTION ---
+                delta_f = delta_W @ Uf.T
+                dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
 
-            # Lower Negative Space IA: [-inf, z_min]
-            drift_low_1 = dWp @ inf_low - dWn @ z_min
-            drift_low_2 = dWp @ z_min - dWn @ inf_low
-            
-            # Upper Negative Space IA: [z_max, +inf]
-            drift_high_1 = dWp @ z_max - dWn @ inf_high
-            drift_high_2 = dWp @ inf_high - dWn @ z_max
+                # Lower Negative Space IA: [-inf, z_min]
+                drift_low_1 = dWp @ inf_low - dWn @ z_min
+                drift_low_2 = dWp @ z_min - dWn @ inf_low
+                
+                # Upper Negative Space IA: [z_max, +inf]
+                drift_high_1 = dWp @ z_max - dWn @ inf_high
+                drift_high_2 = dWp @ inf_high - dWn @ z_max
 
-            total_loss += (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
-            total_loss += (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+                total_loss += (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
+                total_loss += (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+
+            elif isinstance(next_layer, nn.Conv2d):
+                # Reshape bounds for conv2d operations
+                original_shape = info.get("original_shape")
+                
+                if original_shape is not None:
+                    # Reshape to (1, C, H, W) for conv operations
+                    try:
+                        mu_view = mu.view(1, *original_shape)
+                        z_min_view = z_min.view(1, *original_shape) if z_min.numel() == mu.numel() else z_min.view(1, -1, 1, 1)
+                        z_max_view = z_max.view(1, *original_shape) if z_max.numel() == mu.numel() else z_max.view(1, -1, 1, 1)
+                        inf_low_view = inf_low.view(1, *original_shape) if inf_low.numel() == mu.numel() else inf_low.view(1, -1, 1, 1)
+                        inf_high_view = inf_high.view(1, *original_shape) if inf_high.numel() == mu.numel() else inf_high.view(1, -1, 1, 1)
+                    except:
+                        log.warning("Original shape mismatch, falling back to channel-only bounds")
+                        # Fallback: assume channel-only bounds
+                        mu_view = mu.view(1, -1, 1, 1)
+                        z_min_view = z_min.view(1, -1, 1, 1)
+                        z_max_view = z_max.view(1, -1, 1, 1)
+                        inf_low_view = inf_low.view(1, -1, 1, 1)
+                        inf_high_view = inf_high.view(1, -1, 1, 1)
+                else:
+                    # Default: assume channel-only bounds
+                    mu_view = mu.view(1, -1, 1, 1)
+                    z_min_view = z_min.view(1, -1, 1, 1)
+                    z_max_view = z_max.view(1, -1, 1, 1)
+                    inf_low_view = inf_low.view(1, -1, 1, 1)
+                    inf_high_view = inf_high.view(1, -1, 1, 1)
+                
+                conv_kwargs = {
+                    "stride": next_layer.stride,
+                    "padding": next_layer.padding,
+                    "dilation": next_layer.dilation,
+                    "groups": next_layer.groups,
+                }
+                
+                # Split weight changes into positive and negative
+                dW_pos = torch.relu(delta_W)
+                dW_neg = torch.relu(-delta_W)
+                
+                # --- 1. MEAN TRICK: Global Shift Protection ---
+                mean_shift = nn.functional.conv2d(mu_view, delta_W, delta_b, **conv_kwargs)
+                total_loss += mean_shift.pow(2).mean()
+                
+                # --- 2. RESIDUAL PROTECTION ---
+                # For conv: project Ur back to spatial shape and convolve
+                # This is approximate - we treat each output channel independently
+                Ur_expanded = Ur.T  # (residual_dim, original_dim)
+                interference_loss = torch.tensor(0.0, device=device)
+                for i in range(Ur_expanded.size(0)):
+                    ur_vec = Ur_expanded[i].view_as(mu_view)
+                    interf = nn.functional.conv2d(ur_vec, delta_W, None, **conv_kwargs)
+                    interference_loss += (interf.pow(2).mean() * Sr[i].pow(2))
+                total_loss += interference_loss
+                
+                # --- 3. NEGATIVE SPACE IA PROTECTION ---
+                # Compute interval bounds through convolution
+                lower_bound_1 = nn.functional.conv2d(inf_low_view, dW_pos, None, **conv_kwargs) - \
+                                nn.functional.conv2d(z_min_view, dW_neg, None, **conv_kwargs)
+                lower_bound_2 = nn.functional.conv2d(z_min_view, dW_pos, None, **conv_kwargs) - \
+                                nn.functional.conv2d(inf_low_view, dW_neg, None, **conv_kwargs)
+                
+                upper_bound_1 = nn.functional.conv2d(z_max_view, dW_pos, None, **conv_kwargs) - \
+                                nn.functional.conv2d(inf_high_view, dW_neg, None, **conv_kwargs)
+                upper_bound_2 = nn.functional.conv2d(inf_high_view, dW_pos, None, **conv_kwargs) - \
+                                nn.functional.conv2d(z_max_view, dW_neg, None, **conv_kwargs)
+                
+                # Add bias contribution
+                if isinstance(delta_b, torch.Tensor):
+                    lower_bound_1 = lower_bound_1 + delta_b.view(1, -1, 1, 1)
+                    lower_bound_2 = lower_bound_2 + delta_b.view(1, -1, 1, 1)
+                    upper_bound_1 = upper_bound_1 + delta_b.view(1, -1, 1, 1)
+                    upper_bound_2 = upper_bound_2 + delta_b.view(1, -1, 1, 1)
+                
+                total_loss += (lower_bound_1.pow(2).mean() + lower_bound_2.pow(2).mean())
+                total_loss += (upper_bound_1.pow(2).mean() + upper_bound_2.pow(2).mean())
 
         return self.lambda_interval * total_loss
 
-    def _collect_activations(self, model, layer, dataloader, device):
+    def _collect_activations(self, model, layers: List[tuple], dataloader, device):
+        """Collect activations for multiple layers simultaneously."""
         model.eval()
-        buf = []
-        def hook(_, __, out): buf.append(out.detach().view(out.size(0), -1))
-        h = layer.register_forward_hook(hook)
+        buf_dict = {name: [] for name, _ in layers}
+        shape_dict = {name: None for name, _ in layers}  # Store original shapes
+        hooks = []
+        
+        # Register hooks for all layers
+        for layer_name, layer_module in layers:
+            def make_hook(name):
+                def hook(_, __, out):
+                    # Store original shape before flattening (for Conv2d support)
+                    if shape_dict[name] is None and len(out.shape) > 2:
+                        shape_dict[name] = out.shape[1:]  # (C, H, W) or similar
+                    buf_dict[name].append(out.detach().view(out.size(0), -1))
+                return hook
+            h = layer_module.register_forward_hook(make_hook(layer_name))
+            hooks.append(h)
+        
+        # Forward pass through all data
         with torch.no_grad():
-            for batch in dataloader: model(batch[0].to(device))
-        h.remove()
+            for batch in dataloader:
+                model(batch[0].to(device))
+        
+        # Remove all hooks
+        for h in hooks:
+            h.remove()
         model.train()
-        return torch.cat(buf, dim=0)
+
+        # Return both activations and shapes
+        result = {}
+        for name in buf_dict:
+            result[name] = {
+                'activations': torch.cat(buf_dict[name], dim=0),
+                'original_shape': shape_dict[name]
+            }
+        return result
 
     def _resolve_param_name(self, model, param):
         for name, p in model.named_parameters():
             if p is param: return name
         return ""
+    
+    def _find_feature_layer(self, model, layer_to_protect=None):
+        """
+        Find multiple feature layers to protect.
+        
+        Args:
+            layer_to_protect: Can be:
+                - Type name (e.g., "AttnBlock") to match all layers of that type
+                - Substring (e.g., "attn") to match all layer names containing it
+                - None to use default behavior (find pooling layers)
+        
+        Returns:
+            List of (layer_name, layer_module) tuples
+        """
+        I = list(reversed(list(model.named_modules())))
+        result = []
+        
+        if layer_to_protect:
+            # Try to find layers matching the criteria
+            for i, (name, m) in enumerate(I):
+                # Match by type name
+                if type(m).__name__ == layer_to_protect:
+                    if i + 1 < len(I):
+                        next_name, next_m = I[i + 1]
+                        result.append((next_name, next_m))
+                # Match by substring in layer name
+                elif layer_to_protect.lower() in name.lower():
+                    if i + 1 < len(I):
+                        next_name, next_m = I[i + 1]
+                        result.append((next_name, next_m))
+        
+        # If no layers found with criteria, use default behavior
+        if not result:
+            for name, m in I:
+                if isinstance(m, (nn.AdaptiveAvgPool2d, nn.AvgPool2d)):
+                    result.append((name, m))
+                    break  # Take only first pooling layer as default
+        
+        return result
 
     def _find_next_linear(self, model, layer_name):
         found = False
         for name, m in model.named_modules():
-            if name == layer_name: found = True
-            if found and isinstance(m, nn.Linear): return m
-        return None
-
-    def _find_feature_layer(self, model, layer_to_protect=None):
-        I = list(reversed(list(model.named_modules())))
-        if layer_to_protect:
-            for i, (name, m) in enumerate(I):
-                if type(m).__name__ == layer_to_protect:
-                    next_name, next_m = I[i + 1] if i + 1 < len(I) else (None, None)
-                    return next_name, next_m
-        for name, m in I:
-            if isinstance(m, (nn.AdaptiveAvgPool2d, nn.AvgPool2d)): return name, m
+            if name == layer_name: 
+                found = True
+                continue
+            if found and isinstance(m, (nn.Linear, nn.Conv2d)): return m
         return None
 
 def intact_train_epoch(
