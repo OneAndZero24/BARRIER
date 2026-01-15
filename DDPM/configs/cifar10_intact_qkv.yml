@@ -45,7 +45,7 @@ training:
     upper_percentile: 0.95         # Activation safe zone upper bound
     reduced_dim: 32                # PCA dimension for efficiency
     infinity_scale: 20.0           # Scale for negative space intervals
-    layer_to_protect: AttnBlock    # Register protection before attention blocks
+    layer_to_protect: ["attnblock.q", "attnblock.k", "attnblock.v"]  # Protect Q/K/V projections in attention
 
 sampling:
     batch_size: 128
@@ -60,4 +60,4 @@ optim:
     eps: 0.00000001
     grad_clip: 1.0
 
-comments: "InTAct unlearning with interval-based activation protection (no mask)"
+comments: "InTAct unlearning protecting Q/K/V attention projections (no mask)"
