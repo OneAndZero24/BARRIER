@@ -126,7 +126,7 @@ class UnlearnIntervalProtection:
         total_loss = torch.tensor(0.0, device=device)
 
         for info in self.pca_info:
-            next_layer = self._find_next_layer(model, info["layer_name"])
+            next_layer = self._find_next_linear(model, info["layer_name"])
             if not next_layer: continue
 
             mu = info["mu"].to(device)
