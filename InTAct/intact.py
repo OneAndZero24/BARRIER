@@ -39,7 +39,7 @@ class UnlearnIntervalProtection:
     def setup_protection(self, model: nn.Module, forget_dataloader, device, remain_dataloader=None):
         log.info("Setting up InTAct with Mean Reparametrization...")
         
-        feature_layers = self._find_feature_layers(model, self.layer_to_protect)
+        feature_layers = self._find_feature_layer(model, self.layer_to_protect)
         if not feature_layers:
             log.warning("No feature layers found for protection")
             return
