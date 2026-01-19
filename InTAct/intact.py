@@ -145,6 +145,15 @@ class UnlearnIntervalProtection:
             delta_W = next_layer.weight - self.params_snapshot[w_name]
             delta_b = (next_layer.bias - self.params_snapshot[b_name]) if b_name else 0
 
+            # === Dimension validation ===
+            expected_input_dim = delta_W.shape[1]
+            actual_input_dim = mu.shape[0]
+            
+            if expected_input_dim != actual_input_dim:
+                log.warning(f"Dimension mismatch for layer {info['layer_name']} -> {type(next_layer).__name__}: "
+                           f"expected {expected_input_dim}, got {actual_input_dim}. Skipping this layer.")
+                continue
+
             # === Handle Linear vs Conv2d layers ===
             if isinstance(next_layer, nn.Linear):
                 # --- 1. MEAN TRICK: Global Shift Protection ---
