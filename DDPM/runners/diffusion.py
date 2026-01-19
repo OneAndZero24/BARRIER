@@ -670,7 +670,13 @@ class Diffusion(object):
         
         logging.info("Setting up InTAct protection...")
         remain_loader = D_remain_loader if getattr(config.training, 'use_actual_bounds', False) else None
-        protection.setup_protection(model, D_forget_loader, self.device, remain_dataloader=remain_loader)
+        protection.setup_protection(
+            model, D_forget_loader, self.device, 
+            remain_dataloader=remain_loader,
+            data_transform_fn=lambda x: data_transform(self.config, x),
+            betas=self.betas,
+            num_timesteps=self.num_timesteps
+        )
         
         model.train()
         start = time.time()

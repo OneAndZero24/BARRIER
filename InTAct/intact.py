@@ -36,7 +36,8 @@ class UnlearnIntervalProtection:
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}
 
-    def setup_protection(self, model: nn.Module, forget_dataloader, device, remain_dataloader=None):
+    def setup_protection(self, model: nn.Module, forget_dataloader, device, remain_dataloader=None,
+                        data_transform_fn=None, betas=None, num_timesteps=1000):
         log.info("Setting up InTAct with Mean Reparametrization...")
         
         feature_layers = self._find_feature_layer(model, self.layer_to_protect)
@@ -47,13 +48,19 @@ class UnlearnIntervalProtection:
         log.info(f"Found {len(feature_layers)} layers to protect: {[name for name, _ in feature_layers]}")
 
         # 1. Collect Activations for all layers (forget data)
-        acts_dict = self._collect_activations(model, feature_layers, forget_dataloader, device)
+        acts_dict = self._collect_activations(
+            model, feature_layers, forget_dataloader, device,
+            data_transform_fn, betas, num_timesteps
+        )
         
         # 1b. Optionally collect remain data for actual bounds calculation
         remain_acts_dict = None
         if self.use_actual_bounds and remain_dataloader is not None:
             log.info("Collecting remain data activations for actual bounds...")
-            remain_acts_dict = self._collect_activations(model, feature_layers, remain_dataloader, device)
+            remain_acts_dict = self._collect_activations(
+                model, feature_layers, remain_dataloader, device,
+                data_transform_fn, betas, num_timesteps
+            )
         
         # 2. Process each layer
         self.pca_info = []
@@ -242,7 +249,8 @@ class UnlearnIntervalProtection:
 
         return self.lambda_interval * total_loss
 
-    def _collect_activations(self, model, layers: List[tuple], dataloader, device):
+    def _collect_activations(self, model, layers: List[tuple], dataloader, device,
+                            data_transform_fn=None, betas=None, num_timesteps=1000):
         """Collect activations for multiple layers simultaneously."""
         model.eval()
         buf_dict = {name: [] for name, _ in layers}
@@ -264,7 +272,29 @@ class UnlearnIntervalProtection:
         # Forward pass through all data
         with torch.no_grad():
             for batch in dataloader:
-                model(batch[0].to(device))
+                x, c = batch
+                n = x.size(0)
+                x = x.to(device)
+                c = c.to(device)
+                
+                # Apply data transform if provided (for diffusion models)
+                if data_transform_fn is not None:
+                    x = data_transform_fn(x)
+                
+                # Sample random timesteps for diffusion model
+                t = torch.randint(low=0, high=num_timesteps, size=(n // 2 + 1,)).to(device)
+                t = torch.cat([t, num_timesteps - t - 1], dim=0)[:n]
+                
+                # Add diffusion noise if betas provided
+                if betas is not None:
+                    e = torch.randn_like(x)
+                    a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                    x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
+                else:
+                    x_noisy = x
+                
+                # Call diffusion model with required arguments
+                model(x_noisy, t.float(), c, mode="train")
         
         # Remove all hooks
         for h in hooks:
