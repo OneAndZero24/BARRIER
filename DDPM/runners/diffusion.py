@@ -660,16 +660,16 @@ class Diffusion(object):
         
         protection = UnlearnIntervalProtection(
             lambda_interval=config.training.lambda_interval,
-            lower_percentile=config.training.get('lower_percentile', 0.05),
-            upper_percentile=config.training.get('upper_percentile', 0.95),
-            reduced_dim=config.training.get('reduced_dim', 32),
-            infinity_scale=config.training.get('infinity_scale', 20.0),
-            layer_to_protect=config.training.get('layer_to_protect', None),
-            use_actual_bounds=config.training.get('use_actual_bounds', False)
+            lower_percentile=getattr(config.training, 'lower_percentile', 0.05),
+            upper_percentile=getattr(config.training, 'upper_percentile', 0.95),
+            reduced_dim=getattr(config.training, 'reduced_dim', 32),
+            infinity_scale=getattr(config.training, 'infinity_scale', 20.0),
+            layer_to_protect=getattr(config.training, 'layer_to_protect', None),
+            use_actual_bounds=getattr(config.training, 'use_actual_bounds', False)
         )
         
         logging.info("Setting up InTAct protection...")
-        remain_loader = D_remain_loader if config.training.get('use_actual_bounds', False) else None
+        remain_loader = D_remain_loader if getattr(config.training, 'use_actual_bounds', False) else None
         protection.setup_protection(model, D_forget_loader, self.device, remain_dataloader=remain_loader)
         
         model.train()
