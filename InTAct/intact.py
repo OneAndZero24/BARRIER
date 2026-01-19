@@ -64,7 +64,7 @@ class UnlearnIntervalProtection:
         
         # 2. Process each layer
         self.pca_info = []
-        for layer_name, _ in feature_layers:
+        for layer_name in acts_dict.keys():
             acts_info = acts_dict[layer_name]
             acts = acts_info['activations']
             original_shape = acts_info['original_shape']
@@ -85,7 +85,7 @@ class UnlearnIntervalProtection:
             z_max = torch.quantile(Z, self.upper_percentile, dim=0)
             
             # Calculate actual bounds from remain+forget if requested
-            if self.use_actual_bounds and remain_acts_dict is not None:
+            if self.use_actual_bounds and remain_acts_dict is not None and layer_name in remain_acts_dict:
                 remain_acts = remain_acts_dict[layer_name]['activations']
                 remain_Xc = remain_acts - mu
                 remain_Z = remain_Xc @ U_forget.T
