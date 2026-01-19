@@ -45,7 +45,7 @@ class UnlearnIntervalProtection:
             log.warning("No feature layers found for protection")
             return
         
-        log.info(f"Found {len(feature_layers)} layers to protect: {[name for name, _ in feature_layers]}")
+        log.info(f"Found {len(feature_layers)} layers to record activations for: {[name for name, _ in feature_layers]}")
 
         # 1. Collect Activations for all layers (forget data)
         acts_dict = self._collect_activations(
@@ -303,6 +303,7 @@ class UnlearnIntervalProtection:
 
         # Return both activations and shapes
         result = {}
+        log.debug(f"Collected activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
         for name in buf_dict:
             result[name] = {
                 'activations': torch.cat(buf_dict[name], dim=0),
