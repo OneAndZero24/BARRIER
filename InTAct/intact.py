@@ -303,7 +303,7 @@ class UnlearnIntervalProtection:
 
         # Return both activations and shapes
         result = {}
-        log.debug(f"Collected activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
+        log.info(f"Collected activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
         for name in buf_dict:
             result[name] = {
                 'activations': torch.cat(buf_dict[name], dim=0),
