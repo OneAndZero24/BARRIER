@@ -301,14 +301,17 @@ class UnlearnIntervalProtection:
             h.remove()
         model.train()
 
-        # Return both activations and shapes
+        # Return both activations and shapes, skip layers with no activations
         result = {}
         log.info(f"Collected activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
         for name in buf_dict:
-            result[name] = {
-                'activations': torch.cat(buf_dict[name], dim=0),
-                'original_shape': shape_dict[name]
-            }
+            if len(buf_dict[name]) > 0:  # Only include layers that collected activations
+                result[name] = {
+                    'activations': torch.cat(buf_dict[name], dim=0),
+                    'original_shape': shape_dict[name]
+                }
+            else:
+                log.warning(f"Skipping layer {name} - no activations collected (layer not executed)")
         return result
 
     def _resolve_param_name(self, model, param):
