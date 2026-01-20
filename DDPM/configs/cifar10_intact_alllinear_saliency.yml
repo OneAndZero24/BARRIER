@@ -48,7 +48,7 @@ training:
     upper_percentile: 0.95         # Activation safe zone upper bound
     reduced_dim: 32                # PCA dimension for efficiency
     infinity_scale: 20.0           # Scale for negative space intervals
-    layer_to_protect: Linear       # Protect all Linear layers in the model
+    targets: ["Linear"]            # Protect all Linear layers in the model
 
 sampling:
     batch_size: 128

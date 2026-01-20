@@ -1,55 +1,54 @@
 import logging
 import torch
 import torch.nn as nn
-from typing import Optional, List, Dict
+from typing import List, Dict, Optional, Set
 
 log = logging.getLogger(__name__)
 
 class UnlearnIntervalProtection:
-    """
-    Theoretical Max InTAct: Negative Space IA + Mean Reparametrization.
-    
-    Improvements:
-    1. Mean Trick: Corrects the bias shift by coupling Delta W and Delta b.
-    2. Scaled Residual: Uses singular values to weight the residual protection,
-       avoiding the over-constraining nature of a raw Frobenius norm.
-    """
-
     def __init__(
         self,
+        targets: List[str],
         lambda_interval: float = 10.0,
         lower_percentile: float = 0.05,
         upper_percentile: float = 0.95,
         reduced_dim: int = 32,
         infinity_scale: float = 20.0,
-        layer_to_protect: Optional[str] = None,
         use_actual_bounds: bool = False
     ):
+        self.targets = targets
         self.lambda_interval = lambda_interval
         self.lower_percentile = lower_percentile
         self.upper_percentile = upper_percentile
         self.reduced_dim = reduced_dim
         self.infinity_scale = infinity_scale
-        self.layer_to_protect = layer_to_protect
         self.use_actual_bounds = use_actual_bounds
 
         self.pca_info: List[Dict] = []
-        self.params_snapshot = {}
+        self.params_snapshot = {}  # Only target layer parameters
+        self.parent_to_targets: Dict[str, Set[nn.Module]] = {}  # Maps parent_name -> [target_modules]
+        self.param_to_name: Dict[nn.Parameter, str] = {}  # Maps parameter -> name
 
     def setup_protection(self, model: nn.Module, forget_dataloader, device, remain_dataloader=None,
                         data_transform_fn=None, betas=None, num_timesteps=1000):
+        """
+        Populates: pca_info, params_snapshot
+        """
+
         log.info("Setting up InTAct with Mean Reparametrization...")
         
-        feature_layers = self._find_feature_layer(model, self.layer_to_protect)
-        if not feature_layers:
-            log.warning("No feature layers found for protection")
+        # Build & analyze computational graph
+        parent_layers = self._build_analyze_graph(model)
+        
+        if not parent_layers:
+            log.warning("No parent layers found for protection")
             return
         
-        log.info(f"Found {len(feature_layers)} layers to record activations for: {[name for name, _ in feature_layers]}")
+        log.info(f"Found {len(parent_layers)} parent layers to collect activations from: {[name for name, _ in parent_layers]}")
 
-        # 1. Collect Activations for all layers (forget data)
+        # 1. Collect Activations from parent layers (forget data)
         acts_dict = self._collect_activations(
-            model, feature_layers, forget_dataloader, device,
+            model, parent_layers, forget_dataloader, device,
             data_transform_fn, betas, num_timesteps
         )
         
@@ -58,14 +57,12 @@ class UnlearnIntervalProtection:
         if self.use_actual_bounds and remain_dataloader is not None:
             log.info("Collecting remain data activations for actual bounds...")
             remain_acts_dict = self._collect_activations(
-                model, feature_layers, remain_dataloader, device,
+                model, parent_layers, remain_dataloader, device,
                 data_transform_fn, betas, num_timesteps
             )
         
-        # 2. Process each layer
-        self.pca_info = []
-        for layer_name in acts_dict.keys():
-            acts_info = acts_dict[layer_name]
+        # 2. Process each parent layer
+        for layer_name, acts_info in acts_dict.items():
             acts = acts_info['activations']
             original_shape = acts_info['original_shape']
             
@@ -116,157 +113,173 @@ class UnlearnIntervalProtection:
                 "original_shape": original_shape  # Store for Conv2d layers
             })
 
-        # 3. Snapshot parameters once for all layers
+        # 3. Build param_to_name mapping and snapshot only target layer parameters
+        self.param_to_name = {p: n for n, p in model.named_parameters()}
+        
+        target_params = set()
+        for targets in self.parent_to_targets.values():
+            for target in targets:
+                if hasattr(target, 'weight') and target.weight is not None:
+                    target_params.add(target.weight)
+                if hasattr(target, 'bias') and target.bias is not None:
+                    target_params.add(target.bias)
+        
         self.params_snapshot = {
-            n: p.detach().clone() for n, p in model.named_parameters() if p.requires_grad
+            n: p.detach().clone() 
+            for n, p in model.named_parameters() 
+            if p in target_params
         }
+        log.info(f"Snapshotted {len(self.params_snapshot)} target layer parameters")
 
     def compute_protection_loss(self, model: nn.Module, device) -> torch.Tensor:
-        if not self.pca_info: return torch.tensor(0.0, device=device)
         total_loss = torch.tensor(0.0, device=device)
+        if not self.pca_info: return total_loss
 
         for info in self.pca_info:
-            next_layer = self._find_next_linear(model, info["layer_name"])
-            if not next_layer: continue
-
-            mu = info["mu"].to(device)
-            Uf = info["U_forget"].to(device)
-            Ur = info["U_residual"].to(device)
-            Sr = info["S_residual"].to(device)
-            z_min, z_max = info["z_min"].to(device), info["z_max"].to(device)
-            
-            # Use precomputed bounds (either actual or scaled)
-            inf_low = info["inf_low"].to(device)
-            inf_high = info["inf_high"].to(device)
-
-            w_name = self._resolve_param_name(model, next_layer.weight)
-            b_name = self._resolve_param_name(model, next_layer.bias) if next_layer.bias is not None else None
-            
-            delta_W = next_layer.weight - self.params_snapshot[w_name]
-            delta_b = (next_layer.bias - self.params_snapshot[b_name]) if b_name else 0
-
-            # === Dimension validation ===
-            expected_input_dim = delta_W.shape[1]
-            actual_input_dim = mu.shape[0]
-            
-            if expected_input_dim != actual_input_dim:
-                log.warning(f"Dimension mismatch for layer {info['layer_name']} -> {type(next_layer).__name__}: "
-                           f"expected {expected_input_dim}, got {actual_input_dim}. Skipping this layer.")
+            parent_layer_name = info["layer_name"]
+            target_layers = list(self.parent_to_targets.get(parent_layer_name, set()))
+            if not target_layers: 
+                log.warning(f"No target layers found for parent {info['layer_name']}, skipping protection loss computation.")
                 continue
-
-            # === Handle Linear vs Conv2d layers ===
-            if isinstance(next_layer, nn.Linear):
-                # --- 1. MEAN TRICK: Global Shift Protection ---
-                global_shift = torch.matmul(delta_W, mu) + delta_b
-                total_loss += global_shift.pow(2).mean()
-
-                # --- 2. RESIDUAL PROTECTION (Energy-Scaled) ---
-                interference = delta_W @ Ur.T
-                weighted_interference = interference * Sr.to(device).unsqueeze(0)
-                total_loss += torch.norm(weighted_interference, p='fro').pow(2)
-
-                # --- 3. NEGATIVE SPACE IA PROTECTION ---
-                delta_f = delta_W @ Uf.T
-                dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
-
-                # Lower Negative Space IA: [-inf, z_min]
-                drift_low_1 = dWp @ inf_low - dWn @ z_min
-                drift_low_2 = dWp @ z_min - dWn @ inf_low
+            
+            for target_layer in target_layers:
+                mu = info["mu"].to(device)
+                Uf = info["U_forget"].to(device)
+                Ur = info["U_residual"].to(device)
+                Sr = info["S_residual"].to(device)
+                z_min, z_max = info["z_min"].to(device), info["z_max"].to(device)
                 
-                # Upper Negative Space IA: [z_max, +inf]
-                drift_high_1 = dWp @ z_max - dWn @ inf_high
-                drift_high_2 = dWp @ inf_high - dWn @ z_max
+                # Use precomputed bounds (either actual or scaled)
+                inf_low = info["inf_low"].to(device)
+                inf_high = info["inf_high"].to(device)
 
-                total_loss += (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
-                total_loss += (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
-
-            elif isinstance(next_layer, nn.Conv2d):
-                # Reshape bounds for conv2d operations
-                original_shape = info.get("original_shape")
+                w_name = self.param_to_name[target_layer.weight]
+                b_name = self.param_to_name[target_layer.bias] if target_layer.bias is not None else None
                 
-                if original_shape is not None:
-                    # Reshape to (1, C, H, W) for conv operations
-                    try:
-                        mu_view = mu.view(1, *original_shape)
-                        z_min_view = z_min.view(1, *original_shape) if z_min.numel() == mu.numel() else z_min.view(1, -1, 1, 1)
-                        z_max_view = z_max.view(1, *original_shape) if z_max.numel() == mu.numel() else z_max.view(1, -1, 1, 1)
-                        inf_low_view = inf_low.view(1, *original_shape) if inf_low.numel() == mu.numel() else inf_low.view(1, -1, 1, 1)
-                        inf_high_view = inf_high.view(1, *original_shape) if inf_high.numel() == mu.numel() else inf_high.view(1, -1, 1, 1)
-                    except:
-                        log.warning("Original shape mismatch, falling back to channel-only bounds")
-                        # Fallback: assume channel-only bounds
+                delta_W = target_layer.weight - self.params_snapshot[w_name]
+                delta_b = (target_layer.bias - self.params_snapshot[b_name]) if b_name else 0
+
+                # === Dimension validation ===
+                expected_input_dim = delta_W.shape[1]
+                actual_input_dim = mu.shape[0]
+                
+                if expected_input_dim != actual_input_dim:
+                    log.warning(f"Dimension mismatch for parent {parent_layer_name} -> target {type(target_layer).__name__}: "
+                               f"expected {expected_input_dim}, got {actual_input_dim}. Skipping this layer.")
+                    continue
+
+                # === Handle Linear vs Conv2d layers ===
+                if isinstance(target_layer, nn.Linear):
+                    # --- 1. MEAN TRICK: Global Shift Protection ---
+                    global_shift = torch.matmul(delta_W, mu) + delta_b
+                    total_loss += global_shift.pow(2).mean()
+
+                    # --- 2. RESIDUAL PROTECTION (Energy-Scaled) ---
+                    interference = delta_W @ Ur.T
+                    weighted_interference = interference * Sr.to(device).unsqueeze(0)
+                    total_loss += torch.norm(weighted_interference, p='fro').pow(2)
+
+                    # --- 3. NEGATIVE SPACE IA PROTECTION ---
+                    delta_f = delta_W @ Uf.T
+                    dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+
+                    # Lower Negative Space IA: [-inf, z_min]
+                    drift_low_1 = dWp @ inf_low - dWn @ z_min
+                    drift_low_2 = dWp @ z_min - dWn @ inf_low
+                    
+                    # Upper Negative Space IA: [z_max, +inf]
+                    drift_high_1 = dWp @ z_max - dWn @ inf_high
+                    drift_high_2 = dWp @ inf_high - dWn @ z_max
+
+                    total_loss += (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
+                    total_loss += (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+
+                elif isinstance(target_layer, nn.Conv2d):
+                    # Reshape bounds for conv2d operations
+                    original_shape = info.get("original_shape")
+                    
+                    if original_shape is not None:
+                        # Reshape to (1, C, H, W) for conv operations
+                        try:
+                            mu_view = mu.view(1, *original_shape)
+                            z_min_view = z_min.view(1, *original_shape) if z_min.numel() == mu.numel() else z_min.view(1, -1, 1, 1)
+                            z_max_view = z_max.view(1, *original_shape) if z_max.numel() == mu.numel() else z_max.view(1, -1, 1, 1)
+                            inf_low_view = inf_low.view(1, *original_shape) if inf_low.numel() == mu.numel() else inf_low.view(1, -1, 1, 1)
+                            inf_high_view = inf_high.view(1, *original_shape) if inf_high.numel() == mu.numel() else inf_high.view(1, -1, 1, 1)
+                        except:
+                            log.warning("Original shape mismatch, falling back to channel-only bounds")
+                            # Fallback: assume channel-only bounds
+                            mu_view = mu.view(1, -1, 1, 1)
+                            z_min_view = z_min.view(1, -1, 1, 1)
+                            z_max_view = z_max.view(1, -1, 1, 1)
+                            inf_low_view = inf_low.view(1, -1, 1, 1)
+                            inf_high_view = inf_high.view(1, -1, 1, 1)
+                    else:
+                        # Default: assume channel-only bounds
                         mu_view = mu.view(1, -1, 1, 1)
                         z_min_view = z_min.view(1, -1, 1, 1)
                         z_max_view = z_max.view(1, -1, 1, 1)
                         inf_low_view = inf_low.view(1, -1, 1, 1)
                         inf_high_view = inf_high.view(1, -1, 1, 1)
-                else:
-                    # Default: assume channel-only bounds
-                    mu_view = mu.view(1, -1, 1, 1)
-                    z_min_view = z_min.view(1, -1, 1, 1)
-                    z_max_view = z_max.view(1, -1, 1, 1)
-                    inf_low_view = inf_low.view(1, -1, 1, 1)
-                    inf_high_view = inf_high.view(1, -1, 1, 1)
-                
-                conv_kwargs = {
-                    "stride": next_layer.stride,
-                    "padding": next_layer.padding,
-                    "dilation": next_layer.dilation,
-                    "groups": next_layer.groups,
-                }
-                
-                # Split weight changes into positive and negative
-                dW_pos = torch.relu(delta_W)
-                dW_neg = torch.relu(-delta_W)
-                
-                # --- 1. MEAN TRICK: Global Shift Protection ---
-                mean_shift = nn.functional.conv2d(mu_view, delta_W, delta_b, **conv_kwargs)
-                total_loss += mean_shift.pow(2).mean()
-                
-                # --- 2. RESIDUAL PROTECTION ---
-                # For conv: project Ur back to spatial shape and convolve
-                # This is approximate - we treat each output channel independently
-                Ur_expanded = Ur.T  # (residual_dim, original_dim)
-                interference_loss = torch.tensor(0.0, device=device)
-                for i in range(Ur_expanded.size(0)):
-                    ur_vec = Ur_expanded[i].view_as(mu_view)
-                    interf = nn.functional.conv2d(ur_vec, delta_W, None, **conv_kwargs)
-                    interference_loss += (interf.pow(2).mean() * Sr[i].pow(2))
-                total_loss += interference_loss
-                
-                # --- 3. NEGATIVE SPACE IA PROTECTION ---
-                # Compute interval bounds through convolution
-                lower_bound_1 = nn.functional.conv2d(inf_low_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(z_min_view, dW_neg, None, **conv_kwargs)
-                lower_bound_2 = nn.functional.conv2d(z_min_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(inf_low_view, dW_neg, None, **conv_kwargs)
-                
-                upper_bound_1 = nn.functional.conv2d(z_max_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(inf_high_view, dW_neg, None, **conv_kwargs)
-                upper_bound_2 = nn.functional.conv2d(inf_high_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(z_max_view, dW_neg, None, **conv_kwargs)
-                
-                # Add bias contribution
-                if isinstance(delta_b, torch.Tensor):
-                    lower_bound_1 = lower_bound_1 + delta_b.view(1, -1, 1, 1)
-                    lower_bound_2 = lower_bound_2 + delta_b.view(1, -1, 1, 1)
-                    upper_bound_1 = upper_bound_1 + delta_b.view(1, -1, 1, 1)
-                    upper_bound_2 = upper_bound_2 + delta_b.view(1, -1, 1, 1)
-                
-                total_loss += (lower_bound_1.pow(2).mean() + lower_bound_2.pow(2).mean())
-                total_loss += (upper_bound_1.pow(2).mean() + upper_bound_2.pow(2).mean())
+                    
+                    conv_kwargs = {
+                        "stride": target_layer.stride,
+                        "padding": target_layer.padding,
+                        "dilation": target_layer.dilation,
+                        "groups": target_layer.groups,
+                    }
+                    
+                    # Split weight changes into positive and negative
+                    dW_pos = torch.relu(delta_W)
+                    dW_neg = torch.relu(-delta_W)
+                    
+                    # --- 1. MEAN TRICK: Global Shift Protection ---
+                    mean_shift = nn.functional.conv2d(mu_view, delta_W, delta_b, **conv_kwargs)
+                    total_loss += mean_shift.pow(2).mean()
+                    
+                    # --- 2. RESIDUAL PROTECTION ---
+                    # For conv: project Ur back to spatial shape and convolve
+                    # This is approximate - we treat each output channel independently
+                    Ur_expanded = Ur.T  # (residual_dim, original_dim)
+                    interference_loss = torch.tensor(0.0, device=device)
+                    for i in range(Ur_expanded.size(0)):
+                        ur_vec = Ur_expanded[i].view_as(mu_view)
+                        interf = nn.functional.conv2d(ur_vec, delta_W, None, **conv_kwargs)
+                        interference_loss += (interf.pow(2).mean() * Sr[i].pow(2))
+                    total_loss += interference_loss
+                    
+                    # --- 3. NEGATIVE SPACE IA PROTECTION ---
+                    # Compute interval bounds through convolution
+                    lower_bound_1 = nn.functional.conv2d(inf_low_view, dW_pos, None, **conv_kwargs) - \
+                                    nn.functional.conv2d(z_min_view, dW_neg, None, **conv_kwargs)
+                    lower_bound_2 = nn.functional.conv2d(z_min_view, dW_pos, None, **conv_kwargs) - \
+                                    nn.functional.conv2d(inf_low_view, dW_neg, None, **conv_kwargs)
+                    
+                    upper_bound_1 = nn.functional.conv2d(z_max_view, dW_pos, None, **conv_kwargs) - \
+                                    nn.functional.conv2d(inf_high_view, dW_neg, None, **conv_kwargs)
+                    upper_bound_2 = nn.functional.conv2d(inf_high_view, dW_pos, None, **conv_kwargs) - \
+                                    nn.functional.conv2d(z_max_view, dW_neg, None, **conv_kwargs)
+                    
+                    # Add bias contribution
+                    if isinstance(delta_b, torch.Tensor):
+                        lower_bound_1 = lower_bound_1 + delta_b.view(1, -1, 1, 1)
+                        lower_bound_2 = lower_bound_2 + delta_b.view(1, -1, 1, 1)
+                        upper_bound_1 = upper_bound_1 + delta_b.view(1, -1, 1, 1)
+                        upper_bound_2 = upper_bound_2 + delta_b.view(1, -1, 1, 1)
+                    
+                    total_loss += (lower_bound_1.pow(2).mean() + lower_bound_2.pow(2).mean())
+                    total_loss += (upper_bound_1.pow(2).mean() + upper_bound_2.pow(2).mean())
 
         return self.lambda_interval * total_loss
 
     def _collect_activations(self, model, layers: List[tuple], dataloader, device,
                             data_transform_fn=None, betas=None, num_timesteps=1000):
-        """Collect activations for multiple layers simultaneously."""
         model.eval()
         buf_dict = {name: [] for name, _ in layers}
-        shape_dict = {name: None for name, _ in layers}  # Store original shapes
+        shape_dict = {name: None for name, _ in layers}
         hooks = []
         
-        # Register hooks for all layers
+        # Register hooks for all provided layers
         for layer_name, layer_module in layers:
             def make_hook(name):
                 def hook(_, __, out):
@@ -322,70 +335,58 @@ class UnlearnIntervalProtection:
             else:
                 log.warning(f"Skipping layer {name} - no activations collected (layer not executed)")
         return result
-
-    def _resolve_param_name(self, model, param):
-        for name, p in model.named_parameters():
-            if p is param: return name
-        return ""
     
-    def _find_feature_layer(self, model, layer_to_protect=None):
+    def _build_analyze_graph(self, model: nn.Module):
         """
-        Find multiple feature layers to protect.
-        
-        Args:
-            layer_to_protect: Can be:
-                - Type name (e.g., "AttnBlock") to match all layers of that type
-                - Substring (e.g., "attn") to match all layer names containing it
-                - List of substrings (e.g., ["attnblock.q", "attnblock.k"]) to match
-                - None to use default behavior (find pooling layers)
-        
-        Returns:
-            List of (layer_name, layer_module) tuples
+        Populates: parent_to_targets
         """
-        I = list(reversed(list(model.named_modules())))
-        result = []
+        log.info("Tracing computational graph with torch.fx...")
+        parent_layers = set()
         
-        if layer_to_protect:
-            # Handle list of patterns
-            if isinstance(layer_to_protect, list):
-                for i, (name, m) in enumerate(I):
-                    for pattern in layer_to_protect:
-                        if pattern.lower() in name.lower():
-                            if i + 1 < len(I):
-                                next_name, next_m = I[i + 1]
-                                result.append((next_name, next_m))
-                            break  # Only match first pattern per layer
-            else:
-                # Try to find layers matching the criteria
-                for i, (name, m) in enumerate(I):
-                    # Match by type name
-                    if type(m).__name__ == layer_to_protect:
-                        if i + 1 < len(I):
-                            next_name, next_m = I[i + 1]
-                            result.append((next_name, next_m))
-                    # Match by substring in layer name
-                    elif layer_to_protect.lower() in name.lower():
-                        if i + 1 < len(I):
-                            next_name, next_m = I[i + 1]
-                            result.append((next_name, next_m))
+        # Unwrap DataParallel
+        base_model = model.module if isinstance(model, nn.DataParallel) else model
         
-        # If no layers found with criteria, use default behavior
-        if not result:
-            for name, m in I:
-                if isinstance(m, (nn.AdaptiveAvgPool2d, nn.AvgPool2d)):
-                    result.append((name, m))
-                    break  # Take only first pooling layer as default
+        try:
+            # Use symbolic_trace directly
+            gm = torch.fx.symbolic_trace(base_model)
+            
+            for node in gm.graph.nodes:
+                if node.op == 'call_module':
+                    layer_module = gm.get_submodule(node.target)
+                        
+                    # Check if layer matches any pattern
+                    should_protect = False
+                    for pattern in self.targets:
+                        # Match by type name
+                        if type(layer_module).__name__ == pattern:
+                            should_protect = True
+                            break
+                        # Match by substring in layer name
+                        if pattern.lower() in node.target.lower():
+                            should_protect = True
+                            break
+                    
+                    if should_protect:
+                        # Find parent layers (inputs to this target)
+                        for input_node in node.all_input_nodes:
+                            if input_node.op == 'call_module':
+                                parent_module = gm.get_submodule(input_node.target)
+                                parent_layers.add((input_node.target, parent_module))
+                                if input_node.target not in self.parent_to_targets:
+                                    self.parent_to_targets[input_node.target] = set()
+                                self.parent_to_targets[input_node.target].add(layer_module)
+            
+            log.info(f"Built and analyzed computational graph with {len(self.parent_to_targets)} parent layers")
+            
+        except Exception as e:
+            log.error(f"Graph tracing failed: {e}")
+            import traceback
+            log.error(traceback.format_exc())
+            raise RuntimeError(f"Failed to trace computational graph: {e}")
         
-        return result
+        return list(parent_layers)
 
-    def _find_next_linear(self, model, layer_name):
-        found = False
-        for name, m in model.named_modules():
-            if name == layer_name: 
-                found = True
-                continue
-            if found and isinstance(m, (nn.Linear, nn.Conv2d)): return m
-        return None
+# For Classification:
 
 def intact_train_epoch(
     model, optimizer, criterion, forget_loader, device,
@@ -403,7 +404,6 @@ def intact_train_epoch(
         # Unlearning via Gradient Ascent (Negative Loss)
         unlearn_loss = -criterion(out, y) 
 
-        # InTAct Protection (Negative Space Shield)
         protect_loss = (
             interval_protection.compute_protection_loss(model, device)
             if interval_protection else torch.tensor(0.0, device=device)

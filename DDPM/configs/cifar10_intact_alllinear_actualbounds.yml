@@ -45,7 +45,7 @@ training:
     upper_percentile: 0.95         # Activation safe zone upper bound
     reduced_dim: 32                # PCA dimension for efficiency
     infinity_scale: 20.0           # Scale for negative space intervals (unused with actual bounds)
-    layer_to_protect: Linear       # Protect all Linear layers in the model
+    targets: ["Linear"]            # Protect all Linear layers in the model
     use_actual_bounds: true        # Use actual min/max from remain+forget instead of scaled bounds
 
 sampling:
