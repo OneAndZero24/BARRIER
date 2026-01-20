@@ -336,6 +336,7 @@ class UnlearnIntervalProtection:
             layer_to_protect: Can be:
                 - Type name (e.g., "AttnBlock") to match all layers of that type
                 - Substring (e.g., "attn") to match all layer names containing it
+                - List of substrings (e.g., ["attnblock.q", "attnblock.k"]) to match
                 - None to use default behavior (find pooling layers)
         
         Returns:
@@ -345,18 +346,28 @@ class UnlearnIntervalProtection:
         result = []
         
         if layer_to_protect:
-            # Try to find layers matching the criteria
-            for i, (name, m) in enumerate(I):
-                # Match by type name
-                if type(m).__name__ == layer_to_protect:
-                    if i + 1 < len(I):
-                        next_name, next_m = I[i + 1]
-                        result.append((next_name, next_m))
-                # Match by substring in layer name
-                elif layer_to_protect.lower() in name.lower():
-                    if i + 1 < len(I):
-                        next_name, next_m = I[i + 1]
-                        result.append((next_name, next_m))
+            # Handle list of patterns
+            if isinstance(layer_to_protect, list):
+                for i, (name, m) in enumerate(I):
+                    for pattern in layer_to_protect:
+                        if pattern.lower() in name.lower():
+                            if i + 1 < len(I):
+                                next_name, next_m = I[i + 1]
+                                result.append((next_name, next_m))
+                            break  # Only match first pattern per layer
+            else:
+                # Try to find layers matching the criteria
+                for i, (name, m) in enumerate(I):
+                    # Match by type name
+                    if type(m).__name__ == layer_to_protect:
+                        if i + 1 < len(I):
+                            next_name, next_m = I[i + 1]
+                            result.append((next_name, next_m))
+                    # Match by substring in layer name
+                    elif layer_to_protect.lower() in name.lower():
+                        if i + 1 < len(I):
+                            next_name, next_m = I[i + 1]
+                            result.append((next_name, next_m))
         
         # If no layers found with criteria, use default behavior
         if not result:
