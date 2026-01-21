@@ -775,6 +775,15 @@ class Diffusion(object):
                     os.path.join(self.config.ckpt_dir, "ckpt.pth"),
                 )
                 logging.info(f"Checkpoint saved at step {step}")
+                
+                test_model = (
+                    ema_helper.ema_copy(model)
+                    if self.config.model.ema
+                    else copy.deepcopy(model)
+                )
+                test_model.eval()
+                self.sample_visualization(test_model, step, args.cond_scale)
+                del test_model
 
     def load_ema_model(self):
         model = Conditional_Model(self.config)
