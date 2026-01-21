@@ -658,13 +658,16 @@ class Diffusion(object):
             ema_helper = EMAHelper(mu=config.model.ema_rate)
             ema_helper.register(model)
         
+        # Define target layers to protect (default: Linear layers or specific patterns)
+        targets = getattr(config.training, 'targets', ['Linear'])
+        
         protection = UnlearnIntervalProtection(
+            targets=targets,
             lambda_interval=config.training.lambda_interval,
             lower_percentile=getattr(config.training, 'lower_percentile', 0.05),
             upper_percentile=getattr(config.training, 'upper_percentile', 0.95),
             reduced_dim=getattr(config.training, 'reduced_dim', 32),
             infinity_scale=getattr(config.training, 'infinity_scale', 20.0),
-            layer_to_protect=getattr(config.training, 'layer_to_protect', None),
             use_actual_bounds=getattr(config.training, 'use_actual_bounds', False)
         )
         
