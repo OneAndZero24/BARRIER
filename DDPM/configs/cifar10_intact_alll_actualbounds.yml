@@ -33,7 +33,7 @@ diffusion:
     num_diffusion_timesteps: 1000
 
 training:
-    batch_size: 128
+    batch_size: 32
     n_iters: 1500
     snapshot_freq: 150
     log_freq: 50
@@ -50,7 +50,7 @@ training:
     use_actual_bounds: true        # Use actual min/max from remain+forget instead of scaled bounds
 
 sampling:
-    batch_size: 2
+    batch_size: 32
     last_only: True
 
 optim:
