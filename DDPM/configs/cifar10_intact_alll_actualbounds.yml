@@ -55,7 +55,7 @@ sampling:
 
 optim:
     weight_decay: 0.000
-    optimizer: "AdamW"
+    optimizer: "Adam"
     lr: 0.005
     beta1: 0.9
     amsgrad: false
