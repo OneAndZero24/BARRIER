@@ -132,6 +132,32 @@ class UnlearnIntervalProtection:
         }
         log.info(f"Snapshotted {len(self.params_snapshot)} target layer parameters")
 
+    def freeze_non_target_params(self, model: nn.Module):
+        """
+        Freeze all model parameters except those in target layers.
+        Call this after setup_protection() to ensure only protected layers are trainable.
+        """
+        # Collect all parameters in target layers
+        target_params = set()
+        for target_layer in self.target_layers.values():
+            if hasattr(target_layer, 'weight') and target_layer.weight is not None:
+                target_params.add(target_layer.weight)
+            if hasattr(target_layer, 'bias') and target_layer.bias is not None:
+                target_params.add(target_layer.bias)
+        
+        # Freeze/unfreeze parameters
+        frozen_count = 0
+        trainable_count = 0
+        for name, param in model.named_parameters():
+            if param in target_params:
+                param.requires_grad = True
+                trainable_count += 1
+            else:
+                param.requires_grad = False
+                frozen_count += 1
+        
+        log.info(f"Frozen {frozen_count} parameters, kept {trainable_count} target layer parameters trainable")
+
     def compute_protection_loss(self, model: nn.Module, device) -> torch.Tensor:
         total_loss = torch.tensor(0.0, device=device)
         if not self.pca_info: return total_loss
@@ -412,6 +438,9 @@ def intact_unlearn(
     )
 
     protection.setup_protection(model, forget_loader, device)
+    
+    # Freeze all parameters except target layers
+    protection.freeze_non_target_params(model)
 
     for epoch in range(num_epochs):
         loss, unlearn, protect = intact_train_epoch(

@@ -682,6 +682,9 @@ class Diffusion(object):
             num_timesteps=self.num_timesteps
         )
         
+        # Freeze all parameters except target layers
+        protection.freeze_non_target_params(model)
+        
         model.train()
         start = time.time()
         for step in range(config.training.n_iters):
