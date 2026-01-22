@@ -40,7 +40,7 @@ training:
     visualization_samples: 100
     
     # InTAct-specific parameters
-    lambda_interval: 100.0         # Protection loss weight (high to balance GA losses)
+    lambda_interval: 50.0         # Protection loss weight (high to balance GA losses)
     lower_percentile: 0.05         # Activation safe zone lower bound
     upper_percentile: 0.95         # Activation safe zone upper bound
     reduced_dim: 32                # PCA dimension for efficiency
@@ -56,7 +56,7 @@ sampling:
 optim:
     weight_decay: 0.000
     optimizer: "Adam"
-    lr: 0.0001
+    lr: 0.005
     beta1: 0.9
     amsgrad: false
     eps: 0.00000001
