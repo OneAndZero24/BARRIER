@@ -46,7 +46,7 @@ training:
     reduced_dim: 32                # PCA dimension for efficiency
     infinity_scale: 20.0           # Scale for negative space intervals (unused with actual bounds)
     normalize_protection: true     # Normalize by number of layers
-    targets: ["Linear", "Conv2d"]  # Protect all Linear and Conv2d layers in the model
+    targets: ["Linear", "attn.0.q", "attn.0.k", "attn.0.v", "attn_1.q", "attn_1.k", "attn_1.v", "attn.1.q", "attn.1.k", "attn.1.v"]  # Protect all Linear and QKV layers in the model
     use_actual_bounds: true        # Use actual min/max from remain+forget instead of scaled bounds
 
 sampling:
