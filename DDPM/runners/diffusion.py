@@ -668,7 +668,8 @@ class Diffusion(object):
             upper_percentile=getattr(config.training, 'upper_percentile', 0.95),
             reduced_dim=getattr(config.training, 'reduced_dim', 32),
             infinity_scale=getattr(config.training, 'infinity_scale', 20.0),
-            use_actual_bounds=getattr(config.training, 'use_actual_bounds', False)
+            use_actual_bounds=getattr(config.training, 'use_actual_bounds', False),
+            normalize_protection=getattr(config.training, 'normalize_protection', True)
         )
         
         logging.info("Setting up InTAct protection...")

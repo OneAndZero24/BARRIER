@@ -40,11 +40,12 @@ training:
     visualization_samples: 100
     
     # InTAct-specific parameters
-    lambda_interval: 0.01          # Protection loss weight
+    lambda_interval: 100.0         # Protection loss weight (high to balance GA losses)
     lower_percentile: 0.05         # Activation safe zone lower bound
     upper_percentile: 0.95         # Activation safe zone upper bound
     reduced_dim: 32                # PCA dimension for efficiency
     infinity_scale: 20.0           # Scale for negative space intervals
+    normalize_protection: true     # Normalize by number of layers
     targets: ["Linear"]            # Protect all Linear layers in the model
 
 sampling:

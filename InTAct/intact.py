@@ -14,7 +14,8 @@ class UnlearnIntervalProtection:
         upper_percentile: float = 0.95,
         reduced_dim: int = 32,
         infinity_scale: float = 20.0,
-        use_actual_bounds: bool = False
+        use_actual_bounds: bool = False,
+        normalize_protection: bool = True,  # Normalize protection loss by number of layers
     ):
         self.targets = targets
         self.lambda_interval = lambda_interval
@@ -23,6 +24,7 @@ class UnlearnIntervalProtection:
         self.reduced_dim = reduced_dim
         self.infinity_scale = infinity_scale
         self.use_actual_bounds = use_actual_bounds
+        self.normalize_protection = normalize_protection
 
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}  # Only target layer parameters
@@ -64,7 +66,7 @@ class UnlearnIntervalProtection:
         # 2. Process each target layer
         for layer_name, acts_info in acts_dict.items():
             acts = acts_info['activations']
-            original_shape = acts_info['original_shape']
+            layer_type = acts_info.get('layer_type', 'Linear')
             
             # Centered SVD
             mu = acts.mean(dim=0)
@@ -110,7 +112,7 @@ class UnlearnIntervalProtection:
                 "z_max": z_max.detach(),
                 "inf_low": inf_low.detach(),
                 "inf_high": inf_high.detach(),
-                "original_shape": original_shape  # Store for Conv2d layers
+                "layer_type": layer_type
             })
 
         # 3. Build param_to_name mapping and snapshot only target layer parameters
@@ -133,6 +135,8 @@ class UnlearnIntervalProtection:
     def compute_protection_loss(self, model: nn.Module, device) -> torch.Tensor:
         total_loss = torch.tensor(0.0, device=device)
         if not self.pca_info: return total_loss
+        
+        num_layers = 0
 
         for info in self.pca_info:
             layer_name = info["layer_name"]
@@ -146,127 +150,106 @@ class UnlearnIntervalProtection:
             Ur = info["U_residual"].to(device)
             Sr = info["S_residual"].to(device)
             z_min, z_max = info["z_min"].to(device), info["z_max"].to(device)
-            
-            # Use precomputed bounds (either actual or scaled)
             inf_low = info["inf_low"].to(device)
             inf_high = info["inf_high"].to(device)
 
             w_name = self.param_to_name[target_layer.weight]
             b_name = self.param_to_name[target_layer.bias] if target_layer.bias is not None else None
             
-            delta_W = target_layer.weight - self.params_snapshot[w_name]
-            delta_b = (target_layer.bias - self.params_snapshot[b_name]) if b_name else 0
-
-            # === Dimension validation ===
-            expected_input_dim = delta_W.shape[1]
-            actual_input_dim = mu.shape[0]
+            delta_W_raw = target_layer.weight - self.params_snapshot[w_name]
+            delta_b = (target_layer.bias - self.params_snapshot[b_name]) if b_name else torch.tensor(0.0, device=device)
             
-            if expected_input_dim != actual_input_dim:
-                log.warning(f"Dimension mismatch for target {layer_name}: "
-                           f"expected {expected_input_dim}, got {actual_input_dim}. Skipping this layer.")
-                continue
+            if isinstance(target_layer, nn.Conv2d):
+                mu_spatial = mu.view(1, -1, 1, 1)
+                
+                num_layers += 1
+                layer_loss = torch.tensor(0.0, device=device)
+                
+                mean_response = torch.nn.functional.conv2d(
+                    mu_spatial, delta_W_raw, 
+                    bias=delta_b if isinstance(delta_b, torch.Tensor) else None,
+                    stride=target_layer.stride, 
+                    padding=target_layer.padding,
+                    dilation=target_layer.dilation,
+                    groups=target_layer.groups
+                )
+                layer_loss = layer_loss + mean_response.pow(2).mean()
 
-            # === Handle Linear vs Conv2d layers ===
-            if isinstance(target_layer, nn.Linear):
-                # --- 1. MEAN TRICK: Global Shift Protection ---
-                global_shift = torch.matmul(delta_W, mu) + delta_b
-                total_loss += global_shift.pow(2).mean()
+                if Ur.size(0) > 0:
+                    Ur_spatial = Ur.view(Ur.size(0), -1, 1, 1)
+                    
+                    residual_responses = torch.nn.functional.conv2d(
+                        Ur_spatial, delta_W_raw,
+                        stride=target_layer.stride,
+                        padding=target_layer.padding,
+                        dilation=target_layer.dilation,
+                        groups=target_layer.groups
+                    )
+                    
+                    weighted_responses = residual_responses * Sr.view(-1, 1, 1, 1)
+                    layer_loss = layer_loss + torch.norm(weighted_responses, p='fro').pow(2)
 
-                # --- 2. RESIDUAL PROTECTION (Energy-Scaled) ---
-                interference = delta_W @ Ur.T
-                weighted_interference = interference * Sr.to(device).unsqueeze(0)
-                total_loss += torch.norm(weighted_interference, p='fro').pow(2)
-
-                # --- 3. NEGATIVE SPACE IA PROTECTION ---
-                delta_f = delta_W @ Uf.T
+                Uf_spatial = Uf.view(Uf.size(0), -1, 1, 1)
+                
+                forget_responses = torch.nn.functional.conv2d(
+                    Uf_spatial, delta_W_raw,
+                    stride=target_layer.stride,
+                    padding=target_layer.padding,
+                    dilation=target_layer.dilation,
+                    groups=target_layer.groups
+                )
+                
+                delta_f = forget_responses.view(Uf.size(0), -1).T
+                
                 dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
 
-                # Lower Negative Space IA: [-inf, z_min]
                 drift_low_1 = dWp @ inf_low - dWn @ z_min
                 drift_low_2 = dWp @ z_min - dWn @ inf_low
                 
-                # Upper Negative Space IA: [z_max, +inf]
                 drift_high_1 = dWp @ z_max - dWn @ inf_high
                 drift_high_2 = dWp @ inf_high - dWn @ z_max
 
-                total_loss += (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
-                total_loss += (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+                layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
+                layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+                
+            elif isinstance(target_layer, nn.Linear):
+                delta_W = delta_W_raw
+                num_layers += 1
+                layer_loss = torch.tensor(0.0, device=device)
 
-            elif isinstance(target_layer, nn.Conv2d):
-                # Reshape bounds for conv2d operations
-                original_shape = info.get("original_shape")
-                
-                if original_shape is not None:
-                    # Reshape to (1, C, H, W) for conv operations
-                    try:
-                        mu_view = mu.view(1, *original_shape)
-                        z_min_view = z_min.view(1, *original_shape) if z_min.numel() == mu.numel() else z_min.view(1, -1, 1, 1)
-                        z_max_view = z_max.view(1, *original_shape) if z_max.numel() == mu.numel() else z_max.view(1, -1, 1, 1)
-                        inf_low_view = inf_low.view(1, *original_shape) if inf_low.numel() == mu.numel() else inf_low.view(1, -1, 1, 1)
-                        inf_high_view = inf_high.view(1, *original_shape) if inf_high.numel() == mu.numel() else inf_high.view(1, -1, 1, 1)
-                    except:
-                        log.warning("Original shape mismatch, falling back to channel-only bounds")
-                        # Fallback: assume channel-only bounds
-                        mu_view = mu.view(1, -1, 1, 1)
-                        z_min_view = z_min.view(1, -1, 1, 1)
-                        z_max_view = z_max.view(1, -1, 1, 1)
-                        inf_low_view = inf_low.view(1, -1, 1, 1)
-                        inf_high_view = inf_high.view(1, -1, 1, 1)
-                else:
-                    # Default: assume channel-only bounds
-                    mu_view = mu.view(1, -1, 1, 1)
-                    z_min_view = z_min.view(1, -1, 1, 1)
-                    z_max_view = z_max.view(1, -1, 1, 1)
-                    inf_low_view = inf_low.view(1, -1, 1, 1)
-                    inf_high_view = inf_high.view(1, -1, 1, 1)
-                
-                conv_kwargs = {
-                    "stride": target_layer.stride,
-                    "padding": target_layer.padding,
-                    "dilation": target_layer.dilation,
-                    "groups": target_layer.groups,
-                }
-                
-                # Split weight changes into positive and negative
-                dW_pos = torch.relu(delta_W)
-                dW_neg = torch.relu(-delta_W)
-                
-                # --- 1. MEAN TRICK: Global Shift Protection ---
-                mean_shift = nn.functional.conv2d(mu_view, delta_W, delta_b, **conv_kwargs)
-                total_loss += mean_shift.pow(2).mean()
-                
-                # --- 2. RESIDUAL PROTECTION ---
-                # For conv: project Ur back to spatial shape and convolve
-                # This is approximate - we treat each output channel independently
-                Ur_expanded = Ur.T  # (residual_dim, original_dim)
-                interference_loss = torch.tensor(0.0, device=device)
-                for i in range(Ur_expanded.size(0)):
-                    ur_vec = Ur_expanded[i].view_as(mu_view)
-                    interf = nn.functional.conv2d(ur_vec, delta_W, None, **conv_kwargs)
-                    interference_loss += (interf.pow(2).mean() * Sr[i].pow(2))
-                total_loss += interference_loss
-                
-                # --- 3. NEGATIVE SPACE IA PROTECTION ---
-                # Compute interval bounds through convolution
-                lower_bound_1 = nn.functional.conv2d(inf_low_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(z_min_view, dW_neg, None, **conv_kwargs)
-                lower_bound_2 = nn.functional.conv2d(z_min_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(inf_low_view, dW_neg, None, **conv_kwargs)
-                
-                upper_bound_1 = nn.functional.conv2d(z_max_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(inf_high_view, dW_neg, None, **conv_kwargs)
-                upper_bound_2 = nn.functional.conv2d(inf_high_view, dW_pos, None, **conv_kwargs) - \
-                                nn.functional.conv2d(z_max_view, dW_neg, None, **conv_kwargs)
-                
-                # Add bias contribution
                 if isinstance(delta_b, torch.Tensor):
-                    lower_bound_1 = lower_bound_1 + delta_b.view(1, -1, 1, 1)
-                    lower_bound_2 = lower_bound_2 + delta_b.view(1, -1, 1, 1)
-                    upper_bound_1 = upper_bound_1 + delta_b.view(1, -1, 1, 1)
-                    upper_bound_2 = upper_bound_2 + delta_b.view(1, -1, 1, 1)
+                    db = delta_b
+                else:
+                    db = torch.tensor(0.0, device=device)
                 
-                total_loss += (lower_bound_1.pow(2).mean() + lower_bound_2.pow(2).mean())
-                total_loss += (upper_bound_1.pow(2).mean() + upper_bound_2.pow(2).mean())
+                global_shift = torch.matmul(delta_W, mu) + db
+                layer_loss = layer_loss + global_shift.pow(2).mean()
+
+                if Ur.size(0) > 0:
+                    interference = delta_W @ Ur.T
+                    weighted_interference = interference * Sr.unsqueeze(0)
+                    layer_loss = layer_loss + torch.norm(weighted_interference, p='fro').pow(2)
+
+                delta_f = delta_W @ Uf.T
+                dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+
+                drift_low_1 = dWp @ inf_low - dWn @ z_min
+                drift_low_2 = dWp @ z_min - dWn @ inf_low
+                
+                drift_high_1 = dWp @ z_max - dWn @ inf_high
+                drift_high_2 = dWp @ inf_high - dWn @ z_max
+
+                layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
+                layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+            else:
+                log.warning(f"Unknown layer type {type(target_layer)} for {layer_name}, skipping")
+                continue
+            
+            total_loss = total_loss + layer_loss
+
+        # Normalize by number of layers if requested
+        if self.normalize_protection and num_layers > 0:
+            total_loss = total_loss / num_layers
 
         return self.lambda_interval * total_loss
 
@@ -274,7 +257,7 @@ class UnlearnIntervalProtection:
                             data_transform_fn=None, betas=None, num_timesteps=1000):
         model.eval()
         buf_dict = {name: [] for name in layer_names}
-        shape_dict = {name: None for name in layer_names}
+        layer_type_dict = {name: None for name in layer_names}
         hooks = []
         
         # Register hooks for all provided layers - collect INPUTS
@@ -283,10 +266,22 @@ class UnlearnIntervalProtection:
                 # inp is a tuple of inputs, typically (input_tensor,) for Linear/Conv2d
                 if len(inp) > 0 and inp[0] is not None:
                     input_tensor = inp[0]
-                    # Store original shape before flattening (for Conv2d support)
-                    if shape_dict[name] is None and len(input_tensor.shape) > 2:
-                        shape_dict[name] = input_tensor.shape[1:]  # (C, H, W) or similar
-                    buf_dict[name].append(input_tensor.detach().view(input_tensor.size(0), -1))
+                    
+                    # Store layer type
+                    if layer_type_dict[name] is None:
+                        layer_type_dict[name] = type(module).__name__
+                    
+                    # Handle different layer types
+                    if isinstance(module, nn.Conv2d):
+                        # For ALL Conv2d layers: treat each spatial position as a sample
+                        # Input: (B, C, H, W) -> (B*H*W, C)
+                        # This works for any kernel size and gives channel-wise statistics
+                        B, C, H, W = input_tensor.shape
+                        # Reshape to (B*H*W, C) - each spatial position is a sample
+                        reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
+                        buf_dict[name].append(reshaped.detach())
+                    else:
+                        buf_dict[name].append(input_tensor.detach().view(input_tensor.size(0), -1))
             return hook
         hooks = [layer_module.register_forward_hook(make_hook(layer_name)) for layer_name, layer_module in self.target_layers.items()]
         
@@ -326,11 +321,12 @@ class UnlearnIntervalProtection:
         result = {}
         log.info(f"Collected input activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
         for name in buf_dict:
-            if len(buf_dict[name]) > 0:  # Only include layers that collected activations
+            if len(buf_dict[name]) > 0:
                 result[name] = {
                     'activations': torch.cat(buf_dict[name], dim=0),
-                    'original_shape': shape_dict[name]
+                    'layer_type': layer_type_dict[name]
                 }
+                log.info(f"  Layer {name}: {result[name]['activations'].shape}, type={layer_type_dict[name]}")
             else:
                 log.warning(f"Skipping layer {name} - no activations collected (layer not executed)")
         return result
