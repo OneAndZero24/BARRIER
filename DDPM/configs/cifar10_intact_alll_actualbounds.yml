@@ -50,7 +50,7 @@ training:
     use_actual_bounds: true        # Use actual min/max from remain+forget instead of scaled bounds
 
 sampling:
-    batch_size: 32
+    batch_size: 8
     last_only: True
 
 optim:
