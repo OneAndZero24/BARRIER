@@ -68,9 +68,11 @@ class UnlearnIntervalProtection:
             acts = acts_info['activations']
             layer_type = acts_info.get('layer_type', 'Linear')
             
+            acts_gpu = acts.to(device)
+            
             # Centered SVD
-            mu = acts.mean(dim=0)
-            Xc = acts - mu
+            mu = acts_gpu.mean(dim=0)
+            Xc = acts_gpu - mu
             _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
             
             k = min(self.reduced_dim, Vh.size(0))
@@ -83,18 +85,29 @@ class UnlearnIntervalProtection:
             z_min = torch.quantile(Z, self.lower_percentile, dim=0)
             z_max = torch.quantile(Z, self.upper_percentile, dim=0)
             
+            # Free GPU memory
+            del acts_gpu, Xc, Z
+            
             # Calculate actual bounds from remain+forget if requested
             if self.use_actual_bounds and remain_acts_dict is not None and layer_name in remain_acts_dict:
-                remain_acts = remain_acts_dict[layer_name]['activations']
+                remain_acts = remain_acts_dict[layer_name]['activations'].to(device)
                 remain_Xc = remain_acts - mu
                 remain_Z = remain_Xc @ U_forget.T
                 
+                # Recompute forget Z for combining (we deleted it earlier)
+                forget_acts_gpu = acts.to(device)
+                forget_Xc = forget_acts_gpu - mu
+                forget_Z = forget_Xc @ U_forget.T
+                
                 # Combine forget and remain projections
-                combined_Z = torch.cat([Z, remain_Z], dim=0)
+                combined_Z = torch.cat([forget_Z, remain_Z], dim=0)
                 
                 # Use actual min/max as infinity bounds
                 inf_low = combined_Z.min(dim=0)[0]
                 inf_high = combined_Z.max(dim=0)[0]
+                
+                # Free GPU memory
+                del remain_acts, remain_Xc, remain_Z, forget_acts_gpu, forget_Xc, forget_Z, combined_Z
                 
                 log.info(f"Layer {layer_name}: Using actual bounds from remain+forget data")
             else:
@@ -102,16 +115,17 @@ class UnlearnIntervalProtection:
                 inf_low = z_min - self.infinity_scale
                 inf_high = z_max + self.infinity_scale
 
+            # Store all tensors on CPU to save GPU memory
             self.pca_info.append({
                 "layer_name": layer_name,
-                "mu": mu.detach(),
-                "U_forget": U_forget.detach(),
-                "U_residual": U_residual.detach(),
-                "S_residual": S_residual.detach(),
-                "z_min": z_min.detach(),
-                "z_max": z_max.detach(),
-                "inf_low": inf_low.detach(),
-                "inf_high": inf_high.detach(),
+                "mu": mu.detach().cpu(),
+                "U_forget": U_forget.detach().cpu(),
+                "U_residual": U_residual.detach().cpu(),
+                "S_residual": S_residual.detach().cpu(),
+                "z_min": z_min.detach().cpu(),
+                "z_max": z_max.detach().cpu(),
+                "inf_low": inf_low.detach().cpu(),
+                "inf_high": inf_high.detach().cpu(),
                 "layer_type": layer_type
             })
 
@@ -125,8 +139,9 @@ class UnlearnIntervalProtection:
             if hasattr(target, 'bias') and target.bias is not None:
                 target_params.add(target.bias)
         
+        # Store snapshots on CPU to save GPU memory
         self.params_snapshot = {
-            n: p.detach().clone() 
+            n: p.detach().clone().cpu() 
             for n, p in model.named_parameters() 
             if p in target_params
         }
@@ -182,8 +197,9 @@ class UnlearnIntervalProtection:
             w_name = self.param_to_name[target_layer.weight]
             b_name = self.param_to_name[target_layer.bias] if target_layer.bias is not None else None
             
-            delta_W_raw = target_layer.weight - self.params_snapshot[w_name]
-            delta_b = (target_layer.bias - self.params_snapshot[b_name]) if b_name else torch.tensor(0.0, device=device)
+            # Move snapshots to GPU only when needed for computation
+            delta_W_raw = target_layer.weight - self.params_snapshot[w_name].to(device)
+            delta_b = (target_layer.bias - self.params_snapshot[b_name].to(device)) if b_name else torch.tensor(0.0, device=device)
             
             if isinstance(target_layer, nn.Conv2d):
                 mu_spatial = mu.view(1, -1, 1, 1)
@@ -348,8 +364,10 @@ class UnlearnIntervalProtection:
         log.info(f"Collected input activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
         for name in buf_dict:
             if len(buf_dict[name]) > 0:
+                # Move activations to CPU to free GPU memory
+                activations = torch.cat(buf_dict[name], dim=0).cpu()
                 result[name] = {
-                    'activations': torch.cat(buf_dict[name], dim=0),
+                    'activations': activations,
                     'layer_type': layer_type_dict[name]
                 }
                 log.info(f"  Layer {name}: {result[name]['activations'].shape}, type={layer_type_dict[name]}")
