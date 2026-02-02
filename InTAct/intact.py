@@ -327,9 +327,9 @@ class UnlearnIntervalProtection:
                         B, C, H, W = input_tensor.shape
                         # Reshape to (B*H*W, C) - each spatial position is a sample
                         reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
-                        buf_dict[name].append(reshaped.detach())
+                        buf_dict[name].append(reshaped.detach().cpu())  # Move to CPU immediately
                     else:
-                        buf_dict[name].append(input_tensor.detach().view(input_tensor.size(0), -1))
+                        buf_dict[name].append(input_tensor.detach().view(input_tensor.size(0), -1).cpu())  # Move to CPU immediately
             return hook
         hooks = [layer_module.register_forward_hook(make_hook(layer_name)) for layer_name, layer_module in self.target_layers.items()]
         
@@ -370,8 +370,8 @@ class UnlearnIntervalProtection:
         log.info(f"Collected input activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
         for name in buf_dict:
             if len(buf_dict[name]) > 0:
-                # Move activations to CPU to free GPU memory
-                activations = torch.cat(buf_dict[name], dim=0).cpu()
+                # Activations are already on CPU from the hook
+                activations = torch.cat(buf_dict[name], dim=0)
                 result[name] = {
                     'activations': activations,
                     'layer_type': layer_type_dict[name]
