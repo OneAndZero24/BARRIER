@@ -54,16 +54,9 @@ class UnlearnIntervalProtection:
             data_transform_fn, betas, num_timesteps
         )
         
-        # 1b. Optionally collect remain data for actual bounds calculation
-        remain_acts_dict = None
-        if self.use_actual_bounds and remain_dataloader is not None:
-            log.info("Collecting remain data activations for actual bounds...")
-            remain_acts_dict = self._collect_activations(
-                model, target_names, remain_dataloader, device,
-                data_transform_fn, betas, num_timesteps
-            )
+        # 2. Compute SVD on forget data and optionally collect projected remain data
+        pca_components = {}  # Store mu and U_forget for each layer
         
-        # 2. Process each target layer
         for layer_name, acts_info in acts_dict.items():
             acts = acts_info['activations']
             layer_type = acts_info.get('layer_type', 'Linear')
@@ -81,48 +74,38 @@ class UnlearnIntervalProtection:
             S_residual = S[k:]
 
             # Define the Forget Box in centered PCA space
-            Z = Xc @ U_forget.T
-            z_min = torch.quantile(Z, self.lower_percentile, dim=0)
-            z_max = torch.quantile(Z, self.upper_percentile, dim=0)
+            Z_forget = Xc @ U_forget.T
+            z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)
+            z_max = torch.quantile(Z_forget, self.upper_percentile, dim=0)
+            
+            # Store PCA components for remain data projection
+            pca_components[layer_name] = {
+                'mu': mu,
+                'U_forget': U_forget,
+                'layer_type': layer_type
+            }
             
             # Free GPU memory
             del acts_gpu, Xc
             
             # Calculate actual bounds from remain+forget if requested
-            if self.use_actual_bounds and remain_acts_dict is not None and layer_name in remain_acts_dict:
+            if self.use_actual_bounds and remain_dataloader is not None:
                 # Start with forget data bounds
-                combined_min = Z.min(dim=0)[0]
-                combined_max = Z.max(dim=0)[0]
-                del Z
+                combined_min = Z_forget.min(dim=0)[0]
+                combined_max = Z_forget.max(dim=0)[0]
+                del Z_forget
                 
-                # Process remain data in chunks to avoid OOM
-                remain_acts = remain_acts_dict[layer_name]['activations']
-                chunk_size = 50000  # Process 50k samples at a time
-                
-                for i in range(0, remain_acts.size(0), chunk_size):
-                    chunk = remain_acts[i:i+chunk_size].to(device)
-                    chunk_Xc = chunk - mu
-                    chunk_Z = chunk_Xc @ U_forget.T
-                    
-                    # Update global min/max to include both forget and remain
-                    combined_min = torch.minimum(combined_min, chunk_Z.min(dim=0)[0])
-                    combined_max = torch.maximum(combined_max, chunk_Z.max(dim=0)[0])
-                    
-                    del chunk, chunk_Xc, chunk_Z
-                
-                # Use actual min/max as infinity bounds
-                inf_low = combined_min
+                # Will collect and project remain data on-the-fly
+                inf_low = combined_min  # Temporary, will update after remain collection
                 inf_high = combined_max
-                
-                del combined_min, combined_max
-                log.info(f"Layer {layer_name}: Using actual bounds from remain+forget data")
             else:
                 # Use scaled bounds (original behavior)
                 inf_low = z_min - self.infinity_scale
                 inf_high = z_max + self.infinity_scale
+                del Z_forget
 
-            # Store all tensors on CPU to save GPU memory
-            self.pca_info.append({
+            # Store PCA info (will update inf_low/inf_high after remain collection if needed)
+            pca_entry = {
                 "layer_name": layer_name,
                 "mu": mu.detach().cpu(),
                 "U_forget": U_forget.detach().cpu(),
@@ -133,7 +116,35 @@ class UnlearnIntervalProtection:
                 "inf_low": inf_low.detach().cpu(),
                 "inf_high": inf_high.detach().cpu(),
                 "layer_type": layer_type
-            })
+            }
+            self.pca_info.append(pca_entry)
+        
+        # 2b. Collect projected remain data and update bounds
+        if self.use_actual_bounds and remain_dataloader is not None:
+            log.info("Collecting and projecting remain data on-the-fly...")
+            remain_projected = self._collect_projected_activations(
+                model, pca_components, remain_dataloader, device,
+                data_transform_fn, betas, num_timesteps
+            )
+            
+            # Update inf_low/inf_high for each layer
+            for pca_entry in self.pca_info:
+                layer_name = pca_entry["layer_name"]
+                if layer_name in remain_projected:
+                    Z_remain = remain_projected[layer_name].to(device)
+                    
+                    # Update bounds to include remain data
+                    inf_low = pca_entry["inf_low"].to(device)
+                    inf_high = pca_entry["inf_high"].to(device)
+                    
+                    combined_min = torch.minimum(inf_low, Z_remain.min(dim=0)[0])
+                    combined_max = torch.maximum(inf_high, Z_remain.max(dim=0)[0])
+                    
+                    pca_entry["inf_low"] = combined_min.cpu()
+                    pca_entry["inf_high"] = combined_max.cpu()
+                    
+                    log.info(f"Layer {layer_name}: Updated bounds with {Z_remain.size(0)} projected remain samples")
+                    del Z_remain, inf_low, inf_high, combined_min, combined_max
 
         # 3. Build param_to_name mapping and snapshot only target layer parameters
         self.param_to_name = {p: n for n, p in model.named_parameters()}
@@ -379,6 +390,82 @@ class UnlearnIntervalProtection:
                 log.info(f"  Layer {name}: {result[name]['activations'].shape}, type={layer_type_dict[name]}")
             else:
                 log.warning(f"Skipping layer {name} - no activations collected (layer not executed)")
+        return result
+    
+    def _collect_projected_activations(self, model, pca_components: Dict, dataloader, device,
+                                       data_transform_fn=None, betas=None, num_timesteps=1000):
+        """
+        Collect activations and project them on-the-fly using pre-computed PCA components.
+        Returns dict of {layer_name: projected_activations} where projected_activations is [N, reduced_dim].
+        
+        This saves memory by storing only reduced-dimension projections instead of full activations.
+        """
+        model.eval()
+        projected_dict = {name: [] for name in pca_components.keys()}
+        hooks = []
+        
+        # Register hooks that project activations immediately
+        def make_projection_hook(layer_name, mu, U_forget):
+            def hook(module, inp, out):
+                if len(inp) > 0 and inp[0] is not None:
+                    input_tensor = inp[0]
+                    
+                    # Handle different layer types
+                    if isinstance(module, nn.Conv2d):
+                        B, C, H, W = input_tensor.shape
+                        reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
+                    else:
+                        reshaped = input_tensor.view(input_tensor.size(0), -1)
+                    
+                    # Project on GPU, then move to CPU
+                    centered = reshaped - mu
+                    projected = centered @ U_forget.T
+                    projected_dict[layer_name].append(projected.detach().cpu())
+            return hook
+        
+        # Register hooks with PCA components already on GPU
+        for layer_name, components in pca_components.items():
+            layer_module = self.target_layers[layer_name]
+            mu = components['mu']
+            U_forget = components['U_forget']
+            hook = layer_module.register_forward_hook(make_projection_hook(layer_name, mu, U_forget))
+            hooks.append(hook)
+        
+        # Forward pass through all data
+        with torch.no_grad():
+            for batch in dataloader:
+                x, c = batch
+                n = x.size(0)
+                x = x.to(device)
+                c = c.to(device)
+                
+                if data_transform_fn is not None:
+                    x = data_transform_fn(x)
+                
+                t = torch.randint(low=0, high=num_timesteps, size=(n // 2 + 1,)).to(device)
+                t = torch.cat([t, num_timesteps - t - 1], dim=0)[:n]
+                
+                if betas is not None:
+                    e = torch.randn_like(x)
+                    a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                    x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
+                else:
+                    x_noisy = x
+                
+                model(x_noisy, t.float(), c, mode="train")
+        
+        # Remove hooks
+        for h in hooks:
+            h.remove()
+        model.train()
+        
+        # Concatenate projected activations
+        result = {}
+        for name, projections in projected_dict.items():
+            if len(projections) > 0:
+                result[name] = torch.cat(projections, dim=0)
+                log.info(f"  Projected layer {name}: {result[name].shape} (reduced from full activations)")
+        
         return result
     
     def _find_target_layers(self, model: nn.Module) -> List[str]:
