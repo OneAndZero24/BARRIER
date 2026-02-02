@@ -86,29 +86,35 @@ class UnlearnIntervalProtection:
             z_max = torch.quantile(Z, self.upper_percentile, dim=0)
             
             # Free GPU memory
-            del acts_gpu, Xc, Z
+            del acts_gpu, Xc
             
             # Calculate actual bounds from remain+forget if requested
             if self.use_actual_bounds and remain_acts_dict is not None and layer_name in remain_acts_dict:
-                remain_acts = remain_acts_dict[layer_name]['activations'].to(device)
-                remain_Xc = remain_acts - mu
-                remain_Z = remain_Xc @ U_forget.T
+                # Start with forget data bounds
+                combined_min = Z.min(dim=0)[0]
+                combined_max = Z.max(dim=0)[0]
+                del Z
                 
-                # Recompute forget Z for combining (we deleted it earlier)
-                forget_acts_gpu = acts.to(device)
-                forget_Xc = forget_acts_gpu - mu
-                forget_Z = forget_Xc @ U_forget.T
+                # Process remain data in chunks to avoid OOM
+                remain_acts = remain_acts_dict[layer_name]['activations']
+                chunk_size = 50000  # Process 50k samples at a time
                 
-                # Combine forget and remain projections
-                combined_Z = torch.cat([forget_Z, remain_Z], dim=0)
+                for i in range(0, remain_acts.size(0), chunk_size):
+                    chunk = remain_acts[i:i+chunk_size].to(device)
+                    chunk_Xc = chunk - mu
+                    chunk_Z = chunk_Xc @ U_forget.T
+                    
+                    # Update global min/max to include both forget and remain
+                    combined_min = torch.minimum(combined_min, chunk_Z.min(dim=0)[0])
+                    combined_max = torch.maximum(combined_max, chunk_Z.max(dim=0)[0])
+                    
+                    del chunk, chunk_Xc, chunk_Z
                 
                 # Use actual min/max as infinity bounds
-                inf_low = combined_Z.min(dim=0)[0]
-                inf_high = combined_Z.max(dim=0)[0]
+                inf_low = combined_min
+                inf_high = combined_max
                 
-                # Free GPU memory
-                del remain_acts, remain_Xc, remain_Z, forget_acts_gpu, forget_Xc, forget_Z, combined_Z
-                
+                del combined_min, combined_max
                 log.info(f"Layer {layer_name}: Using actual bounds from remain+forget data")
             else:
                 # Use scaled bounds (original behavior)
