@@ -122,9 +122,10 @@ class UnlearnIntervalProtection:
         # 2b. Collect projected remain data and update bounds
         if self.use_actual_bounds and remain_dataloader is not None:
             log.info("Collecting and projecting remain data on-the-fly...")
-            remain_projected = self._collect_projected_activations(
-                model, pca_components, remain_dataloader, device,
-                data_transform_fn, betas, num_timesteps
+            remain_projected = self._collect_activations(
+                model, list(pca_components.keys()), remain_dataloader, device,
+                data_transform_fn, betas, num_timesteps,
+                pca_components=pca_components  # Enable projection mode
             )
             
             # Update inf_low/inf_high for each layer
@@ -313,36 +314,65 @@ class UnlearnIntervalProtection:
         return self.lambda_interval * total_loss
 
     def _collect_activations(self, model, layer_names: List[str], dataloader, device,
-                            data_transform_fn=None, betas=None, num_timesteps=1000):
+                            data_transform_fn=None, betas=None, num_timesteps=1000,
+                            pca_components: Optional[Dict] = None):
+        """
+        Collect activations with optional on-the-fly projection.
+        
+        Args:
+            pca_components: If provided, project activations using {layer_name: {'mu': ..., 'U_forget': ...}}
+                           Returns projected [N, reduced_dim] instead of full [N, feature_dim]
+        """
         model.eval()
         buf_dict = {name: [] for name in layer_names}
         layer_type_dict = {name: None for name in layer_names}
         hooks = []
         
-        # Register hooks for all provided layers - collect INPUTS
-        def make_hook(name):
-            def hook(module, inp, out):
-                # inp is a tuple of inputs, typically (input_tensor,) for Linear/Conv2d
-                if len(inp) > 0 and inp[0] is not None:
-                    input_tensor = inp[0]
-                    
-                    # Store layer type
-                    if layer_type_dict[name] is None:
-                        layer_type_dict[name] = type(module).__name__
-                    
-                    # Handle different layer types
-                    if isinstance(module, nn.Conv2d):
-                        # For ALL Conv2d layers: treat each spatial position as a sample
-                        # Input: (B, C, H, W) -> (B*H*W, C)
-                        # This works for any kernel size and gives channel-wise statistics
-                        B, C, H, W = input_tensor.shape
-                        # Reshape to (B*H*W, C) - each spatial position is a sample
-                        reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
-                        buf_dict[name].append(reshaped.detach().cpu())  # Move to CPU immediately
-                    else:
-                        buf_dict[name].append(input_tensor.detach().view(input_tensor.size(0), -1).cpu())  # Move to CPU immediately
-            return hook
-        hooks = [layer_module.register_forward_hook(make_hook(layer_name)) for layer_name, layer_module in self.target_layers.items()]
+        # Register hooks - either raw collection or projection
+        if pca_components is None:
+            # Standard hook: collect raw activations
+            def make_hook(name):
+                def hook(module, inp, out):
+                    if len(inp) > 0 and inp[0] is not None:
+                        input_tensor = inp[0]
+                        
+                        if layer_type_dict[name] is None:
+                            layer_type_dict[name] = type(module).__name__
+                        
+                        # Handle different layer types
+                        if isinstance(module, nn.Conv2d):
+                            B, C, H, W = input_tensor.shape
+                            reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
+                            buf_dict[name].append(reshaped.detach().cpu())
+                        else:
+                            buf_dict[name].append(input_tensor.detach().view(input_tensor.size(0), -1).cpu())
+                return hook
+        else:
+            # Projection hook: project on GPU, store reduced representation
+            def make_hook(name):
+                mu = pca_components[name]['mu']
+                U_forget = pca_components[name]['U_forget']
+                
+                def hook(module, inp, out):
+                    if len(inp) > 0 and inp[0] is not None:
+                        input_tensor = inp[0]
+                        
+                        # Handle different layer types
+                        if isinstance(module, nn.Conv2d):
+                            B, C, H, W = input_tensor.shape
+                            reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
+                        else:
+                            reshaped = input_tensor.view(input_tensor.size(0), -1)
+                        
+                        # Project on GPU, then move to CPU
+                        centered = reshaped - mu
+                        projected = centered @ U_forget.T
+                        buf_dict[name].append(projected.detach().cpu())
+                return hook
+        
+        hooks = [layer_module.register_forward_hook(make_hook(layer_name)) 
+                for layer_name, layer_module in self.target_layers.items() 
+                if layer_name in layer_names]
         
         # Forward pass through all data
         with torch.no_grad():
@@ -352,15 +382,12 @@ class UnlearnIntervalProtection:
                 x = x.to(device)
                 c = c.to(device)
                 
-                # Apply data transform if provided (for diffusion models)
                 if data_transform_fn is not None:
                     x = data_transform_fn(x)
                 
-                # Sample random timesteps for diffusion model
                 t = torch.randint(low=0, high=num_timesteps, size=(n // 2 + 1,)).to(device)
                 t = torch.cat([t, num_timesteps - t - 1], dim=0)[:n]
                 
-                # Add diffusion noise if betas provided
                 if betas is not None:
                     e = torch.randn_like(x)
                     a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
@@ -368,7 +395,6 @@ class UnlearnIntervalProtection:
                 else:
                     x_noisy = x
                 
-                # Call diffusion model with required arguments
                 model(x_noisy, t.float(), c, mode="train")
         
         # Remove all hooks
@@ -376,95 +402,26 @@ class UnlearnIntervalProtection:
             h.remove()
         model.train()
 
-        # Return both activations and shapes, skip layers with no activations
+        # Return results
         result = {}
-        log.info(f"Collected input activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
+        mode = "projected" if pca_components else "raw"
+        log.info(f"Collected {mode} activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
+        
         for name in buf_dict:
             if len(buf_dict[name]) > 0:
-                # Activations are already on CPU from the hook
                 activations = torch.cat(buf_dict[name], dim=0)
-                result[name] = {
-                    'activations': activations,
-                    'layer_type': layer_type_dict[name]
-                }
-                log.info(f"  Layer {name}: {result[name]['activations'].shape}, type={layer_type_dict[name]}")
-            else:
-                log.warning(f"Skipping layer {name} - no activations collected (layer not executed)")
-        return result
-    
-    def _collect_projected_activations(self, model, pca_components: Dict, dataloader, device,
-                                       data_transform_fn=None, betas=None, num_timesteps=1000):
-        """
-        Collect activations and project them on-the-fly using pre-computed PCA components.
-        Returns dict of {layer_name: projected_activations} where projected_activations is [N, reduced_dim].
-        
-        This saves memory by storing only reduced-dimension projections instead of full activations.
-        """
-        model.eval()
-        projected_dict = {name: [] for name in pca_components.keys()}
-        hooks = []
-        
-        # Register hooks that project activations immediately
-        def make_projection_hook(layer_name, mu, U_forget):
-            def hook(module, inp, out):
-                if len(inp) > 0 and inp[0] is not None:
-                    input_tensor = inp[0]
-                    
-                    # Handle different layer types
-                    if isinstance(module, nn.Conv2d):
-                        B, C, H, W = input_tensor.shape
-                        reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
-                    else:
-                        reshaped = input_tensor.view(input_tensor.size(0), -1)
-                    
-                    # Project on GPU, then move to CPU
-                    centered = reshaped - mu
-                    projected = centered @ U_forget.T
-                    projected_dict[layer_name].append(projected.detach().cpu())
-            return hook
-        
-        # Register hooks with PCA components already on GPU
-        for layer_name, components in pca_components.items():
-            layer_module = self.target_layers[layer_name]
-            mu = components['mu']
-            U_forget = components['U_forget']
-            hook = layer_module.register_forward_hook(make_projection_hook(layer_name, mu, U_forget))
-            hooks.append(hook)
-        
-        # Forward pass through all data
-        with torch.no_grad():
-            for batch in dataloader:
-                x, c = batch
-                n = x.size(0)
-                x = x.to(device)
-                c = c.to(device)
                 
-                if data_transform_fn is not None:
-                    x = data_transform_fn(x)
-                
-                t = torch.randint(low=0, high=num_timesteps, size=(n // 2 + 1,)).to(device)
-                t = torch.cat([t, num_timesteps - t - 1], dim=0)[:n]
-                
-                if betas is not None:
-                    e = torch.randn_like(x)
-                    a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
-                    x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
+                if pca_components is None:
+                    result[name] = {
+                        'activations': activations,
+                        'layer_type': layer_type_dict[name]
+                    }
+                    log.info(f"  Layer {name}: {result[name]['activations'].shape}, type={layer_type_dict[name]}")
                 else:
-                    x_noisy = x
-                
-                model(x_noisy, t.float(), c, mode="train")
-        
-        # Remove hooks
-        for h in hooks:
-            h.remove()
-        model.train()
-        
-        # Concatenate projected activations
-        result = {}
-        for name, projections in projected_dict.items():
-            if len(projections) > 0:
-                result[name] = torch.cat(projections, dim=0)
-                log.info(f"  Projected layer {name}: {result[name].shape} (reduced from full activations)")
+                    result[name] = activations  # Already projected, just return tensor
+                    log.info(f"  Projected layer {name}: {activations.shape}")
+            else:
+                log.warning(f"Skipping layer {name} - no activations collected")
         
         return result
     
