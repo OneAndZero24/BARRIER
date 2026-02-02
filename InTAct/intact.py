@@ -247,7 +247,9 @@ class UnlearnIntervalProtection:
                     )
                     
                     weighted_responses = residual_responses * Sr.view(-1, 1, 1, 1)
-                    layer_loss = layer_loss + torch.norm(weighted_responses, p='fro').pow(2)
+                    # Normalize by number of activations (output elements)
+                    num_activations = weighted_responses.numel()
+                    layer_loss = layer_loss + torch.norm(weighted_responses, p='fro').pow(2) / num_activations
 
                 Uf_spatial = Uf.view(Uf.size(0), -1, 1, 1)
                 
@@ -288,7 +290,9 @@ class UnlearnIntervalProtection:
                 if Ur.size(0) > 0:
                     interference = delta_W @ Ur.T
                     weighted_interference = interference * Sr.unsqueeze(0)
-                    layer_loss = layer_loss + torch.norm(weighted_interference, p='fro').pow(2)
+                    # Normalize by number of activations (output elements)
+                    num_activations = weighted_interference.numel()
+                    layer_loss = layer_loss + torch.norm(weighted_interference, p='fro').pow(2) / num_activations
 
                 delta_f = delta_W @ Uf.T
                 dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
