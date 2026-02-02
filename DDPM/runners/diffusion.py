@@ -651,13 +651,6 @@ class Diffusion(object):
         model = torch.nn.DataParallel(model)
         model.load_state_dict(states[0], strict=True)
         
-        optimizer = get_optimizer(config, model.parameters())
-        criteria = torch.nn.MSELoss()
-        
-        if config.model.ema:
-            ema_helper = EMAHelper(mu=config.model.ema_rate)
-            ema_helper.register(model)
-        
         # Define target layers to protect (default: Linear layers or specific patterns)
         targets = getattr(config.training, 'targets', ['Linear'])
         
@@ -684,6 +677,15 @@ class Diffusion(object):
         
         # Freeze all parameters except target layers
         protection.freeze_non_target_params(model)
+
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+
+        optimizer = get_optimizer(config, trainable_params)
+        criteria = torch.nn.MSELoss()
+        
+        if config.model.ema:
+            ema_helper = EMAHelper(mu=config.model.ema_rate)
+            ema_helper.register(model)
         
         model.train()
         start = time.time()
