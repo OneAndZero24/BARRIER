@@ -76,7 +76,7 @@ model:
 # InTAct Training Configuration
 training:
   # Base method: ga, el, nsfw, esd
-  base_method: "ga"
+  base_method: "rl"
   
   # Standard training params
   batch_size: 8
@@ -103,7 +103,7 @@ training:
   reduced_dim: 32                # PCA dimension for efficiency
   infinity_scale: 20.0           # Scale for negative space intervals
   normalize_protection: true     # Normalize by number of layers
-  use_actual_bounds: false       # Use actual min/max from remain+forget
+  use_actual_bounds: true      # Use actual min/max from remain+forget
 
 # Data configuration
 data:
