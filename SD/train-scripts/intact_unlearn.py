@@ -29,6 +29,13 @@ from time import sleep
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from tqdm import tqdm
+
+# Add parent directories to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # For InTAct
+sys.path.insert(0, str(Path(__file__).parent.parent))  # For ldm and SD modules
+
+from InTAct.intact import UnlearnIntervalProtection
 from convertModels import savemodelDiffusers
 from dataset import (
     setup_forget_data,
@@ -38,11 +45,6 @@ from dataset import (
 )
 from diffusers import LMSDiscreteScheduler
 from ldm.models.diffusion.ddim import DDIMSampler
-from tqdm import tqdm
-
-# Add parent directories to path for InTAct import
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from InTAct.intact import UnlearnIntervalProtection
 
 logging.basicConfig(
     level=logging.INFO,
