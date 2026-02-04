@@ -12,10 +12,10 @@ InTAct adds interval protection loss on top of any base method:
     total_loss = base_loss + lambda_interval * intact_loss
 
 Usage:
-    python train-scripts/intact_unlearn.py --base_method ga --class_to_forget 0 --train_method xattn
-    python train-scripts/intact_unlearn.py --base_method rl --class_to_forget 0 --train_method full
-    python train-scripts/intact_unlearn.py --base_method nsfw --train_method xattn
-    python train-scripts/intact_unlearn.py --base_method esd --prompt "nudity" --train_method xattn
+    python train-scripts/intact_unlearn.py --base_method ga --class_to_forget 0 --targets to_q to_k to_v
+    python train-scripts/intact_unlearn.py --base_method rl --class_to_forget 0 --targets to_q to_k to_v
+    python train-scripts/intact_unlearn.py --base_method nsfw --targets attn1
+    python train-scripts/intact_unlearn.py --base_method esd --prompt "nudity" --targets to_q to_k to_v
 """
 
 import argparse
@@ -390,7 +390,6 @@ def compute_esd_loss(model, model_orig, sampler, word, emb_0, emb_p, emb_n,
 def intact_unlearn_class(
     class_to_forget,
     base_method,
-    train_method,
     alpha,
     batch_size,
     epochs,
@@ -413,7 +412,7 @@ def intact_unlearn_class(
     ddim_steps=50,
 ):
     """
-    InTAct unlearning for class forgetting (GA/EL methods).
+    InTAct unlearning for class forgetting (GA/RL methods).
     """
     log.info(f"InTAct Unlearning: base_method={base_method}, class={class_to_forget}, targets={targets}")
     
@@ -452,7 +451,8 @@ def intact_unlearn_class(
     model.train()
     
     losses = []
-    name = f"compvis-intact-{base_method}-class_{class_to_forget}-method_{train_method}-lambda_{lambda_interval}-epochs_{epochs}-lr_{lr}"
+    targets_str = "_".join(targets)
+    name = f"compvis-intact-{base_method}-class_{class_to_forget}-targets_{targets_str}-lambda_{lambda_interval}-epochs_{epochs}-lr_{lr}"
     
     # Training loop
     for epoch in range(epochs):
@@ -520,7 +520,6 @@ def intact_unlearn_class(
 
 
 def intact_unlearn_nsfw(
-    train_method,
     alpha,
     batch_size,
     epochs,
@@ -581,13 +580,14 @@ def intact_unlearn_nsfw(
     
     # Collect only trainable parameters from the actual diffusion model
     trainable_params = [p for p in model.model.diffusion_model.parameters() if p.requires_grad]
-    log.info(f"Training {len(trainable_params)} parameters")
+    log.info(f"Training {len(trainable_params)} parameters out of {sum(1 for _ in model.model.diffusion_model.parameters())} total")
     
     optimizer = torch.optim.Adam(trainable_params, lr=lr)
     model.train()
     
     losses = []
-    name = f"compvis-intact-nsfw-method_{train_method}-lambda_{lambda_interval}-lr_{lr}"
+    targets_str = "_".join(targets)
+    name = f"compvis-intact-nsfw-targets_{targets_str}-lambda_{lambda_interval}-lr_{lr}"
     
     # Training loop
     for epoch in range(epochs):
@@ -631,7 +631,6 @@ def intact_unlearn_nsfw(
 
 def intact_unlearn_esd(
     prompt,
-    train_method,
     start_guidance,
     negative_guidance,
     iterations,
@@ -731,7 +730,7 @@ def intact_unlearn_esd(
     
     # Collect only trainable parameters from the actual diffusion model
     trainable_params = [p for p in model.model.diffusion_model.parameters() if p.requires_grad]
-    log.info(f"Training {len(trainable_params)} parameters")
+    log.info(f"Training {len(trainable_params)} parameters out of {sum(1 for _ in model.model.diffusion_model.parameters())} total")
     
     model.train()
     
@@ -739,7 +738,8 @@ def intact_unlearn_esd(
     opt = torch.optim.Adam(trainable_params, lr=lr)
     criteria = torch.nn.MSELoss()
     
-    name = f"compvis-intact-esd-method_{train_method}-lambda_{lambda_interval}-lr_{lr}"
+    targets_str = "_".join(targets)
+    name = f"compvis-intact-esd-prompt_{word_print}-targets_{targets_str}-lambda_{lambda_interval}-lr_{lr}"
     
     quick_sample_till_t = lambda x, s, code, t: sample_model(
         model, sampler, x, image_size, image_size, ddim_steps, s, ddim_eta,
@@ -865,8 +865,6 @@ if __name__ == "__main__":
     )
     
     # Common parameters
-    parser.add_argument("--train_method", type=str, required=True,
-                        help="Layer selection: xattn, selfattn, full, noxattn, notime")
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--ckpt_path", type=str, 
                         default="models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt")
@@ -878,7 +876,7 @@ if __name__ == "__main__":
     parser.add_argument("--image_size", type=int, default=512)
     parser.add_argument("--ddim_steps", type=int, default=50)
     
-    # GA/EL specific
+    # GA/RL specific
     parser.add_argument("--class_to_forget", type=str, default="0")
     parser.add_argument("--alpha", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=8)
@@ -896,7 +894,7 @@ if __name__ == "__main__":
     # InTAct parameters
     parser.add_argument("--targets", type=str, nargs="+",
                         default=["to_q", "to_k", "to_v"],
-                        help="Target layer patterns for protection (cross-attn QKV by default)")
+                        help="Target layer patterns for protection (e.g., to_q to_k to_v for cross-attn QKV)")
     parser.add_argument("--lambda_interval", type=float, default=1.0,
                         help="Weight for InTAct protection loss")
     parser.add_argument("--lower_percentile", type=float, default=0.05)
@@ -929,7 +927,6 @@ if __name__ == "__main__":
         intact_unlearn_class(
             class_to_forget=int(args.class_to_forget),
             base_method=args.base_method,
-            train_method=args.train_method,
             alpha=args.alpha,
             batch_size=args.batch_size,
             epochs=args.epochs,
@@ -945,7 +942,6 @@ if __name__ == "__main__":
     
     elif args.base_method == "nsfw":
         intact_unlearn_nsfw(
-            train_method=args.train_method,
             alpha=args.alpha,
             batch_size=args.batch_size,
             epochs=args.epochs,
@@ -967,7 +963,6 @@ if __name__ == "__main__":
         
         intact_unlearn_esd(
             prompt=args.prompt,
-            train_method=args.train_method,
             start_guidance=args.start_guidance,
             negative_guidance=args.negative_guidance,
             iterations=args.iterations,

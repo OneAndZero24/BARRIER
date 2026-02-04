@@ -81,6 +81,8 @@ python train.py --config configs/cifar10_intact.yml
 
 ### Stable Diffusion
 
+#### Training
+
 ```bash
 cd SD
 
@@ -90,27 +92,65 @@ cd SD
 python train-scripts/intact_unlearn.py \
     --base_method ga \
     --class_to_forget 0 \
-    --train_method xattn \
+    --targets to_q to_k to_v \
     --lambda_interval 1.0 \
-    --targets to_q to_k to_v
+    --epochs 5
 
-# Random Label + InTAct
+# Random Label + InTAct (cross-attention only)
 python train-scripts/intact_unlearn.py \
     --base_method rl \
     --class_to_forget 0 \
-    --train_method xattn
+    --targets to_q to_k to_v
 
-# NSFW removal + InTAct
+# NSFW removal + InTAct (self-attention)
 python train-scripts/intact_unlearn.py \
     --base_method nsfw \
-    --train_method xattn
+    --targets attn1
 
-# ESD (prompt-based) + InTAct
+# ESD (prompt-based) + InTAct (full attention)
 python train-scripts/intact_unlearn.py \
     --base_method esd \
     --prompt "nudity" \
-    --train_method xattn \
+    --targets to_q to_k to_v attn1 \
     --iterations 1000
+```
+
+**Target Layer Patterns:**
+
+| Pattern | Layers | Description | Equivalent to old `train_method` |
+|---------|--------|-------------|----------------------------------|
+| `to_q to_k to_v` | Cross-attention QKV | Text-image interaction | `xattn` |
+| `attn1` | Self-attention | Spatial relationships | `selfattn` |
+| `to_q to_k to_v attn1` | All attention | Full attention | `full` (attention only) |
+| *(all patterns)* | All UNet layers | Complete model | `full` |
+
+#### Image Generation
+
+After training, generate images from the unlearned model:
+
+```bash
+# Generate images for evaluation
+python eval-scripts/generate-images.py \
+    --model_name "compvis-intact-ga-class_0-targets_to_q_to_k_to_v-lambda_1.0-epochs_5-lr_1e-05" \
+    --prompts_path "prompts/imagenette.csv" \
+    --save_path "evaluation/intact_ga_class0/" \
+    --num_samples 10 \
+    --device cuda:0
+```
+
+The script expects models saved in: `SD/models/{model_name}/diffusers-{model_name}.pt`
+
+**Evaluation:**
+
+```bash
+# Compute FID score
+python eval-scripts/compute-fid.py \
+    --folder_path "evaluation/intact_ga_class0/"
+
+# Check classification accuracy
+python eval-scripts/imageclassify.py \
+    --prompts_path "prompts/imagenette.csv" \
+    --folder_path "evaluation/intact_ga_class0/"
 ```
 
 **SD Base Methods:**
@@ -144,6 +184,10 @@ InTAct-Unl/
 │   ├── train-scripts/
 │   │   ├── intact_unlearn.py  # SD InTAct (GA, RL, NSFW, ESD)
 │   │   └── ...
+│   ├── eval-scripts/
+│   │   ├── generate-images.py # Generate images from trained models
+│   │   ├── compute-fid.py     # FID evaluation
+│   │   └── imageclassify.py   # Classification accuracy
 │   ├── configs/
 │   │   └── stable-diffusion/v1-intact.yaml
 │   └── ...
