@@ -25,7 +25,7 @@ from models.ema import EMAHelper
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 
-from InTAct.intact import UnlearnIntervalProtection
+from InTAct.intact import UnlearnIntervalProtection, ddpm_forward_fn
 
 
 def torch2hwcuint8(x, clip=False):
@@ -670,6 +670,7 @@ class Diffusion(object):
         protection.setup_protection(
             model, D_forget_loader, self.device, 
             remain_dataloader=remain_loader,
+            forward_fn=ddpm_forward_fn,
             data_transform_fn=lambda x: data_transform(self.config, x),
             betas=self.betas,
             num_timesteps=self.num_timesteps

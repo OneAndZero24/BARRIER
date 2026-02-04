@@ -1,11 +1,58 @@
 import logging
 import torch
 import torch.nn as nn
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable
 
 log = logging.getLogger(__name__)
 
+
+# ============================================================================
+# Forward Functions for Different Model Types
+# ============================================================================
+
+def ddpm_forward_fn(model, batch, device, data_transform_fn=None, betas=None, num_timesteps=1000):
+    """
+    Forward function for DDPM models.
+    Expects batch = (x, c) where x is images and c is class labels.
+    """
+    x, c = batch
+    n = x.size(0)
+    x = x.to(device)
+    c = c.to(device)
+    
+    if data_transform_fn is not None:
+        x = data_transform_fn(x)
+    
+    t = torch.randint(low=0, high=num_timesteps, size=(n // 2 + 1,)).to(device)
+    t = torch.cat([t, num_timesteps - t - 1], dim=0)[:n]
+    
+    if betas is not None:
+        e = torch.randn_like(x)
+        a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+        x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
+    else:
+        x_noisy = x
+    
+    model(x_noisy, t.float(), c, mode="train")
+
+
+def classification_forward_fn(model, batch, device, **kwargs):
+    """
+    Forward function for classification models.
+    Expects batch = (x, y) where x is images and y is labels.
+    """
+    x, y = batch[:2]
+    x = x.to(device)
+    model(x)
+
+
 class UnlearnIntervalProtection:
+    """
+    InTAct (Interval-based Task Activation Consolidation) for machine unlearning.
+    
+    Protects model activations by constraining them to safe intervals during unlearning,
+    preventing catastrophic forgetting on retain data.
+    """
     def __init__(
         self,
         targets: List[str],
@@ -32,10 +79,24 @@ class UnlearnIntervalProtection:
         self.param_to_name: Dict[nn.Parameter, str] = {}  # Maps parameter -> name
 
     def setup_protection(self, model: nn.Module, forget_dataloader, device, remain_dataloader=None,
-                        data_transform_fn=None, betas=None, num_timesteps=1000):
+                        forward_fn: Callable = None, data_transform_fn=None, betas=None, num_timesteps=1000):
         """
         Populates: pca_info, params_snapshot
+        
+        Args:
+            model: The model to protect
+            forget_dataloader: DataLoader for forget data
+            device: Device to run on
+            remain_dataloader: Optional DataLoader for remain data (used with use_actual_bounds)
+            forward_fn: Function to call model forward. Signature: forward_fn(model, batch, device, **kwargs)
+                       If None, uses ddpm_forward_fn as default for backward compatibility.
+            data_transform_fn: Optional transform for input data
+            betas: Noise schedule betas (for diffusion models)
+            num_timesteps: Number of diffusion timesteps
         """
+        # Default to DDPM forward for backward compatibility
+        if forward_fn is None:
+            forward_fn = ddpm_forward_fn
 
         log.info("Setting up InTAct with Mean Reparametrization...")
         
@@ -51,7 +112,8 @@ class UnlearnIntervalProtection:
         # 1. Collect input activations from target layers (forget data)
         acts_dict = self._collect_activations(
             model, target_names, forget_dataloader, device,
-            data_transform_fn, betas, num_timesteps
+            forward_fn=forward_fn,
+            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps
         )
         
         # 2. Compute SVD on forget data and optionally collect projected remain data
@@ -124,7 +186,8 @@ class UnlearnIntervalProtection:
             log.info("Collecting and projecting remain data on-the-fly...")
             remain_projected = self._collect_activations(
                 model, list(pca_components.keys()), remain_dataloader, device,
-                data_transform_fn, betas, num_timesteps,
+                forward_fn=forward_fn,
+                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
                 pca_components=pca_components  # Enable projection mode
             )
             
@@ -318,15 +381,20 @@ class UnlearnIntervalProtection:
         return self.lambda_interval * total_loss
 
     def _collect_activations(self, model, layer_names: List[str], dataloader, device,
+                            forward_fn: Callable = None,
                             data_transform_fn=None, betas=None, num_timesteps=1000,
                             pca_components: Optional[Dict] = None):
         """
         Collect activations with optional on-the-fly projection.
         
         Args:
+            forward_fn: Function to call model forward. Signature: forward_fn(model, batch, device, **kwargs)
             pca_components: If provided, project activations using {layer_name: {'mu': ..., 'U_forget': ...}}
                            Returns projected [N, reduced_dim] instead of full [N, feature_dim]
         """
+        if forward_fn is None:
+            forward_fn = ddpm_forward_fn
+            
         model.eval()
         buf_dict = {name: [] for name in layer_names}
         layer_type_dict = {name: None for name in layer_names}
@@ -378,28 +446,13 @@ class UnlearnIntervalProtection:
                 for layer_name, layer_module in self.target_layers.items() 
                 if layer_name in layer_names]
         
-        # Forward pass through all data
+        # Forward pass through all data using provided forward function
         with torch.no_grad():
             for batch in dataloader:
-                x, c = batch
-                n = x.size(0)
-                x = x.to(device)
-                c = c.to(device)
-                
-                if data_transform_fn is not None:
-                    x = data_transform_fn(x)
-                
-                t = torch.randint(low=0, high=num_timesteps, size=(n // 2 + 1,)).to(device)
-                t = torch.cat([t, num_timesteps - t - 1], dim=0)[:n]
-                
-                if betas is not None:
-                    e = torch.randn_like(x)
-                    a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
-                    x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
-                else:
-                    x_noisy = x
-                
-                model(x_noisy, t.float(), c, mode="train")
+                forward_fn(model, batch, device, 
+                          data_transform_fn=data_transform_fn, 
+                          betas=betas, 
+                          num_timesteps=num_timesteps)
         
         # Remove all hooks
         for h in hooks:
@@ -459,65 +512,3 @@ class UnlearnIntervalProtection:
         log.info(f"Found {len(target_names)} target layers matching patterns: {self.targets}")
         
         return target_names
-
-# For Classification:
-
-def intact_train_epoch(
-    model, optimizer, criterion, forget_loader, device,
-    interval_protection: Optional[UnlearnIntervalProtection] = None,
-):
-    model.train()
-    total_loss = total_unlearn = total_protect = 0.0
-    n = 0
-
-    for batch in forget_loader:
-        X, y = batch[:2]
-        X, y = X.to(device), y.to(device)
-
-        out = model(X)
-        # Unlearning via Gradient Ascent (Negative Loss)
-        unlearn_loss = -criterion(out, y) 
-
-        protect_loss = (
-            interval_protection.compute_protection_loss(model, device)
-            if interval_protection else torch.tensor(0.0, device=device)
-        )
-
-        loss = unlearn_loss + protect_loss
-        
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item()
-        total_unlearn += unlearn_loss.item()
-        total_protect += protect_loss.item()
-        n += 1
-
-    return total_loss / n, total_unlearn / n, total_protect / n
-
-def intact_unlearn(
-    model, forget_loader, criterion, optimizer, num_epochs, device,
-    lambda_interval=10.0, lower_percentile=0.05, upper_percentile=0.95, reduced_dim=32,
-    infinity_scale=20
-):
-    protection = UnlearnIntervalProtection(
-        lambda_interval=lambda_interval,
-        lower_percentile=lower_percentile,
-        upper_percentile=upper_percentile,
-        reduced_dim=reduced_dim,
-        infinity_scale=infinity_scale
-    )
-
-    protection.setup_protection(model, forget_loader, device)
-    
-    # Freeze all parameters except target layers
-    protection.freeze_non_target_params(model)
-
-    for epoch in range(num_epochs):
-        loss, unlearn, protect = intact_train_epoch(
-            model, optimizer, criterion, forget_loader, device, protection
-        )
-        log.info(f"Epoch {epoch+1}/{num_epochs} | loss={loss:.4f} unlearn={unlearn:.4f} protect={protect:.4f}")
-
-    return model

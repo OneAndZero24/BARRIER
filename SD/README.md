@@ -77,3 +77,70 @@ The unlearned weights for NSFW and object forgetting are available [here](https:
    ```
    python train-scripts/nsfw_removal.py --train_method 'full' --mask_path 'mask/nude_0.5.pt' --device '0'
    ```
+
+# InTAct Unlearning
+
+InTAct (Interval Protection) unlearning adds protection loss to preserve model performance on retain data while unlearning forget concepts. It is composable with all existing base methods (GA, RL, NSFW, ESD).
+
+## Usage
+
+InTAct targets cross-attention Q/K/V projections (`to_q`, `to_k`, `to_v`) by default. You can customize targets via `--targets`.
+
+1. **InTAct + Gradient Ascent (class forgetting)**:
+   ```bash
+   python train-scripts/intact_unlearn.py \
+       --base_method ga \
+       --class_to_forget 0 \
+       --train_method xattn \
+       --lambda_interval 1.0 \
+       --epochs 5 \
+       --device 0
+   ```
+
+2. **InTAct + Random Label (class forgetting)**:
+   ```bash
+   python train-scripts/intact_unlearn.py \
+       --base_method rl \
+       --class_to_forget 0 \
+       --train_method xattn \
+       --lambda_interval 1.0 \
+       --epochs 5 \
+       --device 0
+   ```
+
+3. **InTAct + NSFW removal**:
+   ```bash
+   python train-scripts/intact_unlearn.py \
+       --base_method nsfw \
+       --train_method xattn \
+       --lambda_interval 1.0 \
+       --device 0
+   ```
+
+4. **InTAct + ESD (prompt-based)**:
+   ```bash
+   python train-scripts/intact_unlearn.py \
+       --base_method esd \
+       --prompt "nudity" \
+       --train_method xattn \
+       --lambda_interval 1.0 \
+       --iterations 1000 \
+       --devices 0,0
+   ```
+
+## InTAct Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--targets` | `["to_q", "to_k", "to_v"]` | Target layer patterns for protection (cross-attention QKV) |
+| `--lambda_interval` | `1.0` | Weight for InTAct protection loss |
+| `--lower_percentile` | `0.05` | Lower bound for activation safe zone |
+| `--upper_percentile` | `0.95` | Upper bound for activation safe zone |
+| `--reduced_dim` | `32` | PCA dimension for efficiency |
+| `--infinity_scale` | `20.0` | Scale for infinity bounds |
+| `--use_actual_bounds` | `False` | Use actual min/max from remain+forget data |
+| `--normalize_protection` | `True` | Normalize protection loss by number of layers |
+
+## Config File
+
+A sample config is provided at `configs/stable-diffusion/v1-intact.yaml`.
