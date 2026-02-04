@@ -58,6 +58,7 @@ Please follow instructions from each subfolder.
 
 ```bash
 cd Classification
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
 
 # Forget class 0 (airplane)
 python intact_experiment.py --unlearn_classes 0 --lambda_interval 100.0
