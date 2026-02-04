@@ -10,6 +10,8 @@ dependencies:
   - pip:
       # ---- Core numeric stack ----
       - numpy==1.26.4
+      - pyarrow==14.0.2
+      - matplotlib==3.8.0
 
       # ---- PyTorch (CUDA bundled, H100 compatible) ----
       - torch==2.1.2
