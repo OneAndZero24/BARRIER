@@ -94,7 +94,11 @@ python train-scripts/intact_unlearn.py \
     --class_to_forget 0 \
     --targets to_q to_k to_v \
     --lambda_interval 1.0 \
-    --epochs 5
+    --epochs 5 \
+    --ckpt_path models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt \
+    --config_path configs/stable-diffusion/v1-inference.yaml \
+    --diffusers_config_path diffusers_unet_config.json \
+    --device 0
 
 # Random Label + InTAct (cross-attention only)
 python train-scripts/intact_unlearn.py \

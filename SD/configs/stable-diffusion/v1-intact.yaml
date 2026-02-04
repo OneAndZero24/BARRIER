@@ -111,7 +111,7 @@ data:
   
 # What to forget
 forget:
-  # For class-based forgetting (ga, el methods)
+  # For class-based forgetting (ga, rl methods)
   class_to_forget: 0
   
   # For prompt-based forgetting (esd method)
