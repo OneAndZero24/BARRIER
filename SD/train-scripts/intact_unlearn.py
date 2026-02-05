@@ -65,18 +65,19 @@ def sd_forward_fn(model, batch, device, prompts=None, data_transform_fn=None, be
     
     Args:
         model: Full SD model (LatentDiffusion) - needed for get_input()
-        batch: Tuple of (images, labels) from standard dataloader
+        batch: Either tuple (images, labels) or list of (image, label) tuples
         device: CUDA device
         prompts: List of text prompts (indexed by labels)
         betas: Noise schedule betas tensor
         num_timesteps: Number of diffusion timesteps
     """
-    # Unpack batch
-    if isinstance(batch, tuple):
-        images, labels = batch[0], batch[1]
+    # Handle DataLoader wrapping a list - batch is list of tuples [(img, lbl), ...]
+    if isinstance(batch, list):
+        images = torch.stack([item[0] for item in batch])
+        labels = torch.tensor([item[1] for item in batch])
     else:
-        images = batch
-        labels = None
+        # Batch is tuple (images, labels) from proper Dataset
+        images, labels = batch
     
     images = images.to(device)
     n = images.size(0)
