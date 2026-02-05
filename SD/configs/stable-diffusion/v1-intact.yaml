@@ -95,12 +95,12 @@ training:
   # InTAct-specific parameters
   # Target cross-attention Q/K/V projections in SD's UNet
   # These are nn.Linear layers inside CrossAttention modules
-  targets: ["attn2.to_q", "attn2.to_k", "attn2.to_v"]
+  targets: ['middle_block.1.transformer_blocks.0.attn2.to_q', 'middle_block.1.transformer_blocks.0.attn2.to_k', 'middle_block.1.transformer_blocks.0.attn2.to_v',]
   
   lambda_interval: 1.0           # Protection loss weight
   lower_percentile: 0.05         # Activation safe zone lower bound
   upper_percentile: 0.95         # Activation safe zone upper bound
-  reduced_dim: 32                # PCA dimension for efficiency
+  reduced_dim: 32                # SVD dimension for efficiency
   infinity_scale: 20.0           # Scale for negative space intervals
   normalize_protection: true     # Normalize by number of layers
   use_actual_bounds: true      # Use actual min/max from remain+forget

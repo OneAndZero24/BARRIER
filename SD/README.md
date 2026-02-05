@@ -136,7 +136,7 @@ InTAct targets cross-attention Q/K/V projections (`to_q`, `to_k`, `to_v`) by def
 | `--lambda_interval` | `1.0` | Weight for InTAct protection loss |
 | `--lower_percentile` | `0.05` | Lower bound for activation safe zone |
 | `--upper_percentile` | `0.95` | Upper bound for activation safe zone |
-| `--reduced_dim` | `32` | PCA dimension for efficiency |
+| `--reduced_dim` | `32` | SVD dimension for efficiency |
 | `--infinity_scale` | `20.0` | Scale for infinity bounds |
 | `--use_actual_bounds` | `False` | Use actual min/max from remain+forget data |
 | `--normalize_protection` | `True` | Normalize protection loss by number of layers |
