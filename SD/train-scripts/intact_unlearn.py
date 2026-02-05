@@ -23,6 +23,7 @@ import logging
 import os
 import random
 import sys
+from functools import partial
 from pathlib import Path
 from time import sleep
 
@@ -230,13 +231,8 @@ def setup_intact_protection(
         normalize_protection=normalize_protection,
     )
     
-    # Get betas from model for noising schedule
-    betas = model.betas.to(device) if hasattr(model, 'betas') else None
-    num_timesteps = model.num_timesteps if hasattr(model, 'num_timesteps') else 1000
-    
-    # Create forward function with prompts captured via closure
-    def forward_fn(m, batch, dev, **kwargs):
-        return sd_forward_fn(model, batch, dev, prompts=descriptions, betas=betas, num_timesteps=num_timesteps, **kwargs)
+    # Create forward function with prompts pre-bound
+    forward_fn = partial(sd_forward_fn, prompts=descriptions)
     
     # Setup protection on diffusion_model, but pass raw dataloaders
     protection.setup_protection(
@@ -245,6 +241,8 @@ def setup_intact_protection(
         device,
         remain_dataloader=remain_dl,
         forward_fn=forward_fn,
+        betas=model.betas.to(device) if hasattr(model, 'betas') else None,
+        num_timesteps=model.num_timesteps if hasattr(model, 'num_timesteps') else 1000,
     )
     
     return protection
