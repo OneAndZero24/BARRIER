@@ -228,7 +228,9 @@ def setup_intact_protection(
     )
     
     # Create forward function with prompts pre-bound
-    forward_fn = partial(sd_forward_fn, prompts=descriptions)
+    # Note: Capture full model for encoding, but forward_fn receives diffusion_model
+    def forward_fn(diffusion_model, batch, dev, **kwargs):
+        return sd_forward_fn(model, batch, dev, prompts=descriptions, **kwargs)
     
     # Setup protection on diffusion_model, but pass raw dataloaders
     protection.setup_protection(
