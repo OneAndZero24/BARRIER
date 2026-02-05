@@ -30,6 +30,7 @@ from time import sleep
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 from tqdm import tqdm
 
 # Add parent directories to path
@@ -52,6 +53,20 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 log = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Config Loading
+# ============================================================================
+
+def load_training_config(config_path):
+    """Load training configuration from YAML file."""
+    if config_path and os.path.exists(config_path):
+        config = OmegaConf.load(config_path)
+        if hasattr(config, 'training'):
+            log.info(f"Loaded training config from {config_path}")
+            return config.training
+    return None
 
 
 # ============================================================================
@@ -858,16 +873,17 @@ if __name__ == "__main__":
         "--base_method",
         help="Base unlearning method: ga, rl, nsfw, esd",
         type=str,
-        required=True,
+        required=False,
+        default=None,
         choices=["ga", "rl", "nsfw", "esd"],
     )
     
     # Common parameters
-    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--ckpt_path", type=str, 
                         default="models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt")
     parser.add_argument("--config_path", type=str,
-                        default="configs/stable-diffusion/v1-inference.yaml")
+                        default="configs/stable-diffusion/v1-intact.yaml")
     parser.add_argument("--diffusers_config_path", type=str,
                         default="diffusers_unet_config.json")
     parser.add_argument("--device", type=str, default="0")
@@ -875,60 +891,111 @@ if __name__ == "__main__":
     parser.add_argument("--ddim_steps", type=int, default=50)
     
     # GA/RL specific
-    parser.add_argument("--class_to_forget", type=str, default="0")
-    parser.add_argument("--alpha", type=float, default=0.1)
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--class_to_forget", type=str, default=None)
+    parser.add_argument("--alpha", type=float, default=None)
+    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--epochs", type=int, default=None)
     
     # ESD specific
     parser.add_argument("--prompt", type=str, default=None)
-    parser.add_argument("--start_guidance", type=float, default=3.0)
-    parser.add_argument("--negative_guidance", type=float, default=1.0)
-    parser.add_argument("--iterations", type=int, default=1000)
+    parser.add_argument("--start_guidance", type=float, default=None)
+    parser.add_argument("--negative_guidance", type=float, default=None)
+    parser.add_argument("--iterations", type=int, default=None)
     parser.add_argument("--devices", type=str, default="0,0",
                         help="Two devices for ESD: training,frozen model")
     parser.add_argument("--seperator", type=str, default=None)
     
     # InTAct parameters
     parser.add_argument("--targets", type=str, nargs="+",
-                        default=["to_q", "to_k", "to_v"],
+                        default=None,
                         help="Target layer patterns for protection (e.g., to_q to_k to_v for cross-attn QKV)")
-    parser.add_argument("--lambda_interval", type=float, default=1.0,
+    parser.add_argument("--lambda_interval", type=float, default=None,
                         help="Weight for InTAct protection loss")
-    parser.add_argument("--lower_percentile", type=float, default=0.05)
-    parser.add_argument("--upper_percentile", type=float, default=0.95)
-    parser.add_argument("--reduced_dim", type=int, default=32)
-    parser.add_argument("--infinity_scale", type=float, default=20.0)
+    parser.add_argument("--lower_percentile", type=float, default=None)
+    parser.add_argument("--upper_percentile", type=float, default=None)
+    parser.add_argument("--reduced_dim", type=int, default=None)
+    parser.add_argument("--infinity_scale", type=float, default=None)
     parser.add_argument("--use_actual_bounds", action="store_true",
                         help="Use actual min/max from remain+forget instead of scaled bounds")
-    parser.add_argument("--normalize_protection", action="store_true", default=True)
+    parser.add_argument("--normalize_protection", action="store_true", default=None)
     
     args = parser.parse_args()
+    
+    # Load training config from YAML file
+    training_config = load_training_config(args.config_path)
+    
+    # Merge config with command-line args (args override config)
+    def get_param(arg_val, config_key, default):
+        """Get parameter from args (priority), then config, then default."""
+        if arg_val is not None:
+            return arg_val
+        if training_config and hasattr(training_config, config_key):
+            return getattr(training_config, config_key)
+        return default
+    
+    # Extract parameters with fallbacks
+    base_method = get_param(args.base_method, 'base_method', 'rl')
+    lr = get_param(args.lr, 'lr', 1e-5)
+    alpha = get_param(args.alpha, 'alpha', 0.1)
+    batch_size = get_param(args.batch_size, 'batch_size', 8)
+    epochs = get_param(args.epochs, 'epochs', 5)
+    
+    # ESD params
+    start_guidance = get_param(args.start_guidance, 'start_guidance', 3.0)
+    negative_guidance = get_param(args.negative_guidance, 'negative_guidance', 1.0)
+    iterations = get_param(args.iterations, 'iterations', 1000)
+    
+    # InTAct params
+    targets = get_param(args.targets, 'targets', ['to_q', 'to_k', 'to_v'])
+    lambda_interval = get_param(args.lambda_interval, 'lambda_interval', 1.0)
+    lower_percentile = get_param(args.lower_percentile, 'lower_percentile', 0.05)
+    upper_percentile = get_param(args.upper_percentile, 'upper_percentile', 0.95)
+    reduced_dim = get_param(args.reduced_dim, 'reduced_dim', 32)
+    infinity_scale = get_param(args.infinity_scale, 'infinity_scale', 20.0)
+    use_actual_bounds = args.use_actual_bounds if args.use_actual_bounds else get_param(None, 'use_actual_bounds', False)
+    normalize_protection = get_param(args.normalize_protection, 'normalize_protection', True)
+    
+    # Forget config
+    class_to_forget = args.class_to_forget
+    if class_to_forget is None and training_config and hasattr(training_config, 'forget'):
+        if hasattr(training_config.forget, 'class_to_forget'):
+            class_to_forget = str(training_config.forget.class_to_forget)
+    if class_to_forget is None:
+        class_to_forget = '0'
+    
+    prompt = args.prompt
+    if prompt is None and training_config and hasattr(training_config, 'forget'):
+        if hasattr(training_config.forget, 'prompt'):
+            prompt = training_config.forget.prompt
+    
+    log.info(f"Configuration loaded: base_method={base_method}, targets={targets}")
+    log.info(f"  lambda_interval={lambda_interval}, lr={lr}, alpha={alpha}")
+    log.info(f"  class_to_forget={class_to_forget}, prompt={prompt}")
     
     # Device setup
     device = f"cuda:{args.device}"
     
     # InTAct common params
     intact_params = {
-        "targets": args.targets,
-        "lambda_interval": args.lambda_interval,
-        "lower_percentile": args.lower_percentile,
-        "upper_percentile": args.upper_percentile,
-        "reduced_dim": args.reduced_dim,
-        "infinity_scale": args.infinity_scale,
-        "use_actual_bounds": args.use_actual_bounds,
-        "normalize_protection": args.normalize_protection,
+        "targets": targets,
+        "lambda_interval": lambda_interval,
+        "lower_percentile": lower_percentile,
+        "upper_percentile": upper_percentile,
+        "reduced_dim": reduced_dim,
+        "infinity_scale": infinity_scale,
+        "use_actual_bounds": use_actual_bounds,
+        "normalize_protection": normalize_protection,
     }
     
     # Run appropriate method
-    if args.base_method in ["ga", "rl"]:
+    if base_method in ["ga", "rl"]:
         intact_unlearn_class(
-            class_to_forget=int(args.class_to_forget),
-            base_method=args.base_method,
-            alpha=args.alpha,
-            batch_size=args.batch_size,
-            epochs=args.epochs,
-            lr=args.lr,
+            class_to_forget=int(class_to_forget),
+            base_method=base_method,
+            alpha=alpha,
+            batch_size=batch_size,
+            epochs=epochs,
+            lr=lr,
             config_path=args.config_path,
             ckpt_path=args.ckpt_path,
             diffusers_config_path=args.diffusers_config_path,
@@ -940,10 +1007,10 @@ if __name__ == "__main__":
     
     elif args.base_method == "nsfw":
         intact_unlearn_nsfw(
-            alpha=args.alpha,
-            batch_size=args.batch_size,
-            epochs=args.epochs,
-            lr=args.lr,
+            alpha=alpha,
+            batch_size=batch_size,
+            epochs=epochs,
+            lr=lr,
             config_path=args.config_path,
             ckpt_path=args.ckpt_path,
             diffusers_config_path=args.diffusers_config_path,
@@ -954,17 +1021,17 @@ if __name__ == "__main__":
         )
     
     elif args.base_method == "esd":
-        if args.prompt is None:
+        if prompt is None:
             raise ValueError("--prompt is required for ESD base method")
         
         devices = [f"cuda:{d.strip()}" for d in args.devices.split(",")]
         
         intact_unlearn_esd(
-            prompt=args.prompt,
-            start_guidance=args.start_guidance,
-            negative_guidance=args.negative_guidance,
-            iterations=args.iterations,
-            lr=args.lr,
+            prompt=prompt,
+            start_guidance=start_guidance,
+            negative_guidance=negative_guidance,
+            iterations=iterations,
+            lr=lr,
             config_path=args.config_path,
             ckpt_path=args.ckpt_path,
             diffusers_config_path=args.diffusers_config_path,
