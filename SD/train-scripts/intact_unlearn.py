@@ -71,14 +71,9 @@ def sd_forward_fn(model, batch, device, prompts=None, data_transform_fn=None, be
         betas: Noise schedule betas tensor
         num_timesteps: Number of diffusion timesteps
     """
-    # Handle DataLoader wrapping a list - batch is list of tuples [(img, lbl), ...]
-    if isinstance(batch, list):
-        images = torch.stack([item[0] for item in batch])
-        labels = torch.tensor([item[1] for item in batch])
-    else:
-        # Batch is tuple (images, labels) from proper Dataset
-        images, labels = batch
+    images, labels = batch
     
+    images = torch.stack([item for item in images])
     images = images.to(device)
     n = images.size(0)
     
