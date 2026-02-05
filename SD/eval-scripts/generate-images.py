@@ -23,6 +23,8 @@ def generate_images(
     ddim_steps=100,
     num_samples=10,
     from_case=0,
+    base_model_path="CompVis/stable-diffusion-v1-4",
+    base_config_path=None,
 ):
     """
     Function to generate images from diffusers code
@@ -59,30 +61,75 @@ def generate_images(
 
     """
 
-    # 1. Load the autoencoder model which will be used to decode the latents into image space.
-    vae = AutoencoderKL.from_pretrained(
-        "CompVis/stable-diffusion-v1-4", subfolder="vae"
-    )
-    # 2. Load the tokenizer and text encoder to tokenize and encode the text.
-    tokenizer = CLIPTokenizer.from_pretrained(
-        "CompVis/stable-diffusion-v1-4", subfolder="tokenizer"
-    )
-    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
-    # 3. The UNet model for generating the latents.
-    unet = UNet2DConditionModel.from_pretrained(
-        "CompVis/stable-diffusion-v1-4", subfolder="unet"
-    )
-    if "SD" not in model_name:
+    # Load base model components
+    print(f"Loading models from base: {base_model_path}")
+    
+    # Check if base_model_path is a checkpoint file
+    if base_model_path.endswith('.ckpt'):
+        print("Loading from checkpoint format...")
+        if base_config_path is None:
+            raise ValueError("base_config_path required when loading from .ckpt")
+        
+        # Need to convert checkpoint to diffusers format
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'train-scripts'))
+        from convertModels import (
+            create_unet_diffusers_config,
+            create_vae_diffusers_config,
+            convert_ldm_unet_checkpoint,
+            convert_ldm_vae_checkpoint,
+        )
+        from omegaconf import OmegaConf
+        
+        checkpoint = torch.load(base_model_path, map_location="cpu")
+        if "state_dict" in checkpoint:
+            checkpoint = checkpoint["state_dict"]
+        
+        original_config = OmegaConf.load(base_config_path)
+        
+        # Create and load VAE
+        vae_config = create_vae_diffusers_config(original_config, image_size=image_size)
+        vae = AutoencoderKL(**vae_config)
+        converted_vae_checkpoint = convert_ldm_vae_checkpoint(checkpoint, vae_config)
+        vae.load_state_dict(converted_vae_checkpoint)
+        
+        # Create and load UNet
+        unet_config = create_unet_diffusers_config(original_config, image_size=image_size)
+        unet_config["upcast_attention"] = False
+        unet = UNet2DConditionModel(**unet_config)
+        converted_unet_checkpoint = convert_ldm_unet_checkpoint(checkpoint, unet_config)
+        unet.load_state_dict(converted_unet_checkpoint)
+        
+        # Load text encoder and tokenizer from HuggingFace (small download)
+        from transformers import CLIPTextModel, CLIPTokenizer
+        tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+        
+        print("Successfully loaded from checkpoint")
+    else:
+        # Load from diffusers format directory or HuggingFace
+        vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae")
+        tokenizer = CLIPTokenizer.from_pretrained(base_model_path, subfolder="tokenizer")
+        text_encoder = CLIPTextModel.from_pretrained(base_model_path, subfolder="text_encoder")
+        unet = UNet2DConditionModel.from_pretrained(base_model_path, subfolder="unet")
+    
+    # Load fine-tuned UNet weights if model_name specified
+    # Load fine-tuned UNet weights if model_name specified
+    if "SD" not in model_name and model_name:
         try:
-            model_path = (
-                f'models/{model_name}/{model_name.replace("compvis","diffusers")}.pt'
-            )
-            # model_path = model_name
-            unet.load_state_dict(torch.load(model_path))
+            # Try loading from models directory
+            model_path = f'models/{model_name}/{model_name.replace("compvis","diffusers")}.pt'
+            if not os.path.exists(model_path):
+                # Try loading from absolute path
+                model_path = f'{model_name}'
+            
+            print(f"Loading fine-tuned UNet weights from: {model_path}")
+            unet.load_state_dict(torch.load(model_path, map_location="cpu"))
+            print("Successfully loaded fine-tuned UNet")
         except Exception as e:
-            print(
-                f"Model path is not valid, please check the file name and structure: {e}"
-            )
+            print(f"Could not load fine-tuned UNet: {e}")
+            print("Using base UNet instead")
     scheduler = LMSDiscreteScheduler(
         beta_start=0.00085,
         beta_end=0.012,
@@ -246,6 +293,20 @@ if __name__ == "__main__":
         required=False,
         default=100,
     )
+    parser.add_argument(
+        "--base_model_path",
+        help="path to base model checkpoint (.ckpt) or diffusers format directory",
+        type=str,
+        required=False,
+        default="CompVis/stable-diffusion-v1-4",
+    )
+    parser.add_argument(
+        "--base_config_path",
+        help="path to base model config (required if base_model_path is .ckpt)",
+        type=str,
+        required=False,
+        default=None,
+    )
     args = parser.parse_args()
 
     model_name = args.model_name
@@ -257,6 +318,8 @@ if __name__ == "__main__":
     ddim_steps = args.ddim_steps
     num_samples = args.num_samples
     from_case = args.from_case
+    base_model_path = args.base_model_path
+    base_config_path = args.base_config_path
 
     generate_images(
         model_name,
@@ -268,4 +331,6 @@ if __name__ == "__main__":
         ddim_steps=ddim_steps,
         num_samples=num_samples,
         from_case=from_case,
+        base_model_path=base_model_path,
+        base_config_path=base_config_path,
     )
