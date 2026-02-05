@@ -431,6 +431,12 @@ def intact_unlearn_class(
     
     # Setup model
     model = setup_model(config_path, ckpt_path, device)
+    
+    # Ensure all model buffers (including logvar) are on the correct device
+    model = model.to(device)
+    if hasattr(model, 'logvar'):
+        model.logvar = model.logvar.to(device)
+    
     criteria = torch.nn.MSELoss()
     
     # Setup data
@@ -561,6 +567,12 @@ def intact_unlearn_nsfw(
     
     # Setup model
     model = setup_model(config_path, ckpt_path, device)
+    
+    # Ensure all model buffers (including logvar) are on the correct device
+    model = model.to(device)
+    if hasattr(model, 'logvar'):
+        model.logvar = model.logvar.to(device)
+    
     sampler = DDIMSampler(model)
     criteria = torch.nn.MSELoss()
     
