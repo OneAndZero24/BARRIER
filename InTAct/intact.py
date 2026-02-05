@@ -415,9 +415,15 @@ class UnlearnIntervalProtection:
                         if isinstance(module, nn.Conv2d):
                             B, C, H, W = input_tensor.shape
                             reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
-                            buf_dict[name].append(reshaped.detach().cpu())
+                        elif isinstance(module, nn.Linear):
+                            # For Linear layers, reshape to [N, in_features] matching layer weight
+                            # Handles both 2D [B, features] and 3D [B, seq, features] inputs
+                            in_features = module.weight.shape[1]
+                            reshaped = input_tensor.reshape(-1, in_features)
                         else:
-                            buf_dict[name].append(input_tensor.detach().view(input_tensor.size(0), -1).cpu())
+                            # Fallback for other layer types
+                            reshaped = input_tensor.view(input_tensor.size(0), -1)
+                        buf_dict[name].append(reshaped.detach().cpu())
                 return hook
         else:
             # Projection hook: project on GPU, store reduced representation
@@ -433,7 +439,13 @@ class UnlearnIntervalProtection:
                         if isinstance(module, nn.Conv2d):
                             B, C, H, W = input_tensor.shape
                             reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
+                        elif isinstance(module, nn.Linear):
+                            # For Linear layers, reshape to [N, in_features] matching mu dimension
+                            # Handles both 2D [B, features] and 3D [B, seq, features] inputs
+                            in_features = mu.shape[0]
+                            reshaped = input_tensor.reshape(-1, in_features)
                         else:
+                            # Fallback for other layer types
                             reshaped = input_tensor.view(input_tensor.size(0), -1)
                         
                         # Project on GPU, then move to CPU
