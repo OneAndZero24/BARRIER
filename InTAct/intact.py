@@ -230,8 +230,13 @@ class UnlearnIntervalProtection:
 
     def freeze_non_target_params(self, model: nn.Module):
         """
-        Freeze all model parameters except those in target layers.
-        Call this after setup_protection() to ensure only protected layers are trainable.
+        Mark non-target parameters for exclusion from optimization.
+        
+        NOTE: This does NOT set requires_grad=False to avoid breaking gradient checkpointing.
+        Instead, it just identifies target parameters. The caller should only pass target
+        parameters to the optimizer using get_trainable_params().
+        
+        Call this after setup_protection() to prepare for training.
         """
         # Collect all parameters in target layers
         target_params = set()
@@ -241,18 +246,25 @@ class UnlearnIntervalProtection:
             if hasattr(target_layer, 'bias') and target_layer.bias is not None:
                 target_params.add(target_layer.bias)
         
-        # Freeze/unfreeze parameters
-        frozen_count = 0
-        trainable_count = 0
-        for name, param in model.named_parameters():
-            if param in target_params:
-                param.requires_grad = True
-                trainable_count += 1
-            else:
-                param.requires_grad = False
-                frozen_count += 1
+        self._target_params = target_params
         
-        log.info(f"Frozen {frozen_count} parameters, kept {trainable_count} target layer parameters trainable")
+        total_params = sum(1 for _ in model.named_parameters())
+        trainable_count = len(target_params)
+        log.info(f"Marked {trainable_count}/{total_params} parameters as trainable (rest will be excluded from optimizer)")
+    
+    def get_trainable_params(self, model: nn.Module):
+        """
+        Get list of trainable parameters to pass to optimizer.
+        Call this after freeze_non_target_params().
+        
+        Returns:
+            List of parameters that should be optimized.
+        """
+        if not hasattr(self, '_target_params'):
+            log.warning("get_trainable_params called before freeze_non_target_params, returning all parameters")
+            return list(model.parameters())
+        
+        return [p for p in model.parameters() if p in self._target_params]
 
     def compute_protection_loss(self, model: nn.Module, device) -> torch.Tensor:
         total_loss = torch.tensor(0.0, device=device)

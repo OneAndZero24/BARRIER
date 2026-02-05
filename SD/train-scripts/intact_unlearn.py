@@ -459,11 +459,11 @@ def intact_unlearn_class(
     # Get reference to diffusion_model for InTAct operations
     diffusion_model = model.model.diffusion_model
     
-    # Freeze non-target parameters
+    # Mark non-target parameters (doesn't freeze to avoid breaking checkpointing)
     protection.freeze_non_target_params(diffusion_model)
     
-    # Collect only trainable parameters from the actual diffusion model
-    trainable_params = [p for p in model.model.diffusion_model.parameters() if p.requires_grad]
+    # Get only trainable parameters for optimizer
+    trainable_params = protection.get_trainable_params(diffusion_model)
     log.info(f"Training {len(trainable_params)} parameters")
     
     optimizer = torch.optim.Adam(trainable_params, lr=lr)
@@ -600,11 +600,11 @@ def intact_unlearn_nsfw(
     # Get reference to diffusion_model for InTAct operations
     diffusion_model = model.model.diffusion_model
     
-    # Freeze non-target parameters
+    # Mark non-target parameters (doesn't freeze to avoid breaking checkpointing)
     protection.freeze_non_target_params(diffusion_model)
     
-    # Collect only trainable parameters from the actual diffusion model
-    trainable_params = [p for p in model.model.diffusion_model.parameters() if p.requires_grad]
+    # Get only trainable parameters for optimizer
+    trainable_params = protection.get_trainable_params(diffusion_model)
     log.info(f"Training {len(trainable_params)} parameters out of {sum(1 for _ in model.model.diffusion_model.parameters())} total")
     
     optimizer = torch.optim.Adam(trainable_params, lr=lr)
@@ -750,11 +750,11 @@ def intact_unlearn_esd(
         forward_fn=esd_forward_fn,
     )
     
-    # Freeze non-target parameters
+    # Mark non-target parameters (doesn't freeze to avoid breaking checkpointing)
     protection.freeze_non_target_params(diffusion_model)
     
-    # Collect only trainable parameters from the actual diffusion model
-    trainable_params = [p for p in model.model.diffusion_model.parameters() if p.requires_grad]
+    # Get only trainable parameters for optimizer
+    trainable_params = protection.get_trainable_params(diffusion_model)
     log.info(f"Training {len(trainable_params)} parameters out of {sum(1 for _ in model.model.diffusion_model.parameters())} total")
     
     model.train()
