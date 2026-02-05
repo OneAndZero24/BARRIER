@@ -96,7 +96,7 @@ python train-scripts/intact_unlearn.py \
     --lambda_interval 1.0 \
     --epochs 5 \
     --ckpt_path models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt \
-    --config_path configs/stable-diffusion/v1-inference.yaml \
+    --config_path configs/stable-diffusion/v1-intact.yaml \
     --diffusers_config_path diffusers_unet_config.json \
     --device 0
 
