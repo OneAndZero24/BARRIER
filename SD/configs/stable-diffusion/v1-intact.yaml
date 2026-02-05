@@ -80,8 +80,8 @@ training:
   
   # Standard training params
   batch_size: 8
-  epochs: 5
-  lr: 1.0e-05
+  epochs: 10
+  lr: 1.0e-03
   alpha: 0.1  # Weight for remain loss
   
   # ESD-specific (if base_method=esd)
@@ -97,7 +97,7 @@ training:
   # These are nn.Linear layers inside CrossAttention modules
   targets: ['middle_block.1.transformer_blocks.0.attn2.to_q', 'middle_block.1.transformer_blocks.0.attn2.to_k', 'middle_block.1.transformer_blocks.0.attn2.to_v',]
   
-  lambda_interval: 1.0           # Protection loss weight
+  lambda_interval: 5.0           # Protection loss weight
   lower_percentile: 0.05         # Activation safe zone lower bound
   upper_percentile: 0.95         # Activation safe zone upper bound
   reduced_dim: 32                # SVD dimension for efficiency
