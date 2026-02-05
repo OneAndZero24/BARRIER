@@ -101,10 +101,20 @@ def generate_images(
         converted_unet_checkpoint = convert_ldm_unet_checkpoint(checkpoint, unet_config)
         unet.load_state_dict(converted_unet_checkpoint)
         
-        # Load text encoder and tokenizer from HuggingFace (small download)
-        from transformers import CLIPTextModel, CLIPTokenizer
-        tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-        text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+        # Extract text encoder from checkpoint
+        from convertModels import convert_ldm_clip_checkpoint
+        print("Extracting CLIP text encoder from checkpoint...")
+        text_encoder = convert_ldm_clip_checkpoint(checkpoint)
+        
+        # Use tokenizer from CompVis SD (should be cached or available locally)
+        from transformers import CLIPTokenizer
+        print("Loading tokenizer...")
+        try:
+            # Try from local cache first
+            tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14", local_files_only=True)
+        except:
+            print("Tokenizer not in cache, downloading (may be slow)...")
+            tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
         
         print("Successfully loaded from checkpoint")
     else:
