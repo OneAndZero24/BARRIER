@@ -125,14 +125,18 @@ def generate_images(
         unet = UNet2DConditionModel.from_pretrained(base_model_path, subfolder="unet")
     
     # Load fine-tuned UNet weights if model_name specified
-    # Load fine-tuned UNet weights if model_name specified
-    if "SD" not in model_name and model_name:
+    # Skip loading if model_name is exactly "SD" or empty
+    if model_name:
         try:
-            # Try loading from models directory
-            model_path = f'models/{model_name}/{model_name.replace("compvis","diffusers")}.pt'
-            if not os.path.exists(model_path):
-                # Try loading from absolute path
-                model_path = f'{model_name}'
+            # Check if model_name is an absolute path to a .pt file
+            if os.path.isabs(model_name) and os.path.exists(model_name):
+                model_path = model_name
+            elif os.path.exists(model_name):
+                # Relative path that exists
+                model_path = model_name
+            else:
+                # Try loading from models directory
+                model_path = f'models/{model_name}/{model_name.replace("compvis","diffusers")}.pt'
             
             print(f"Loading fine-tuned UNet weights from: {model_path}")
             unet.load_state_dict(torch.load(model_path, map_location="cpu"))
