@@ -80,7 +80,7 @@ training:
   
   # Standard training params
   batch_size: 8
-  epochs: 10
+  epochs: 5
   lr: 1.0e-03
   alpha: 0.1  # Weight for remain loss
   
@@ -96,7 +96,7 @@ training:
   # Target cross-attention Q/K/V projections in SD's UNet
   # These are nn.Linear layers inside CrossAttention modules
   targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']  
-  
+
   lambda_interval: 5.0           # Protection loss weight
   lower_percentile: 0.05         # Activation safe zone lower bound
   upper_percentile: 0.95         # Activation safe zone upper bound
