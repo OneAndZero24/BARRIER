@@ -525,7 +525,7 @@ def intact_unlearn_class(
                 losses.append(total_loss.item() / batch_size)
                 pbar.set_postfix({
                     "base": base_loss.item() / batch_size,
-                    "intact": intact_loss.item(),
+                    "intact": intact_loss.item() / batch_size,
                     "total": total_loss.item() / batch_size
                 })
                 pbar.update(1)
@@ -641,7 +641,7 @@ def intact_unlearn_nsfw(
                 losses.append(total_loss.item() / batch_size)
                 pbar.set_postfix({
                     "base": base_loss.item() / batch_size,
-                    "intact": intact_loss.item(),
+                    "intact": intact_loss.item() / batch_size,
                     "total": total_loss.item() / batch_size
                 })
                 pbar.update(1)
