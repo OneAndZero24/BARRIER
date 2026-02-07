@@ -80,7 +80,7 @@ training:
   
   # Standard training params
   batch_size: 8
-  epochs: 5
+  epochs: 6
   lr: 5.0e-06
   alpha: 0.0  # Weight for remain loss
   
