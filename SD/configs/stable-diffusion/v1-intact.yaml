@@ -81,8 +81,8 @@ training:
   # Standard training params
   batch_size: 8
   epochs: 5
-  lr: 1.0e-04
-  alpha: 0.1  # Weight for remain loss
+  lr: 1.0e-03
+  alpha: 0.0  # Weight for remain loss
   
   # ESD-specific (if base_method=esd)
   iterations: 1000
