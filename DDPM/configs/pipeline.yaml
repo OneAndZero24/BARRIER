@@ -1,0 +1,78 @@
+# ============================================================================
+# DDPM Pipeline – Class Forgetting (CIFAR-10)
+# ============================================================================
+# Usage:
+#   cd DDPM
+#   python pipeline.py --config configs/pipeline.yaml
+
+wandb:
+  project: "intact-ddpm"
+  entity: null
+  group: "cifar10"
+  tags: ["ddpm", "cifar10", "intact"]
+
+# ---- paths (adjust to your environment) ----
+paths:
+  pretrained_ckpt_folder: null       # e.g. "results/cifar10/2024_01_01_000000"
+  output_dir: "./results/pipeline"
+  ref_dataset_dir: null              # e.g. "./cifar10_without_label_0" (create with save_base_dataset.py)
+  classifier_ckpt: "cifar10_resnet34.pth"   # trained ResNet34 for eval
+
+# ---- model config (existing DDPM YAML) ----
+# This is the standard DDPM config that defines architecture + diffusion schedule.
+# The pipeline will override training params from the 'unlearn' section below.
+model_config: "configs/cifar10_intact.yml"
+
+# ---- data ----
+data:
+  dataset: "CIFAR10"
+  n_classes: 10
+
+# ---- pipeline ----
+pipeline:
+  seed: 1234
+
+# ---- sampling ----
+cond_scale: 2.0
+sample_type: "generalized"
+skip_type: "uniform"
+timesteps: 1000
+eta: 1.0
+
+# ---- unlearning ----
+unlearn:
+  mode: "intact"                     # intact | saliency_unlearn | forget | retrain | train_esd
+  label_to_forget: 0
+  method: "ga"                       # ga | rl (base method for unlearning)
+  lr: 1.0e-3
+  n_iters: 1500
+  batch_size: 128
+  alpha: 0.0                         # remain loss weight (for saliency_unlearn/forget)
+  negative_guidance: 7.5
+
+# ---- InTAct parameters (only used when mode=intact) ----
+intact:
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32
+  infinity_scale: 20.0
+  normalize_protection: true
+  use_actual_bounds: true
+  targets:
+    - "attn.0.q"
+    - "attn.0.k"
+    - "attn.0.v"
+    - "attn_1.q"
+    - "attn_1.k"
+    - "attn_1.v"
+    - "cond_emb"                     # class embedding projection
+
+# ---- evaluation ----
+evaluate:
+  n_samples_per_class: 500           # smaller for grids; use 5000 for final
+  fid:
+    enabled: true
+    n_samples_per_class: 500
+  classifier:
+    enabled: true

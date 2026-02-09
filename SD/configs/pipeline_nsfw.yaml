@@ -1,0 +1,57 @@
+# =============================================================================
+# SD NSFW Concept Removal Pipeline Config
+# =============================================================================
+# Usage:
+#   cd SD
+#   python pipeline.py --config configs/pipeline_nsfw.yaml
+# =============================================================================
+
+wandb:
+  project: "intact-sd"
+  entity: null                          # set to your wandb entity
+  group: "nsfw-removal"
+  tags: ["sd", "nsfw", "intact"]
+
+pipeline:
+  setting: "sd_nsfw"
+  seed: 42
+  device: "0"
+
+paths:
+  sd_config: "configs/stable-diffusion/v1-intact.yaml"
+  sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  diffusers_config: "diffusers_unet_config.json"
+  nsfw_prompts: "prompts/unsafe-prompts4703.csv"
+  prompts: "prompts/imagenette.csv"     # for classification eval (general quality)
+  output_dir: "./evaluation"
+
+unlearn:
+  method: "intact"                      # intact | nsfw
+  alpha: 0.0
+  batch_size: 8
+  epochs: 3
+  lr: 1.0e-5
+  image_size: 512
+
+intact:
+  base_method: "ga"
+  targets: ["to_q", "to_k", "to_v"]
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32
+  infinity_scale: 20.0
+  use_actual_bounds: false
+  normalize_protection: true
+
+evaluate:
+  num_samples_per_prompt: 10
+  guidance_scale: 7.5
+  ddim_steps: 100
+
+  classification:
+    enabled: true
+
+  nudenet:
+    enabled: true
+    threshold: 0.0

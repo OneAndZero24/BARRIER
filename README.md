@@ -50,11 +50,108 @@ L_protect = L_mean + L_residual + L_interval
 
 ## Installation
 
-Please follow instructions from each subfolder. 
+Please follow instructions from each subfolder.
 
-## Usage
+## Pipelines (Recommended)
 
-### Classification (CIFAR-10)
+Each setting has a **unified pipeline** that orchestrates unlearning → evaluation → wandb logging via a single YAML config. All pipelines support **wandb sweeps** and are **SLURM-ready**.
+
+### Classification – Class-wise Forgetting
+
+```bash
+cd Classification
+export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
+pip install -r requirements.txt
+
+# Edit configs/pipeline_classwise.yaml (paths, wandb entity, etc.)
+python pipeline.py --config configs/pipeline_classwise.yaml
+```
+
+### Classification – Random Data Forgetting
+
+```bash
+cd Classification
+python pipeline.py --config configs/pipeline_random.yaml
+```
+
+### DDPM – Conditional Diffusion (CIFAR-10)
+
+```bash
+cd DDPM
+export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
+pip install -r requirements.txt
+
+# Edit configs/pipeline.yaml (paths, wandb entity, etc.)
+python pipeline.py --config configs/pipeline.yaml
+```
+
+### Stable Diffusion – Class Forgetting
+
+```bash
+cd SD
+export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
+conda env create -f environment.yaml && conda activate ldm
+# Download SD v1.4 weights (see SD/README.md)
+
+python pipeline.py --config configs/pipeline_class.yaml
+```
+
+### Stable Diffusion – NSFW Removal
+
+```bash
+cd SD
+python pipeline.py --config configs/pipeline_nsfw.yaml
+```
+
+### wandb Sweeps
+
+```bash
+# Example: sweep over Classification class-wise hyperparameters
+cd Classification
+wandb sweep configs/sweep_classwise.yaml
+wandb agent <sweep-id>
+
+# DDPM sweep
+cd DDPM
+wandb sweep configs/sweep.yaml
+wandb agent <sweep-id>
+
+# SD class sweep
+cd SD
+wandb sweep configs/sweep_class.yaml
+wandb agent <sweep-id>
+```
+
+### SLURM
+
+Wrap any pipeline command in a SLURM script (eg. DDPM):
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=intact-ddpm
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=24:00:00
+#SBATCH --output=logs/%j.out
+
+source activate ldm  # or your env
+cd /path/to/InTAct-Unl/DDPM
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
+python pipeline.py --config configs/pipeline.yaml
+```
+
+For sweep agents on SLURM, replace the last line with `wandb agent <sweep-id>`.
+
+---
+
+## Direct Script Usage
+
+The original training and evaluation scripts remain available for finer-grained control.
+
+<details>
+<summary>Classification (manual)</summary>
 
 ```bash
 cd Classification
@@ -62,138 +159,82 @@ export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
 
 # Forget class 0 (airplane)
 python intact_experiment.py --unlearn_classes 0 --lambda_interval 100.0
-
-# Forget multiple classes
-python intact_experiment.py --unlearn_classes 0 1 2 --unlearn_epochs 20
-
-# Custom targets (protect specific layers)
-python intact_experiment.py --targets fc layer4 --lambda_interval 50.0
 ```
+</details>
 
-### DDPM (Diffusion Models)
+<details>
+<summary>DDPM (manual)</summary>
 
 ```bash
 cd DDPM
-
-# Forget class 0 with InTAct
 python train.py --config configs/cifar10_intact.yml
 ```
+</details>
 
-### Stable Diffusion
-
-#### Training
+<details>
+<summary>Stable Diffusion (manual)</summary>
 
 ```bash
 cd SD
 
-# Download SD v1.4 weights first (see SD/README.md)
-
-# Forget class 0 with Gradient Ascent + InTAct
+# GA + InTAct
 python train-scripts/intact_unlearn.py \
-    --base_method ga \
-    --class_to_forget 0 \
-    --targets to_q to_k to_v \
-    --lambda_interval 1.0 \
-    --epochs 5 \
-    --ckpt_path models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt \
-    --config_path configs/stable-diffusion/v1-intact.yaml \
-    --diffusers_config_path diffusers_unet_config.json \
-    --device 0
+    --base_method ga --class_to_forget 0 \
+    --targets to_q to_k to_v --lambda_interval 1.0 --epochs 5
 
-# Random Label + InTAct (cross-attention only)
-python train-scripts/intact_unlearn.py \
-    --base_method rl \
-    --class_to_forget 0 \
-    --targets to_q to_k to_v
-
-# NSFW removal + InTAct (self-attention)
-python train-scripts/intact_unlearn.py \
-    --base_method nsfw \
-    --targets attn1
-
-# ESD (prompt-based) + InTAct (full attention)
-python train-scripts/intact_unlearn.py \
-    --base_method esd \
-    --prompt "nudity" \
-    --targets to_q to_k to_v attn1 \
-    --iterations 1000
+# Generate + evaluate
+python eval-scripts/generate-images.py --model_name "..." --prompts_path prompts/imagenette.csv --save_path evaluation/
+python eval-scripts/compute-fid.py --folder_path evaluation/
+python eval-scripts/imageclassify.py --prompts_path prompts/imagenette.csv --folder_path evaluation/
 ```
+</details>
 
-**Target Layer Patterns:**
+## Parameters
 
-| Pattern | Layers | Description | Equivalent to old `train_method` |
-|---------|--------|-------------|----------------------------------|
-| `to_q to_k to_v` | Cross-attention QKV | Text-image interaction | `xattn` |
-| `attn1` | Self-attention | Spatial relationships | `selfattn` |
-| `to_q to_k to_v attn1` | All attention | Full attention | `full` (attention only) |
-| *(all patterns)* | All UNet layers | Complete model | `full` |
-
-#### Image Generation
-
-After training, generate images from the unlearned model:
-
-```bash
-# Generate images for evaluation
-python eval-scripts/generate-images.py \
-    --model_name "compvis-intact-ga-class_0-targets_to_q_to_k_to_v-lambda_1.0-epochs_5-lr_1e-05" \
-    --prompts_path "prompts/imagenette.csv" \
-    --save_path "evaluation/intact_ga_class0/" \
-    --num_samples 10 \
-    --device cuda:0
-```
-
-The script expects models saved in: `SD/models/{model_name}/diffusers-{model_name}.pt`
-
-**Evaluation:**
-
-```bash
-# Compute FID score
-python eval-scripts/compute-fid.py \
-    --folder_path "evaluation/intact_ga_class0/"
-
-# Check classification accuracy
-python eval-scripts/imageclassify.py \
-    --prompts_path "prompts/imagenette.csv" \
-    --folder_path "evaluation/intact_ga_class0/"
-```
-
-**SD Base Methods:**
-
-| Method | Description | Use Case |
-|--------|-------------|----------|
-| `ga` | Gradient Ascent | Class forgetting |
-| `rl` | Random Label | Class forgetting |
-| `nsfw` | NSFW removal | Concept removal |
-| `esd` | Erased Stable Diffusion | Prompt-based concept removal |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `targets` | `["fc"]` | Layer name patterns to protect (e.g., `["to_q", "to_k", "to_v"]`) |
+| `lambda_interval` | `10.0` | Weight for protection loss |
+| `lower_percentile` | `0.05` | Lower bound of safe activation zone |
+| `upper_percentile` | `0.95` | Upper bound of safe activation zone |
+| `reduced_dim` | `32` | SVD dimensions (for efficiency) |
+| `infinity_scale` | `20.0` | Scale for outer bounds (negative space) |
+| `use_actual_bounds` | `False` | Use actual min/max from remain data instead of scaled bounds |
+| `normalize_protection` | `True` | Normalize loss by number of layers |
 
 ## Project Structure
 
 ```
 InTAct-Unl/
 ├── InTAct/
-│   ├── intact.py              # Core InTAct implementation
-│   └── README.md
+│   └── intact.py                          # Core InTAct implementation
 ├── Classification/
-│   ├── intact_experiment.py   # Classification demo (CIFAR-10)
-│   ├── main_forget.py         # Other unlearning baselines
+│   ├── pipeline.py                        # Unified pipeline (classwise + random)
+│   ├── configs/
+│   │   ├── pipeline_classwise.yaml
+│   │   ├── pipeline_random.yaml
+│   │   ├── sweep_classwise.yaml
+│   │   └── sweep_random.yaml
+│   ├── intact_experiment.py               # Standalone InTAct demo
+│   ├── main_forget.py                     # Baseline unlearning methods
 │   └── ...
 ├── DDPM/
-│   ├── train.py               # DDPM training with InTAct
-│   ├── runners/diffusion.py   # InTAct integration
+│   ├── pipeline.py                        # Unified pipeline
 │   ├── configs/
-│   │   ├── cifar10_intact.yml
-│   │   └── ...
+│   │   ├── pipeline.yaml
+│   │   └── sweep.yaml
+│   ├── train.py                           # Original training entry
+│   ├── runners/diffusion.py               # InTAct integration
 │   └── ...
 ├── SD/
-│   ├── train-scripts/
-│   │   ├── intact_unlearn.py  # SD InTAct (GA, RL, NSFW, ESD)
-│   │   └── ...
-│   ├── eval-scripts/
-│   │   ├── generate-images.py # Generate images from trained models
-│   │   ├── compute-fid.py     # FID evaluation
-│   │   └── imageclassify.py   # Classification accuracy
+│   ├── pipeline.py                        # Unified pipeline (class + NSFW)
 │   ├── configs/
-│   │   └── stable-diffusion/v1-intact.yaml
+│   │   ├── pipeline_class.yaml
+│   │   ├── pipeline_nsfw.yaml
+│   │   ├── sweep_class.yaml
+│   │   └── sweep_nsfw.yaml
+│   ├── train-scripts/intact_unlearn.py    # SD InTAct (GA, RL, NSFW, ESD)
+│   ├── eval-scripts/                      # FID, classify, NudeNet
 │   └── ...
 └── README.md
 ```

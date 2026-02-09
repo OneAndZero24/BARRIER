@@ -1,11 +1,54 @@
-# Saliency-Unlearning for Classification
-This is the official repository for Saliency Unlearning for Clasification. The code structure of this project is adapted from the [Sparse Unlearn](https://github.com/OPTML-Group/Unlearn-Sparse) codebase.
+# Classification Unlearning
 
+ResNet-18 on CIFAR-10 with class-wise and random data forgetting. Based on the [Sparse Unlearn](https://github.com/OPTML-Group/Unlearn-Sparse) codebase.
 
 ## Requirements
 ```bash
 pip install -r requirements.txt
 ```
+
+## Pipeline (Recommended)
+
+A single command runs unlearning → evaluation (accuracy, SVC_MIA) → wandb logging:
+
+```bash
+export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
+
+# Class-wise forgetting (forget class 0)
+python pipeline.py --config configs/pipeline_classwise.yaml
+
+# Random data forgetting (forget 4500 random samples)
+python pipeline.py --config configs/pipeline_random.yaml
+```
+
+Edit the YAML configs to set:
+- `paths.model` – path to the pretrained ResNet-18 checkpoint
+- `wandb.entity` – your wandb team/user
+- `unlearn.*` – method, epochs, learning rate
+- `intact.*` – InTAct hyperparameters
+
+### wandb Sweeps
+
+```bash
+wandb sweep configs/sweep_classwise.yaml
+wandb agent <sweep-id>
+```
+
+### SLURM
+
+```bash
+#!/bin/bash
+#SBATCH --gres=gpu:1 --mem=16G --time=4:00:00
+source activate your-env
+cd /path/to/InTAct-Unl/Classification
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
+python pipeline.py --config configs/pipeline_classwise.yaml
+```
+
+---
+
+<details>
+<summary>Manual scripts (original)</summary>
 
 ## Scripts
 1. Get the origin model.
@@ -61,3 +104,5 @@ pip install -r requirements.txt
     ```bash
     python -u main_forget.py --save_dir ${save_dir} --model_path ${origin_model_path} --unlearn FT_prune --num_indexes_to_replace ${forgetting data amount} --alpha ${alpha} --unlearn_epochs ${epochs for unlearning} --unlearn_lr ${learning rate for unlearning}
     ```
+
+</details>

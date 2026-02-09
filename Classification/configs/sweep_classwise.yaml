@@ -1,0 +1,27 @@
+# ============================================================================
+# wandb sweep – Classification Class-Wise (example)
+# ============================================================================
+# Usage:
+#   cd Classification
+#   wandb sweep configs/sweep_classwise.yaml
+#   wandb agent <sweep-id>
+
+program: pipeline.py
+method: grid                          # grid | random | bayes
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config
+  - configs/pipeline_classwise.yaml
+
+parameters:
+  unlearn.unlearn_lr:
+    values: [0.1, 0.01, 0.001]
+  unlearn.unlearn_epochs:
+    values: [5, 10, 20]
+  intact.lambda_interval:
+    values: [10.0, 50.0, 100.0, 500.0]
+  intact.base_method:
+    values: ["ga", "rl"]

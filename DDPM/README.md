@@ -1,13 +1,53 @@
-# Saliency-Unlearning for DDPM
-This is the official repository for Saliency Unlearning for DDPM. The code structure of this project is adapted from the [DDIM](https://github.com/ermongroup/ddim) and [SA](https://github.com/clear-nus/selective-amnesia/tree/a7a27ab573ba3be77af9e7aae4a3095da9b136ac/ddpm) codebase.
+# DDPM Unlearning
 
-# Requirements
-Install the requirements using a `conda` environment:
+Conditional DDPM class forgetting. Based on [DDIM](https://github.com/ermongroup/ddim) and [SA](https://github.com/clear-nus/selective-amnesia/tree/a7a27ab573ba3be77af9e7aae4a3095da9b136ac/ddpm).
+
+## Requirements
 ```
 conda create --name salun-ddpm python=3.8
 conda activate salun-ddpm
 pip install -r requirements.txt
 ```
+
+## Pipeline (Recommended)
+
+A single command runs InTAct unlearning → sampling → FID + classifier evaluation → wandb logging:
+
+```bash
+export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
+
+# Edit configs/pipeline.yaml (paths, wandb entity, etc.)
+python pipeline.py --config configs/pipeline.yaml
+```
+
+Key config fields:
+- `paths.pretrained_ckpt_folder` – path to pretrained DDPM checkpoint folder
+- `paths.ref_dataset_dir` – reference dataset for FID (e.g., `cifar10_without_label_0`)
+- `paths.classifier_ckpt` – path to ResNet34 classifier checkpoint
+- `wandb.entity` – your wandb team/user
+
+### wandb Sweeps
+
+```bash
+wandb sweep configs/sweep.yaml
+wandb agent <sweep-id>
+```
+
+### SLURM
+
+```bash
+#!/bin/bash
+#SBATCH --gres=gpu:1 --mem=32G --time=24:00:00
+source activate salun-ddpm
+cd /path/to/InTAct-Unl/DDPM
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
+python pipeline.py --config configs/pipeline.yaml
+```
+
+---
+
+<details>
+<summary>Manual workflow (original)</summary>
 
 # Forgetting Training with Saliency-Unlearning
 
@@ -97,3 +137,5 @@ pip install -r requirements.txt
     Classifier evaluation:
     Average entropy: 1.4654556959867477
     Average prob of forgotten class: 0.15628313273191452
+
+</details>

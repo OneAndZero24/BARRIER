@@ -1,13 +1,60 @@
-# Saliency-Unlearning for SD
-This is the official repository for Saliency Unlearning for stable diffusion. The code structure of this project is adapted from the [ESD](https://github.com/rohitgandikota/erasing/tree/main) codebase.
+# Stable Diffusion Unlearning
 
-# Installation Guide
-* To get started clone the following repository of Original Stable Diffusion [Link](https://github.com/CompVis/stable-diffusion)
-* Then download the files from our repository to `stable-diffusion` main directory of stable diffusion. This would replace the `ldm` folder of the original repo with our custom `ldm` directory
-* Download the weights from [here](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4-full-ema.ckpt) and move them to `SD/models/ldm/`
-* [Only for training] To convert your trained models to diffusers download the diffusers Unet config from [here](https://huggingface.co/CompVis/stable-diffusion-v1-4/blob/main/unet/config.json)
+Class forgetting (Imagenette) and NSFW concept removal for Stable Diffusion v1.4. Based on the [ESD](https://github.com/rohitgandikota/erasing/tree/main) codebase.
 
-# Unlearned Weights
+## Installation
+* Clone [Stable Diffusion](https://github.com/CompVis/stable-diffusion) and overlay this repo's files
+* Download weights from [here](https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4-full-ema.ckpt) → `SD/models/ldm/stable-diffusion-v1/`
+* Download diffusers UNet config from [here](https://huggingface.co/CompVis/stable-diffusion-v1-4/blob/main/unet/config.json) → `SD/diffusers_unet_config.json`
+
+## Pipeline (Recommended)
+
+Single command: unlearn → generate images → evaluate (FID + classification + NudeNet) → wandb:
+
+```bash
+export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
+conda env create -f environment.yaml && conda activate ldm
+
+# Class forgetting (e.g., forget "tench")
+python pipeline.py --config configs/pipeline_class.yaml
+
+# NSFW concept removal
+python pipeline.py --config configs/pipeline_nsfw.yaml
+```
+
+Key config fields:
+- `paths.sd_ckpt` – path to `sd-v1-4-full-ema.ckpt`
+- `paths.sd_config` – model config yaml
+- `wandb.entity` – your wandb team/user
+- `unlearn.class_to_forget` – Imagenette class index (0-9)
+
+### wandb Sweeps
+
+```bash
+wandb sweep configs/sweep_class.yaml
+wandb agent <sweep-id>
+
+wandb sweep configs/sweep_nsfw.yaml
+wandb agent <sweep-id>
+```
+
+### SLURM
+
+```bash
+#!/bin/bash
+#SBATCH --gres=gpu:1 --mem=48G --time=48:00:00
+source activate ldm
+cd /path/to/InTAct-Unl/SD
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
+python pipeline.py --config configs/pipeline_class.yaml
+```
+
+---
+
+<details>
+<summary>Manual workflow (original)</summary>
+
+## Unlearned Weights
 The unlearned weights for NSFW and object forgetting are available [here](https://drive.google.com/drive/folders/1fOx-v_ru3NfB2rPe5LGxaQS-Q17QzKzp?usp=sharing).
 
 # Forgetting Training with Saliency-Unlearning
@@ -144,3 +191,5 @@ InTAct targets cross-attention Q/K/V projections (`to_q`, `to_k`, `to_v`) by def
 ## Config File
 
 A sample config is provided at `configs/stable-diffusion/v1-intact.yaml`.
+
+</details>
