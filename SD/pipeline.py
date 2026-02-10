@@ -31,8 +31,8 @@ from PIL import Image
 # Ensure project root and SD dirs are on path
 sys.path.insert(0, str(Path(__file__).parent.parent))  # InTAct
 sys.path.insert(0, str(Path(__file__).parent))           # SD root
-sys.path.insert(0, str(Path(__file__).parent / "train-scripts"))
 sys.path.insert(0, str(Path(__file__).parent / "eval-scripts"))
+sys.path.insert(0, str(Path(__file__).parent / "train-scripts"))
 
 logging.basicConfig(
     level=logging.INFO,
