@@ -8,7 +8,7 @@
 
 wandb:
   project: "intact-sd"
-  entity: null                          # set to your wandb entity
+  entity: oneandzero24                        # set to your wandb entity
   group: "class-forgetting"
   tags: ["sd", "class-wise", "intact"]
 
@@ -22,7 +22,7 @@ paths:
   sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
   diffusers_config: "diffusers_unet_config.json"
   prompts: "prompts/imagenette.csv"
-  output_dir: "./evaluation"
+  output_dir: "/shared/results/common/miksa/intact/SD/evaluation"
 
 # Imagenette class indices:
 #  0 - tench
@@ -42,18 +42,18 @@ unlearn:
   alpha: 0.0
   batch_size: 8
   epochs: 5
-  lr: 1.0e-5
+  lr: 5.0e-6
   image_size: 512
 
 intact:
-  base_method: "ga"                     # ga | rl
-  targets: ["to_q", "to_k", "to_v"]
-  lambda_interval: 1.0
+  base_method: "rl"                     # ga | rl
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']  
+  lambda_interval: 10.0
   lower_percentile: 0.05
   upper_percentile: 0.95
-  reduced_dim: 32
+  reduced_dim: 64
   infinity_scale: 20.0
-  use_actual_bounds: false
+  use_actual_bounds: true
   normalize_protection: true
 
 evaluate:
