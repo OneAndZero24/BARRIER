@@ -161,6 +161,8 @@ def run_unlearn_nsfw(cfg, device_str):
             use_actual_bounds=ic.get("use_actual_bounds", False),
             normalize_protection=ic.get("normalize_protection", True),
             image_size=uc.get("image_size", 512),
+            nsfw_data_path=cfg["paths"].get("nsfw_data", "data/nsfw"),
+            not_nsfw_data_path=cfg["paths"].get("not_nsfw_data", "data/not-nsfw"),
         )
     elif method == "nsfw":
         from nsfw_removal import nsfw_removal

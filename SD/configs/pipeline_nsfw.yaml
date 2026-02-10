@@ -24,6 +24,8 @@ paths:
   nsfw_prompts: "prompts/unsafe-prompts4703.csv"
   prompts: "prompts/imagenette.csv"     # for classification eval (general quality)
   output_dir: "./evaluation"
+  nsfw_data: "data/nsfw"                # NSFW training images (forget set)
+  not_nsfw_data: "data/not-nsfw"        # Clothed person images (remain set)
 
 unlearn:
   method: "intact"                      # intact | nsfw

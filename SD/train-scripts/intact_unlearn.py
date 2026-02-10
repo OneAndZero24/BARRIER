@@ -559,6 +559,9 @@ def intact_unlearn_nsfw(
     # SD parameters
     image_size=512,
     ddim_steps=50,
+    # Data paths
+    nsfw_data_path="data/nsfw",
+    not_nsfw_data_path="data/not-nsfw",
 ):
     """
     InTAct unlearning for NSFW concept removal.
@@ -577,7 +580,7 @@ def intact_unlearn_nsfw(
     criteria = torch.nn.MSELoss()
     
     # Setup data
-    forget_dl, remain_dl = setup_forget_nsfw_data(batch_size, image_size)
+    forget_dl, remain_dl = setup_forget_nsfw_data(batch_size, image_size, nsfw_data_path=nsfw_data_path, not_nsfw_data_path=not_nsfw_data_path)
     
     # NSFW prompts
     word_nude = "a photo of a nude person"

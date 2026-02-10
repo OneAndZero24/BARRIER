@@ -64,8 +64,8 @@ class Imagenette(Dataset):
 
 
 class NSFW(Dataset):
-    def __init__(self, transform=None):
-        self.dataset = load_dataset("data/nsfw")["train"]
+    def __init__(self, data_path="data/nsfw", transform=None):
+        self.dataset = load_dataset(data_path)["train"]
         self.transform = transform
 
     def __len__(self):
@@ -82,8 +82,8 @@ class NSFW(Dataset):
 
 
 class NOT_NSFW(Dataset):
-    def __init__(self, transform=None):
-        self.dataset = load_dataset("data/not-nsfw")["train"]
+    def __init__(self, data_path="data/not-nsfw", transform=None):
+        self.dataset = load_dataset(data_path)["train"]
         self.transform = transform
 
     def __len__(self):
@@ -164,13 +164,13 @@ def setup_forget_data(class_to_forget, batch_size, image_size, interpolation="bi
     return train_dl, descriptions
 
 
-def setup_forget_nsfw_data(batch_size, image_size, interpolation="bicubic"):
+def setup_forget_nsfw_data(batch_size, image_size, interpolation="bicubic", nsfw_data_path="data/nsfw", not_nsfw_data_path="data/not-nsfw"):
     interpolation = INTERPOLATIONS[interpolation]
     transform = get_transform(interpolation, image_size)
 
-    forget_set = NSFW(transform=transform)
+    forget_set = NSFW(data_path=nsfw_data_path, transform=transform)
     forget_dl = DataLoader(forget_set, batch_size=batch_size)
 
-    remain_set = NOT_NSFW(transform=transform)
+    remain_set = NOT_NSFW(data_path=not_nsfw_data_path, transform=transform)
     remain_dl = DataLoader(remain_set, batch_size=batch_size)
     return forget_dl, remain_dl
