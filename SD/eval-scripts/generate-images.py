@@ -107,7 +107,6 @@ def generate_images(
         text_encoder = convert_ldm_clip_checkpoint(checkpoint)
         
         # Use tokenizer from CompVis SD (should be cached or available locally)
-        from transformers import CLIPTokenizer
         print("Loading tokenizer...")
         try:
             # Try from local cache first
