@@ -22,7 +22,9 @@ paths:
   sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
   diffusers_config: "diffusers_unet_config.json"
   prompts: "prompts/imagenette.csv"
-  output_dir: "/shared/results/common/miksa/intact/SD/evaluation"
+  output_dir: "/shared/results/common/miksa/intact/SD/evaluation"  # Where generated images are saved
+  model_save_dir: "/shared/results/common/miksa/intact/SD/models"  # Where model checkpoints are saved
+  logs_dir: "/shared/results/common/miksa/intact/SD/logs"          # Where training logs/losses are saved
 
 # Imagenette class indices:
 #  0 - tench
@@ -60,9 +62,9 @@ evaluate:
   num_samples_per_prompt: 10
   guidance_scale: 7.5
   ddim_steps: 100
+  n_sample_images_per_class: 4       # how many example images per class to upload to wandb
 
   fid:
     enabled: true
-
-  classification:
-    enabled: true
+    max_real: 100                   # null = use all; set e.g. 500 for fast pipeline eval
+    max_fake: 100                   # null = use all; set e.g. 500 for fast pipeline eval

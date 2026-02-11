@@ -15,7 +15,8 @@ wandb:
 paths:
   data_dir: "../data"              # root data folder
   pretrained_ckpt: null            # e.g. "./checkpoints/resnet18_cifar10_best.pth"
-  output_dir: "./results/pipeline/classwise"
+  output_dir: "/shared/results/common/miksa/intact/Cls/class/"  # Where generated outputs/logs are saved
+  checkpoint_dir: "/shared/results/common/miksa/intact/Cls/class/checkpoints"  # Where model checkpoints are saved
 
 # ---- data ----
 data:
@@ -51,7 +52,7 @@ unlearn:
 
 # ---- InTAct parameters (only used when method=intact) ----
 intact:
-  base_method: "ga"                # ga | rl
+  base_method: "rl"                # ga | rl
   targets: ["fc"]                  # layer name patterns to protect
   lambda_interval: 100.0
   lower_percentile: 0.05

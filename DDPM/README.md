@@ -28,8 +28,23 @@ Key config fields:
 
 ### wandb Sweeps
 
+Sweeps run the pipeline with different hyperparameter combinations. The sweep
+YAML specifies which parameters to vary; the pipeline config provides defaults.
+Dotted keys (e.g. `unlearn.lr`) map to nested fields.
+
 ```bash
 wandb sweep configs/sweep.yaml
+wandb agent <sweep-id>
+```
+
+To add a new parameter, copy any dotted config key into the sweep's
+`parameters:` block. On SLURM, launch each agent in its own job:
+```bash
+#!/bin/bash
+#SBATCH --gres=gpu:1 --mem=32G --time=24:00:00 --array=0-9
+source activate salun-ddpm
+cd /path/to/InTAct-Unl/DDPM
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
 wandb agent <sweep-id>
 ```
 

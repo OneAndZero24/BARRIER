@@ -423,6 +423,9 @@ def intact_unlearn_class(
     # SD parameters
     image_size=512,
     ddim_steps=50,
+    # Save paths
+    model_save_dir="models",
+    logs_dir="models",
 ):
     """
     InTAct unlearning for class forgetting (GA/RL methods).
@@ -532,8 +535,9 @@ def intact_unlearn_class(
                 sleep(0.1)
     
     model.eval()
-    save_model(model, name, None, config_path, diffusers_config_path)
-    save_history(losses, name, f"class_{class_to_forget}")
+    save_model(model, name, None, config_path, diffusers_config_path, 
+               model_save_dir=model_save_dir, device=device)
+    save_history(losses, name, f"class_{class_to_forget}", logs_dir=logs_dir)
     
     return model
 
@@ -562,6 +566,9 @@ def intact_unlearn_nsfw(
     # Data paths
     nsfw_data_path="data/nsfw",
     not_nsfw_data_path="data/not-nsfw",
+    # Save paths
+    model_save_dir="models",
+    logs_dir="models",
 ):
     """
     InTAct unlearning for NSFW concept removal.
@@ -651,8 +658,9 @@ def intact_unlearn_nsfw(
                 sleep(0.1)
     
     model.eval()
-    save_model(model, name, None, config_path, diffusers_config_path)
-    save_history(losses, name, "nsfw")
+    save_model(model, name, None, config_path, diffusers_config_path,
+               model_save_dir=model_save_dir, device=device)
+    save_history(losses, name, "nsfw", logs_dir=logs_dir)
     
     return model
 
@@ -848,8 +856,8 @@ def plot_loss(losses, path, word, n=100):
 
 
 def save_model(model, name, num, compvis_config_file=None, diffusers_config_file=None,
-               device="cpu", save_compvis=True, save_diffusers=True):
-    folder_path = f"models/{name}"
+               device="cpu", save_compvis=True, save_diffusers=True, model_save_dir="models"):
+    folder_path = f"{model_save_dir}/{name}"
     os.makedirs(folder_path, exist_ok=True)
     
     if num is not None:
@@ -862,11 +870,12 @@ def save_model(model, name, num, compvis_config_file=None, diffusers_config_file
     
     if save_diffusers and diffusers_config_file is not None:
         print("Saving Model in Diffusers Format")
-        savemodelDiffusers(name, compvis_config_file, diffusers_config_file, device=device)
+        savemodelDiffusers(name, compvis_config_file, diffusers_config_file, device=device, 
+                          save_dir=model_save_dir)
 
 
-def save_history(losses, name, word_print):
-    folder_path = f"models/{name}"
+def save_history(losses, name, word_print, logs_dir="models"):
+    folder_path = f"{logs_dir}/{name}"
     os.makedirs(folder_path, exist_ok=True)
     with open(f"{folder_path}/loss.txt", "w") as f:
         f.writelines([str(i) + "\n" for i in losses])

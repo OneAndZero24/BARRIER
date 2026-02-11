@@ -14,7 +14,8 @@ wandb:
 # ---- paths (adjust to your environment) ----
 paths:
   pretrained_ckpt_folder: null       # e.g. "results/cifar10/2024_01_01_000000"
-  output_dir: "./results/pipeline"
+  output_dir: "./results/pipeline"   # Where generated images/logs are saved
+  checkpoint_dir: "./results/pipeline/checkpoints"  # Where model checkpoints are saved
   ref_dataset_dir: null              # e.g. "./cifar10_without_label_0" (create with save_base_dataset.py)
   classifier_ckpt: "cifar10_resnet34.pth"   # trained ResNet34 for eval
 
@@ -43,7 +44,7 @@ eta: 1.0
 unlearn:
   mode: "intact"                     # intact | saliency_unlearn | forget | retrain | train_esd
   label_to_forget: 0
-  method: "ga"                       # ga | rl (base method for unlearning)
+  method: "rl"                       # ga | rl (base method for unlearning)
   lr: 1.0e-3
   n_iters: 1500
   batch_size: 128
@@ -66,12 +67,21 @@ intact:
     - "attn_1.q"
     - "attn_1.k"
     - "attn_1.v"
-    - "cond_emb"                     # class embedding projection
+    - "attn.1.q"
+    - "attn.1.k"
+    - "attn.1.v"
+    - "cemb.dense.0"
+    - "cemb.dense.1"
 
 # ---- evaluation ----
 evaluate:
-  n_samples_per_class: 500           # smaller for grids; use 5000 for final
+  n_samples_per_class: 500           # samples per class for classifier eval
+  n_sample_images_per_class: 8       # how many example images per class to upload to wandb
   fid:
+    enabled: true
+    n_samples_per_class: 500         # smaller for fast pipeline eval; use 5000 for final
+
+  classifier:
     enabled: true
     n_samples_per_class: 500
   classifier:

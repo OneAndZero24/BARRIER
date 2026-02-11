@@ -105,8 +105,56 @@ python pipeline.py --config configs/pipeline_nsfw.yaml
 
 ### wandb Sweeps
 
+Sweeps automate hyperparameter search across pipeline runs. Each sweep config
+defines which parameters to vary; the pipeline YAML provides defaults for
+everything else.
+
+**Quick start:**
 ```bash
-# Example: sweep over Classification class-wise hyperparameters
+# 1. Create the sweep (returns a sweep-id)
+cd SD
+wandb sweep configs/sweep_class.yaml
+
+# 2. Launch one or more agents (each runs pipeline.py with different params)
+wandb agent <sweep-id>
+```
+
+**On SLURM** – launch one agent per job:
+```bash
+#!/bin/bash
+#SBATCH --gres=gpu:1 --mem=48G --time=48:00:00 --array=0-9
+source activate ldm
+cd /path/to/InTAct-Unl/SD
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
+wandb agent <sweep-id>
+```
+
+**Sweep parameter format** – dotted keys map to nested YAML fields:
+```yaml
+parameters:
+  unlearn.lr:               # → cfg["unlearn"]["lr"]
+    values: [1e-5, 5e-5]
+  intact.lambda_interval:   # → cfg["intact"]["lambda_interval"]
+    values: [1.0, 10.0]
+```
+
+**Available sweep configs:**
+| Setting | Config | Key parameters |
+|---------|--------|----------------|
+| Classification class-wise | `Classification/configs/sweep_classwise.yaml` | `unlearn_lr`, `unlearn_epochs`, `lambda_interval`, `base_method` |
+| Classification random | `Classification/configs/sweep_random.yaml` | `unlearn_lr`, `unlearn_epochs`, `lambda_interval`, `base_method` |
+| DDPM class forgetting | `DDPM/configs/sweep.yaml` | `lr`, `n_iters`, `lambda_interval`, `method` |
+| SD class forgetting | `SD/configs/sweep_class.yaml` | `lr`, `epochs`, `lambda_interval`, `base_method`, `targets` |
+| SD NSFW removal | `SD/configs/sweep_nsfw.yaml` | `lr`, `epochs`, `lambda_interval`, `targets` |
+
+**Adding parameters:** copy any dotted key from the pipeline YAML into the
+sweep's `parameters:` block. Use `values:` for grid, `min:`/`max:` for random,
+or `distribution:` for Bayesian. See the
+[wandb sweep docs](https://docs.wandb.ai/guides/sweeps) for details.
+
+**Examples:**
+```bash
+# Classification class-wise sweep
 cd Classification
 wandb sweep configs/sweep_classwise.yaml
 wandb agent <sweep-id>

@@ -89,10 +89,17 @@ def build_runner_config(cfg):
 
     # Setup dirs under pipeline output
     output_dir = cfg["paths"].get("output_dir", "./results/pipeline")
+    checkpoint_dir = cfg["paths"].get("checkpoint_dir", None)
     timestamp = datetime.now().strftime("%Y_%m_%d_%H%M%S")
     config.exp_root_dir = os.path.join(output_dir, timestamp)
     config.log_dir = os.path.join(config.exp_root_dir, "logs")
-    config.ckpt_dir = os.path.join(config.exp_root_dir, "ckpts")
+    
+    # Use checkpoint_dir if specified, otherwise default to exp_root_dir/ckpts
+    if checkpoint_dir:
+        config.ckpt_dir = os.path.join(checkpoint_dir, timestamp)
+    else:
+        config.ckpt_dir = os.path.join(config.exp_root_dir, "ckpts")
+    
     os.makedirs(config.log_dir, exist_ok=True)
     os.makedirs(config.ckpt_dir, exist_ok=True)
 
@@ -203,7 +210,8 @@ class ImagePathDataset(torch.utils.data.Dataset):
 
 
 def classifier_eval(sample_path, dataset, label_of_forgotten_class, classifier_ckpt, device):
-    """Evaluate generated samples of forgotten class with a ResNet-34 classifier."""
+    """Evaluate generated samples of forgotten class with a ResNet-34 classifier.
+    Returns dict with classifier/acc_forgotten (lower = better forgetting)."""
     model = torchvision.models.resnet34(pretrained=False)
     model.fc = nn.Linear(model.fc.in_features, 10)
     model.load_state_dict(torch.load(classifier_ckpt, map_location="cpu"))
@@ -241,6 +249,54 @@ def classifier_eval(sample_path, dataset, label_of_forgotten_class, classifier_c
         "classifier/prob_forgotten": prob_sum / n,
         "classifier/acc_forgotten": acc_sum / n,
     }
+
+
+def classifier_eval_remaining(class_samples_dir, label_to_forget, n_classes, classifier_ckpt, device):
+    """
+    Evaluate generated samples of remaining classes with a ResNet-34 classifier.
+    Returns TA = average per-class accuracy across remaining classes.
+    """
+    model = torchvision.models.resnet34(pretrained=False)
+    model.fc = nn.Linear(model.fc.in_features, n_classes)
+    model.load_state_dict(torch.load(classifier_ckpt, map_location="cpu"))
+    model = model.to(device)
+    model.eval()
+
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+    ])
+
+    per_class_acc = {}
+    for cls_idx in range(n_classes):
+        if cls_idx == label_to_forget:
+            continue
+        cls_dir = os.path.join(class_samples_dir, str(cls_idx))
+        if not os.path.isdir(cls_dir):
+            continue
+        ds = ImagePathDataset(cls_dir, transform=transform)
+        if len(ds) == 0:
+            continue
+        loader = DataLoader(ds, batch_size=64)
+
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data in loader:
+                logits = model(data.to(device))
+                preds = torch.argmax(logits, dim=-1)
+                correct += (preds == cls_idx).sum().item()
+                total += data.size(0)
+
+        per_class_acc[cls_idx] = correct / max(total, 1)
+
+    if not per_class_acc:
+        return None, {}
+
+    ta = np.mean(list(per_class_acc.values()))
+    detail = {f"classifier/acc_class_{k}": v for k, v in per_class_acc.items()}
+    return ta, detail
 
 
 # =============================================================================
@@ -313,16 +369,19 @@ def main():
     # =========================================================================
     n_samples = eval_cfg.get("n_samples_per_class", 500)
     cond_scale = cfg.get("cond_scale", 2.0)
+    n_classes = cfg["data"].get("n_classes", 10)
 
-    # 2a: Sample forget class (for classifier evaluation)
+    # 2a: Sample ALL classes (for classifier eval on forgotten + remaining, and wandb images)
     if eval_cfg.get("classifier", {}).get("enabled", True):
-        log.info(f"Step 2a: Sampling {n_samples} images of forgotten class {label_to_forget}")
-        runner_args.classes_to_generate = str(label_to_forget)
+        log.info(f"Step 2a: Sampling {n_samples} images per class (all {n_classes} classes)")
+        all_class_labels = ",".join(str(i) for i in range(n_classes))
+        runner_args.classes_to_generate = all_class_labels
         runner_args.n_samples_per_class = n_samples
         runner_args.mode = "sample_classes"
         sample_runner = Diffusion(runner_args, runner_config)
         sample_runner.sample()
-        forget_sample_dir = os.path.join(unlearn_output, "class_samples", str(label_to_forget))
+        class_samples_dir = os.path.join(unlearn_output, "class_samples")
+        forget_sample_dir = os.path.join(class_samples_dir, str(label_to_forget))
 
     # 2b: Sample remaining classes (for FID)
     if eval_cfg.get("fid", {}).get("enabled", True):
@@ -349,7 +408,9 @@ def main():
     # =========================================================================
     log.info("Step 3: Evaluation")
 
-    # 3a: FID (+ IS, sFID, Precision, Recall)
+    clf_ckpt = cfg["paths"].get("classifier_ckpt", f"{dataset_name}_resnet34.pth")
+
+    # 3a: FID (+ IS, sFID, Precision, Recall) — remaining classes only
     if eval_cfg.get("fid", {}).get("enabled", True):
         ref_dir = cfg["paths"].get("ref_dataset_dir")
         if ref_dir is None:
@@ -357,27 +418,44 @@ def main():
         if os.path.exists(ref_dir) and os.path.exists(fid_sample_dir):
             log.info(f"Computing FID (TF evaluator): {ref_dir} vs {fid_sample_dir}")
             fid_metrics = compute_fid_reference(ref_dir, fid_sample_dir)
-            metrics.update(fid_metrics)
-            for k, v in fid_metrics.items():
+            metrics["FID"] = fid_metrics.pop("fid")
+            metrics.update(fid_metrics)  # IS, sFID, precision, recall
+            for k, v in {**{"FID": metrics["FID"]}, **fid_metrics}.items():
                 log.info(f"  {k} = {v:.4f}")
         else:
             log.warning(f"Skipping FID: ref_dir={ref_dir} exists={os.path.exists(ref_dir)}"
                         f"  samples exist={os.path.exists(fid_sample_dir)}")
             log.warning("Run save_base_dataset.py first to create reference images.")
 
-    # 3b: Classifier evaluation
+    # 3b: UA — Unlearning Accuracy (1 - acc on forgotten class)
     if eval_cfg.get("classifier", {}).get("enabled", True):
-        clf_ckpt = cfg["paths"].get("classifier_ckpt", f"{dataset_name}_resnet34.pth")
         if os.path.exists(clf_ckpt) and os.path.exists(forget_sample_dir):
-            log.info(f"Classifier eval on {forget_sample_dir}")
+            log.info(f"Classifier eval (UA) on forget class {label_to_forget}")
             clf_metrics = classifier_eval(
                 forget_sample_dir, dataset_name, label_to_forget, clf_ckpt, device,
             )
             metrics.update(clf_metrics)
+            ua = 1.0 - clf_metrics.get("classifier/acc_forgotten", 0.0)
+            metrics["UA"] = ua
+            log.info(f"  UA = {ua:.4f}")
             for k, v in clf_metrics.items():
                 log.info(f"  {k} = {v:.4f}")
         else:
-            log.warning(f"Skipping classifier eval: ckpt={clf_ckpt} exist={os.path.exists(clf_ckpt)}")
+            log.warning(f"Skipping UA: ckpt={clf_ckpt} exist={os.path.exists(clf_ckpt)}")
+
+    # 3c: TA — Testing Accuracy (avg accuracy on remaining classes)
+    if eval_cfg.get("classifier", {}).get("enabled", True):
+        if os.path.exists(clf_ckpt) and os.path.exists(class_samples_dir):
+            log.info(f"Classifier eval (TA) on remaining classes")
+            ta, ta_detail = classifier_eval_remaining(
+                class_samples_dir, label_to_forget, n_classes, clf_ckpt, device,
+            )
+            if ta is not None:
+                metrics["TA"] = ta
+                metrics.update(ta_detail)
+                log.info(f"  TA = {ta:.4f}")
+        else:
+            log.warning(f"Skipping TA: class_samples_dir missing")
 
     # =========================================================================
     # Step 4: Log to wandb
@@ -386,16 +464,24 @@ def main():
     wandb.log(metrics)
     wandb.summary.update(metrics)
 
-    # Log sample images
-    forget_img_dir = os.path.join(unlearn_output, "class_samples", str(label_to_forget))
-    if os.path.isdir(forget_img_dir):
-        imgs = sorted(pathlib.Path(forget_img_dir).glob("*.png"))[:16]
-        if imgs:
-            wandb.log({
-                f"samples/forget_class_{label_to_forget}": [
-                    wandb.Image(str(p)) for p in imgs
-                ]
-            })
+    # Log sample images — one panel per class (including forgotten)
+    n_sample_imgs = eval_cfg.get("n_sample_images_per_class", 8)
+    cifar10_classes = ["airplane", "automobile", "bird", "cat", "deer",
+                       "dog", "frog", "horse", "ship", "truck"]
+    class_names = cifar10_classes if n_classes == 10 else [str(i) for i in range(n_classes)]
+
+    for cls_idx in range(n_classes):
+        cls_dir = os.path.join(unlearn_output, "class_samples", str(cls_idx))
+        if os.path.isdir(cls_dir):
+            imgs = sorted(pathlib.Path(cls_dir).glob("*.png"))[:n_sample_imgs]
+            if imgs:
+                cls_name = class_names[cls_idx] if cls_idx < len(class_names) else str(cls_idx)
+                label = f"(FORGET) {cls_name}" if cls_idx == label_to_forget else cls_name
+                wandb.log({
+                    f"samples/{cls_idx}_{cls_name}": [
+                        wandb.Image(str(p), caption=label) for p in imgs
+                    ]
+                })
 
     # Log model checkpoint as artifact
     ckpt_file = os.path.join(runner_config.ckpt_dir, "ckpt.pth")

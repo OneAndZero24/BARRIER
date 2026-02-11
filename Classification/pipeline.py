@@ -87,7 +87,7 @@ def build_args(cfg):
     args.workers = cfg["data"].get("num_workers", 4)
     args.resume = False
     args.checkpoint = None
-    args.save_dir = cfg["paths"].get("output_dir", "./results/pipeline")
+    args.save_dir = cfg["paths"].get("checkpoint_dir", cfg["paths"].get("output_dir", "./results/pipeline"))
     args.model_path = cfg["paths"]["pretrained_ckpt"]
 
     # Training / Unlearning
@@ -277,9 +277,16 @@ def evaluate_all(model, data_loaders, criterion, args, forget_dataset, retain_da
         metrics[f"acc/{name}"] = acc
         log.info(f"  {name} accuracy: {acc:.2f}%")
 
-    # Unlearning Accuracy = 100 - forget accuracy
+    # Standard metric names
+    # UA = Unlearning Accuracy = 100 - forget accuracy
     if "acc/forget" in metrics:
         metrics["UA"] = 100.0 - metrics["acc/forget"]
+    # RA = Retain Accuracy
+    if "acc/retain" in metrics:
+        metrics["RA"] = metrics["acc/retain"]
+    # TA = Test Accuracy
+    if "acc/test" in metrics:
+        metrics["TA"] = metrics["acc/test"]
 
     # SVC-MIA forget efficacy
     try:
@@ -304,6 +311,9 @@ def evaluate_all(model, data_loaders, criterion, args, forget_dataset, retain_da
         for k, v in mia.items():
             metrics[f"mia/{k}"] = v
             log.info(f"  MIA {k}: {v:.4f}")
+        # SalUn convention: MIA = SVC_MIA confidence × 100
+        if "confidence" in mia:
+            metrics["MIA"] = mia["confidence"] * 100
     except Exception as e:
         log.warning(f"SVC_MIA failed: {e}")
 

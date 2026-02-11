@@ -29,8 +29,28 @@ Edit the YAML configs to set:
 
 ### wandb Sweeps
 
+Sweeps run the pipeline with different hyperparameter combinations. The sweep
+YAML specifies which parameters to vary; the pipeline config provides defaults.
+Dotted keys (e.g. `unlearn.unlearn_lr`) map to nested fields.
+
 ```bash
+# Class-wise sweep
 wandb sweep configs/sweep_classwise.yaml
+wandb agent <sweep-id>
+
+# Random data sweep
+wandb sweep configs/sweep_random.yaml
+wandb agent <sweep-id>
+```
+
+To add a new parameter, copy any dotted config key into the sweep's
+`parameters:` block. On SLURM, launch each agent in its own job:
+```bash
+#!/bin/bash
+#SBATCH --gres=gpu:1 --mem=16G --time=4:00:00 --array=0-9
+source activate your-env
+cd /path/to/InTAct-Unl/Classification
+export PYTHONPATH="${PYTHONPATH}:/path/to/InTAct-Unl"
 wandb agent <sweep-id>
 ```
 
