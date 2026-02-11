@@ -12,7 +12,7 @@ from torchvision.utils import save_image
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data_path", type=str, default="./data", help="Path of your cifar10 dataset"
+        "--data_path", type=str, default="../data", help="Path of your cifar10 dataset"
     )
     parser.add_argument(
         "--dataset",
