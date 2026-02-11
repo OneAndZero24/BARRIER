@@ -7,17 +7,17 @@
 
 wandb:
   project: "intact-ddpm"
-  entity: null
+  entity: "oneandzero24"
   group: "cifar10"
   tags: ["ddpm", "cifar10", "intact"]
 
 # ---- paths (adjust to your environment) ----
 paths:
-  pretrained_ckpt_folder: null       # e.g. "results/cifar10/2024_01_01_000000"
-  output_dir: "./results/pipeline"   # Where generated images/logs are saved
-  checkpoint_dir: "./results/pipeline/checkpoints"  # Where model checkpoints are saved
-  ref_dataset_dir: null              # e.g. "./cifar10_without_label_0" (create with save_base_dataset.py)
-  classifier_ckpt: "cifar10_resnet34.pth"   # trained ResNet34 for eval
+  pretrained_ckpt_folder: /shared/results/common/miksa/intact/DDPM/results/cifar10/2026_01_13_220000       # e.g. "results/cifar10/2024_01_01_000000"
+  output_dir: "/shared/results/common/miksa/intact/DDPM/results/pipeline"   # Where generated images/logs are saved
+  checkpoint_dir: "/shared/results/common/miksa/intact/DDPM/results/pipeline/checkpoints"  # Where model checkpoints are saved
+  ref_dataset_dir: /shared/results/common/miksa/intact/DDPM/results/cifar10_without_label_0             # e.g. "./cifar10_without_label_0" (create with save_base_dataset.py)
+  classifier_ckpt: "/shared/results/common/miksa/intact/DDPM/results/cifar10_resnet34.pth"   # trained ResNet34 for eval
 
 # ---- model config (existing DDPM YAML) ----
 # This is the standard DDPM config that defines architecture + diffusion schedule.
