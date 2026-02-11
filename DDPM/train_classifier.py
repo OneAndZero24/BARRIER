@@ -104,7 +104,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", choices=["cifar10", "stl10"], help="Dataset type")
     parser.add_argument(
-        "--data_path", type=str, default="./data", help="Path to dataset"
+        "--data_path", type=str, default="../data", help="Path to dataset"
     )
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
