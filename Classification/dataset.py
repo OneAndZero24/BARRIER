@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 
 def cifar10_dataloaders_no_val(
-    batch_size=128, data_dir="datasets/cifar10", num_workers=2
+    batch_size=128, data_dir="data/cifar10", num_workers=2
 ):
     train_transform = transforms.Compose(
         [
@@ -72,7 +72,7 @@ def cifar10_dataloaders_no_val(
 
 def svhn_dataloaders(
     batch_size=128,
-    data_dir="datasets/svhn",
+    data_dir="data/svhn",
     num_workers=2,
     class_to_replace: int = None,
     num_indexes_to_replace=None,
@@ -180,7 +180,7 @@ def svhn_dataloaders(
 
 def cifar100_dataloaders(
     batch_size=128,
-    data_dir="datasets/cifar100",
+    data_dir="data/cifar100",
     num_workers=2,
     class_to_replace: int = None,
     num_indexes_to_replace=None,
@@ -295,7 +295,7 @@ def cifar100_dataloaders(
 
 
 def cifar100_dataloaders_no_val(
-    batch_size=128, data_dir="datasets/cifar100", num_workers=2
+    batch_size=128, data_dir="data/cifar100", num_workers=2
 ):
     train_transform = transforms.Compose(
         [
@@ -432,7 +432,7 @@ class TinyImageNet:
     def data_loaders(
         self,
         batch_size=128,
-        data_dir="datasets/tiny",
+        data_dir="data/tiny",
         num_workers=2,
         class_to_replace: int = None,
         num_indexes_to_replace=None,
@@ -528,7 +528,7 @@ class TinyImageNet:
 
 def cifar10_dataloaders(
     batch_size=128,
-    data_dir="datasets/cifar10",
+    data_dir="data/cifar10",
     num_workers=2,
     random_to_replace: int = None,
     class_to_replace: int = None,
