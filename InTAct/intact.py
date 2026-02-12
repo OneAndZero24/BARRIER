@@ -292,7 +292,7 @@ class UnlearnIntervalProtection:
             
             # Move snapshots to GPU only when needed for computation
             delta_W_raw = target_layer.weight - self.params_snapshot[w_name].to(device)
-            delta_b = (target_layer.bias - self.params_snapshot[b_name].to(device)) if b_name else torch.tensor(0.0, device=device)
+            delta_b = (target_layer.bias - self.params_snapshot[b_name].to(device)) if b_name else None
             
             if isinstance(target_layer, nn.Conv2d):
                 mu_spatial = mu.view(1, -1, 1, 1)
@@ -302,7 +302,7 @@ class UnlearnIntervalProtection:
                 
                 mean_response = torch.nn.functional.conv2d(
                     mu_spatial, delta_W_raw, 
-                    bias=delta_b if isinstance(delta_b, torch.Tensor) else None,
+                    bias=delta_b,
                     stride=target_layer.stride, 
                     padding=target_layer.padding,
                     dilation=target_layer.dilation,
@@ -354,10 +354,7 @@ class UnlearnIntervalProtection:
                 num_layers += 1
                 layer_loss = torch.tensor(0.0, device=device)
 
-                if isinstance(delta_b, torch.Tensor):
-                    db = delta_b
-                else:
-                    db = torch.tensor(0.0, device=device)
+                db = delta_b if delta_b is not None else torch.tensor(0.0, device=device)
                 
                 global_shift = torch.matmul(delta_W, mu) + db
                 layer_loss = layer_loss + global_shift.pow(2).mean()
