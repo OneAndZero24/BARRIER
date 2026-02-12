@@ -37,12 +37,10 @@ fields in the pipeline YAML.
 
 ```bash
 # Class forgetting sweep
-wandb sweep configs/sweep_class.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep_class
 
 # NSFW removal sweep
-wandb sweep configs/sweep_nsfw.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep_nsfw
 ```
 
 To add a new sweep parameter, copy any dotted config key into the sweep's

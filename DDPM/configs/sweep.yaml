@@ -22,8 +22,6 @@ parameters:
   unlearn.n_iters:
     values: [1000, 1500, 3000]
   intact.lambda_interval:
-    values: [1.0, 10.0, 100.0]
-  intact.use_actual_bounds:
-    values: [true, false]
+    values: [0.1, 1.0, 5.0, 10.0, 100.0]
   unlearn.method:
-    values: ["ga", "rl"]
+    values: ["rl"]

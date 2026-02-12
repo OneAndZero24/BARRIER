@@ -20,12 +20,8 @@ command:
 
 parameters:
   unlearn.lr:
-    values: [1.0e-5, 5.0e-5, 1.0e-4]
+    values: [1.0e-5, 5.0e-5, 5.0e-6, 1.0e-4]
   unlearn.epochs:
     values: [2, 3, 5]
   intact.lambda_interval:
-    values: [0.5, 1.0, 5.0]
-  intact.targets:
-    values:
-      - ["to_q", "to_k", "to_v"]
-      - ["to_q", "to_k", "to_v", "to_out.0"]
+    values: [0.5, 1.0, 5.0, 10.0, 100.0]

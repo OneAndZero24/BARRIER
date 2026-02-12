@@ -35,12 +35,10 @@ Dotted keys (e.g. `unlearn.unlearn_lr`) map to nested fields.
 
 ```bash
 # Class-wise sweep
-wandb sweep configs/sweep_classwise.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep_classwise
 
 # Random data sweep
-wandb sweep configs/sweep_random.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep_random
 ```
 
 To add a new parameter, copy any dotted config key into the sweep's

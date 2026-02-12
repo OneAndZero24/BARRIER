@@ -33,8 +33,7 @@ YAML specifies which parameters to vary; the pipeline config provides defaults.
 Dotted keys (e.g. `unlearn.lr`) map to nested fields.
 
 ```bash
-wandb sweep configs/sweep.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep
 ```
 
 To add a new parameter, copy any dotted config key into the sweep's

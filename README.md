@@ -111,12 +111,9 @@ everything else.
 
 **Quick start:**
 ```bash
-# 1. Create the sweep (returns a sweep-id)
+# Use the convenience script that creates sweep and starts agent
 cd SD
-wandb sweep configs/sweep_class.yaml
-
-# 2. Launch one or more agents (each runs pipeline.py with different params)
-wandb agent <sweep-id>
+./run_sweep.sh sweep_class
 ```
 
 **On SLURM** – launch one agent per job:
@@ -156,18 +153,21 @@ or `distribution:` for Bayesian. See the
 ```bash
 # Classification class-wise sweep
 cd Classification
-wandb sweep configs/sweep_classwise.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep_classwise
+
+# Classification random sweep
+./run_sweep.sh sweep_random
 
 # DDPM sweep
 cd DDPM
-wandb sweep configs/sweep.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep
 
 # SD class sweep
 cd SD
-wandb sweep configs/sweep_class.yaml
-wandb agent <sweep-id>
+./run_sweep.sh sweep_class
+
+# SD NSFW sweep
+./run_sweep.sh sweep_nsfw
 ```
 
 ### SLURM
