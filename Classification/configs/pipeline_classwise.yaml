@@ -53,7 +53,7 @@ unlearn:
 # ---- InTAct parameters (only used when method=intact) ----
 intact:
   base_method: "rl"                # ga | rl
-  targets: ["Linear"]                  # layer name patterns to protect
+  targets: ["layer3", "layer4", "Linear"]  # Protect feature layers + classifier (= make trainable)
   lambda_interval: 100.0
   lower_percentile: 0.05
   upper_percentile: 0.95
