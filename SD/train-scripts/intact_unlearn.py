@@ -103,7 +103,8 @@ def sd_forward_fn(model, batch, device, prompts=None, data_transform_fn=None, be
     if prompts is not None and labels is not None:
         txt = [prompts[label] for label in labels]
     elif prompts is not None:
-        txt = prompts[:n]
+        # No labels (e.g. NSFW datasets) — repeat first prompt for all images
+        txt = [prompts[0]] * n
     else:
         txt = [""] * n
     
