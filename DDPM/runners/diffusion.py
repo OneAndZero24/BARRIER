@@ -815,8 +815,10 @@ class Diffusion(object):
 
     def sample(self):
         model = Conditional_Model(self.config)
+        # Prefer config.ckpt_dir (set by pipeline), fall back to legacy path
+        ckpt_path = os.path.join(self.config.ckpt_dir, "ckpt.pth") if hasattr(self.config, 'ckpt_dir') else os.path.join(self.args.ckpt_folder, "ckpts/ckpt.pth")
         states = torch.load(
-            os.path.join(self.args.ckpt_folder, "ckpts/ckpt.pth"),
+            ckpt_path,
             map_location=self.device,
         )
 
