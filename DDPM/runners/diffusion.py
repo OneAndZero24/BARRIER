@@ -373,29 +373,29 @@ class Diffusion(object):
             if self.config.model.ema:
                 ema_helper.update(model)
 
-            if (step + 1) % config.training.snapshot_freq == 0:
-                states = [
-                    model.state_dict(),
-                    optimizer.state_dict(),
-                    # epoch,
-                    step,
-                ]
-                if config.model.ema:
-                    states.append(ema_helper.state_dict())
+        # Save checkpoint and samples at the end of training
+        logging.info("Training completed. Saving final checkpoint and generating samples...")
+        states = [
+            model.state_dict(),
+            optimizer.state_dict(),
+            config.training.n_iters - 1,
+        ]
+        if config.model.ema:
+            states.append(ema_helper.state_dict())
 
-                torch.save(
-                    states,
-                    os.path.join(config.ckpt_dir, "ckpt.pth"),
-                )
+        torch.save(
+            states,
+            os.path.join(config.ckpt_dir, "ckpt.pth"),
+        )
 
-                test_model = (
-                    ema_helper.ema_copy(model)
-                    if config.model.ema
-                    else copy.deepcopy(model)
-                )
-                test_model.eval()
-                self.sample_visualization(test_model, step, args.cond_scale)
-                del test_model
+        test_model = (
+            ema_helper.ema_copy(model)
+            if config.model.ema
+            else copy.deepcopy(model)
+        )
+        test_model.eval()
+        self.sample_visualization(test_model, "final", args.cond_scale)
+        del test_model
 
 
     def retrain(self):
@@ -458,28 +458,29 @@ class Diffusion(object):
             if self.config.model.ema:
                 ema_helper.update(model)
 
-            if (step + 1) % self.config.training.snapshot_freq == 0:
-                states = [
-                    model.state_dict(),
-                    optimizer.state_dict(),
-                    step,
-                ]
-                if self.config.model.ema:
-                    states.append(ema_helper.state_dict())
+        # Save checkpoint and samples at the end of training
+        logging.info("Training completed. Saving final checkpoint and generating samples...")
+        states = [
+            model.state_dict(),
+            optimizer.state_dict(),
+            self.config.training.n_iters - 1,
+        ]
+        if self.config.model.ema:
+            states.append(ema_helper.state_dict())
 
-                torch.save(
-                    states,
-                    os.path.join(self.config.ckpt_dir, "ckpt.pth"),
-                )
+        torch.save(
+            states,
+            os.path.join(self.config.ckpt_dir, "ckpt.pth"),
+        )
 
-                test_model = (
-                    ema_helper.ema_copy(model)
-                    if self.config.model.ema
-                    else copy.deepcopy(model)
-                )
-                test_model.eval()
-                self.sample_visualization(test_model, step, args.cond_scale)
-                del test_model
+        test_model = (
+            ema_helper.ema_copy(model)
+            if self.config.model.ema
+            else copy.deepcopy(model)
+        )
+        test_model.eval()
+        self.sample_visualization(test_model, "final", args.cond_scale)
+        del test_model
 
     def saliency_unlearn(self):
         args, config = self.args, self.config
@@ -597,28 +598,29 @@ class Diffusion(object):
             if self.config.model.ema:
                 ema_helper.update(model)
 
-            if (step + 1) % self.config.training.snapshot_freq == 0:
-                states = [
-                    model.state_dict(),
-                    optimizer.state_dict(),
-                    step,
-                ]
-                if self.config.model.ema:
-                    states.append(ema_helper.state_dict())
+        # Save checkpoint and samples at the end of training
+        logging.info("Training completed. Saving final checkpoint and generating samples...")
+        states = [
+            model.state_dict(),
+            optimizer.state_dict(),
+            self.config.training.n_iters - 1,
+        ]
+        if self.config.model.ema:
+            states.append(ema_helper.state_dict())
 
-                torch.save(
-                    states,
-                    os.path.join(self.config.ckpt_dir, "ckpt.pth"),
-                )
+        torch.save(
+            states,
+            os.path.join(self.config.ckpt_dir, "ckpt.pth"),
+        )
 
-                test_model = (
-                    ema_helper.ema_copy(model)
-                    if self.config.model.ema
-                    else copy.deepcopy(model)
-                )
-                test_model.eval()
-                self.sample_visualization(test_model, step, args.cond_scale)
-                del test_model
+        test_model = (
+            ema_helper.ema_copy(model)
+            if self.config.model.ema
+            else copy.deepcopy(model)
+        )
+        test_model.eval()
+        self.sample_visualization(test_model, "final", args.cond_scale)
+        del test_model
 
     def intact_unlearn(self):
         """
@@ -679,7 +681,10 @@ class Diffusion(object):
         # Freeze all parameters except target layers
         protection.freeze_non_target_params(model)
 
-        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        # Use get_trainable_params() to get only the target layer parameters.
+        # NOTE: freeze_non_target_params does NOT set requires_grad=False,
+        # so filtering by requires_grad would incorrectly include ALL params.
+        trainable_params = protection.get_trainable_params(model)
 
         optimizer = get_optimizer(config, trainable_params)
         criteria = torch.nn.MSELoss()
@@ -766,31 +771,31 @@ class Diffusion(object):
             # Update EMA
             if self.config.model.ema:
                 ema_helper.update(model)
-            
-            # === CHECKPOINTING ===
-            if (step + 1) % self.config.training.snapshot_freq == 0:
-                states = [
-                    model.state_dict(),
-                    optimizer.state_dict(),
-                    step,
-                ]
-                if self.config.model.ema:
-                    states.append(ema_helper.state_dict())
-                
-                torch.save(
-                    states,
-                    os.path.join(self.config.ckpt_dir, "ckpt.pth"),
-                )
-                logging.info(f"Checkpoint saved at step {step}")
-                
-                test_model = (
-                    ema_helper.ema_copy(model)
-                    if self.config.model.ema
-                    else copy.deepcopy(model)
-                )
-                test_model.eval()
-                self.sample_visualization(test_model, step, args.cond_scale)
-                del test_model
+        
+        # === FINAL CHECKPOINTING ===
+        logging.info("Training completed. Saving final checkpoint and generating samples...")
+        states = [
+            model.state_dict(),
+            optimizer.state_dict(),
+            config.training.n_iters - 1,
+        ]
+        if self.config.model.ema:
+            states.append(ema_helper.state_dict())
+        
+        torch.save(
+            states,
+            os.path.join(self.config.ckpt_dir, "ckpt.pth"),
+        )
+        logging.info("Final checkpoint saved")
+        
+        test_model = (
+            ema_helper.ema_copy(model)
+            if self.config.model.ema
+            else copy.deepcopy(model)
+        )
+        test_model.eval()
+        self.sample_visualization(test_model, "final", args.cond_scale)
+        del test_model
 
     def load_ema_model(self):
         model = Conditional_Model(self.config)

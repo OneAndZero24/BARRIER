@@ -1,5 +1,5 @@
 data:
-    path: ./data
+    path: ../data
     dataset: CIFAR10
     image_size: 32
     channels: 3
@@ -33,14 +33,14 @@ diffusion:
     num_diffusion_timesteps: 1000
 
 training:
-    batch_size: 8
+    batch_size: 128
     n_iters: 1500
     snapshot_freq: 150
     log_freq: 50
     visualization_samples: 100
     
     # InTAct-specific parameters
-    lambda_interval: 50.0         # Protection loss weight (high to balance GA losses)
+    lambda_interval: 1.0         # Protection loss weight (high to balance GA losses)
     lower_percentile: 0.05         # Activation safe zone lower bound
     upper_percentile: 0.95         # Activation safe zone upper bound
     reduced_dim: 32                # PCA dimension for efficiency
@@ -50,13 +50,13 @@ training:
     use_actual_bounds: true        # Use actual min/max from remain+forget instead of scaled bounds
 
 sampling:
-    batch_size: 8
+    batch_size: 128
     last_only: True
 
 optim:
     weight_decay: 0.000
     optimizer: "Adam"
-    lr: 0.005
+    lr: 0.001
     beta1: 0.9
     amsgrad: false
     eps: 0.00000001

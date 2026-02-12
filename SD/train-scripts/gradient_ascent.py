@@ -25,6 +25,7 @@ def gradient_ascent(
     device,
     image_size=512,
     ddim_steps=50,
+    model_save_dir="models",
 ):
     # MODEL TRAINING SETUP
     model = setup_model(config_path, ckpt_path, device)
@@ -113,6 +114,7 @@ def gradient_ascent(
         save_diffusers=True,
         compvis_config_file=config_path,
         diffusers_config_file=diffusers_config_path,
+        model_save_dir=model_save_dir,
     )
     save_history(losses, name, classes)
 
@@ -142,9 +144,10 @@ def save_model(
     device="cpu",
     save_compvis=True,
     save_diffusers=True,
+    model_save_dir="models",
 ):
     # SAVE MODEL
-    folder_path = f"models/{name}"
+    folder_path = f"{model_save_dir}/{name}"
     os.makedirs(folder_path, exist_ok=True)
     if num is not None:
         path = f"{folder_path}/{name}-epoch_{num}.pt"
@@ -156,7 +159,8 @@ def save_model(
     if save_diffusers:
         print("Saving Model in Diffusers Format")
         savemodelDiffusers(
-            name, compvis_config_file, diffusers_config_file, device=device
+            name, compvis_config_file, diffusers_config_file, device=device,
+            save_dir=model_save_dir
         )
 
 

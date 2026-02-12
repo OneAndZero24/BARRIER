@@ -75,12 +75,12 @@ intact:
 
 # ---- evaluation ----
 evaluate:
-  n_samples_per_class: 500           # samples per class for classifier eval
+  n_samples_per_class: 100           # samples per class for classifier eval
   n_sample_images_per_class: 8       # how many example images per class to upload to wandb
   fid:
     enabled: true
-    n_samples_per_class: 500         # smaller for fast pipeline eval; use 5000 for final
+    n_samples_per_class: 100         # smaller for fast pipeline eval; use 5000 for final
 
   classifier:
     enabled: true
-    n_samples_per_class: 500
+    n_samples_per_class: 100

@@ -122,6 +122,7 @@ def run_unlearn_class(cfg, device_str):
             diffusers_config_path=cfg["paths"]["diffusers_config"],
             device=device_str,
             image_size=uc.get("image_size", 512),
+            model_save_dir=model_save_dir,
         )
     elif method == "rl":
         from random_label import certain_label
@@ -138,6 +139,7 @@ def run_unlearn_class(cfg, device_str):
             diffusers_config_path=cfg["paths"]["diffusers_config"],
             device=device_str,
             image_size=uc.get("image_size", 512),
+            model_save_dir=model_save_dir,
         )
     else:
         raise ValueError(f"Unknown class unlearn method: {method}")
@@ -194,6 +196,7 @@ def run_unlearn_nsfw(cfg, device_str):
             diffusers_config_path=cfg["paths"]["diffusers_config"],
             device=device_str,
             image_size=uc.get("image_size", 512),
+            model_save_dir=model_save_dir,
         )
     else:
         raise ValueError(f"Unknown NSFW unlearn method: {method}")
@@ -248,6 +251,7 @@ def generate_images(cfg, model_name, device_str):
     eval_cfg = cfg.get("evaluate", {})
     setting = cfg["pipeline"]["setting"]
     output_dir = cfg["paths"].get("output_dir", "./evaluation")
+    model_save_dir = cfg["paths"].get("model_save_dir", "models")
 
     if setting == "sd_nsfw":
         prompts_path = cfg["paths"].get("nsfw_prompts", "prompts/unsafe-prompts4703.csv")
@@ -259,6 +263,7 @@ def generate_images(cfg, model_name, device_str):
     os.makedirs(save_path, exist_ok=True)
 
     log.info(f"Generating images: model={model_name}, prompts={prompts_path}, n={num_samples}")
+    log.info(f"  output_dir={output_dir}, model_dir={model_save_dir}")
 
     # Import generate_images from eval-scripts
     eval_scripts_dir = str(Path(__file__).parent / "eval-scripts")
@@ -274,6 +279,7 @@ def generate_images(cfg, model_name, device_str):
         image_size=cfg["unlearn"].get("image_size", 512),
         ddim_steps=eval_cfg.get("ddim_steps", 100),
         num_samples=num_samples,
+        model_dir=model_save_dir,
     )
 
     return os.path.join(save_path, model_name)
@@ -465,6 +471,7 @@ def generate_nsfw_probe_images(model_name, output_dir, eval_cfg, device_str, cfg
         image_size=cfg["unlearn"].get("image_size", 512),
         ddim_steps=eval_cfg.get("ddim_steps", 100),
         num_samples=num_samples,
+        model_dir=cfg["paths"].get("model_save_dir", "models"),
     )
 
     probe_dir = os.path.join(probe_base, model_name)

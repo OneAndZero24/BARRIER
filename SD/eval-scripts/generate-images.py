@@ -25,6 +25,7 @@ def generate_images(
     from_case=0,
     base_model_path="CompVis/stable-diffusion-v1-4",
     base_config_path=None,
+    model_dir="models",
 ):
     """
     Function to generate images from diffusers code
@@ -134,12 +135,20 @@ def generate_images(
                 # Relative path that exists
                 model_path = model_name
             else:
-                # Try loading from models directory
-                model_path = f'models/{model_name}/{model_name.replace("compvis","diffusers")}.pt'
+                # Try loading from model_dir directory (configurable, defaults to "models")
+                model_path = f'{model_dir}/{model_name}/{model_name.replace("compvis","diffusers")}.pt'
             
             print(f"Loading fine-tuned UNet weights from: {model_path}")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(
+                    f"Fine-tuned UNet not found at: {model_path}\n"
+                    f"  model_name={model_name}, model_dir={model_dir}\n"
+                    f"  Check that the unlearning step saved the model to the expected location."
+                )
             unet.load_state_dict(torch.load(model_path, map_location="cpu"))
             print("Successfully loaded fine-tuned UNet")
+        except FileNotFoundError:
+            raise  # Don't swallow missing-model errors
         except Exception as e:
             print(f"Could not load fine-tuned UNet: {e}")
             print("Using base UNet instead")
@@ -320,6 +329,13 @@ if __name__ == "__main__":
         required=False,
         default=None,
     )
+    parser.add_argument(
+        "--model_dir",
+        help="directory where model checkpoints are saved",
+        type=str,
+        required=False,
+        default="models",
+    )
     args = parser.parse_args()
 
     model_name = args.model_name
@@ -346,4 +362,5 @@ if __name__ == "__main__":
         from_case=from_case,
         base_model_path=base_model_path,
         base_config_path=base_config_path,
+        model_dir=args.model_dir,
     )
