@@ -84,5 +84,3 @@ evaluate:
   classifier:
     enabled: true
     n_samples_per_class: 500
-  classifier:
-    enabled: true

@@ -13,7 +13,7 @@ wandb:
 
 paths:
   data_dir: "../data"
-  pretrained_ckpt: "/shared/results/common/miksa/intact/Cls/random/checkpoints/resnet18_cifar10_best.pth"           # e.g. "./checkpoints/resnet18_cifar10_best.pth"
+  pretrained_ckpt: "/shared/results/common/miksa/intact/Cls/models/0checkpoint.pth.tar"           # e.g. "./checkpoints/resnet18_cifar10_best.pth"
   output_dir: "/shared/results/common/miksa/intact/Cls/random/"  # Where generated outputs/logs are saved
   checkpoint_dir: "/shared/results/common/miksa/intact/Cls/random/checkpoints"  # Where model checkpoints are saved
 
