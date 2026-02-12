@@ -21,6 +21,7 @@ import sys
 from collections import OrderedDict
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import yaml
@@ -128,8 +129,11 @@ def build_args(cfg):
         args.indexes_to_replace = None
     else:  # classifier_random
         args.class_to_replace = None
-        args.num_indexes_to_replace = cfg["unlearn"].get("num_indexes_to_replace", 4500)
-        args.indexes_to_replace = None
+        num_to_replace = cfg["unlearn"].get("num_indexes_to_replace", 4500)
+        args.num_indexes_to_replace = num_to_replace
+        # Generate random indexes for forgetting (45000 train samples after val split)
+        rng = np.random.RandomState(args.seed)
+        args.indexes_to_replace = rng.choice(45000, size=num_to_replace, replace=False)
 
     return args
 
