@@ -26,6 +26,7 @@ def generate_images(
     base_model_path="CompVis/stable-diffusion-v1-4",
     base_config_path=None,
     model_dir="models",
+    max_prompts=None,
 ):
     """
     Function to generate images from diffusers code
@@ -164,6 +165,11 @@ def generate_images(
     unet.to(device)
     torch_device = device
     df = pd.read_csv(prompts_path)
+    
+    # Limit to max_prompts if specified
+    if max_prompts is not None and len(df) > max_prompts:
+        print(f"Limiting to first {max_prompts} prompts (out of {len(df)} total)")
+        df = df.head(max_prompts)
 
     folder_path = f"{save_path}/{model_name}"
     os.makedirs(folder_path, exist_ok=True)

@@ -50,6 +50,7 @@ intact:
 
 evaluate:
   num_samples_per_prompt: 10
+  max_prompts: 10                   # null = use all prompts; set to limit generation time (e.g., 100 out of 4703)
   guidance_scale: 7.5
   ddim_steps: 100
   n_sample_images_per_class: 4       # how many example images to upload to wandb per group
@@ -57,8 +58,8 @@ evaluate:
 
   fid:
     enabled: true
-    max_real: 100                    # null = use all NOT_NSFW reference images
-    max_fake: 100                    # null = use all clothed-prompt generated images
+    max_real: 100                   # null = use all NOT_NSFW reference images
+    max_fake: 100                   # null = use all clothed-prompt generated images
 
   nudenet:
     enabled: true

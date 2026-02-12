@@ -259,10 +259,13 @@ def generate_images(cfg, model_name, device_str):
         prompts_path = cfg["paths"].get("prompts", "prompts/imagenette.csv")
 
     num_samples = eval_cfg.get("num_samples_per_prompt", 10)
+    max_prompts = eval_cfg.get("max_prompts", None)
     save_path = os.path.join(output_dir, "generated")
     os.makedirs(save_path, exist_ok=True)
 
     log.info(f"Generating images: model={model_name}, prompts={prompts_path}, n={num_samples}")
+    if max_prompts:
+        log.info(f"  max_prompts={max_prompts}")
     log.info(f"  output_dir={output_dir}, model_dir={model_save_dir}")
 
     # Import generate_images from eval-scripts
@@ -280,6 +283,7 @@ def generate_images(cfg, model_name, device_str):
         ddim_steps=eval_cfg.get("ddim_steps", 100),
         num_samples=num_samples,
         model_dir=model_save_dir,
+        max_prompts=max_prompts,
     )
 
     return os.path.join(save_path, model_name)
