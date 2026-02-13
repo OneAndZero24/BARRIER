@@ -218,7 +218,7 @@ def run_intact_unlearn(cfg, model, data_loaders, criterion, device):
 
     lr = cfg["unlearn"].get("unlearn_lr", 0.01)
     optimizer = torch.optim.SGD(
-        trainable, lr=lr,
+        trainable, lr=float(lr),
         momentum=cfg["unlearn"].get("momentum", 0.9),
         weight_decay=cfg["unlearn"].get("weight_decay", 5e-4),
     )
