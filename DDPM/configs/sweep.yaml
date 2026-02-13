@@ -8,6 +8,8 @@
 
 program: pipeline.py
 method: grid
+entity: oneandzero24
+project: intact-ddpm
 
 command:
   - ${env}

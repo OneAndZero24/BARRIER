@@ -10,6 +10,8 @@
 program: pipeline.py
 method: grid
 name: sd-nsfw-sweep
+entity: oneandzero24
+project: intact-sd
 
 command:
   - ${env}

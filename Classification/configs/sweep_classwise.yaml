@@ -8,6 +8,8 @@
 
 program: pipeline.py
 method: grid                          # grid | random | bayes
+entity: oneandzero24
+project: intact-classification
 
 command:
   - ${env}
