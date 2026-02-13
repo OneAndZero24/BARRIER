@@ -87,7 +87,7 @@ def sd_forward_fn(model, batch, device, prompts=None, data_transform_fn=None, be
         num_timesteps: Number of diffusion timesteps
     """
     # Handle both (images, labels) and images-only batches
-    if isinstance(batch, (tuple, list)) and len(batch) == 2 and not isinstance(batch[0], torch.Tensor):
+    if isinstance(batch, (tuple, list)) and len(batch) == 2 and isinstance(batch[0], torch.Tensor):
         # batch is (images, labels) tuple from DataLoader
         images, labels = batch
     else:
