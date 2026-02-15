@@ -1,5 +1,5 @@
 """
-Redirect all model / dataset caches to /shared/results/.cache so that
+Redirect all model / dataset caches to /shared/results/common/miksa/.cache so that
 the home-directory disk quota is not exceeded.
 
 Import this module **before** any library that downloads models (torch,
@@ -13,7 +13,7 @@ The module is idempotent – re-importing is a no-op.
 
 import os
 
-_CACHE_ROOT = "/shared/results/.cache"
+_CACHE_ROOT = "/shared/results/common/miksa/.cache"
 
 # HuggingFace (hub, datasets, tokenizers, diffusers)
 os.environ.setdefault("HF_HOME", os.path.join(_CACHE_ROOT, "huggingface"))
