@@ -13,11 +13,14 @@ Usage:
     wandb agent <sweep-id>
 """
 
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import setup_cache  # noqa: E402  — must precede torch / HF imports
+
 import argparse
 import copy
 import logging
-import os
-import sys
 from collections import OrderedDict
 from pathlib import Path
 

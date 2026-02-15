@@ -1,3 +1,4 @@
+import os
 from functools import partial
 
 import clip
@@ -365,7 +366,8 @@ class FrozenCLIPImageEmbedder(AbstractEncoder):
         antialias=False,
     ):
         super().__init__()
-        self.model, _ = clip.load(name=model, device=device, jit=jit)
+        self.model, _ = clip.load(name=model, device=device, jit=jit,
+                                      download_root=os.environ.get("CLIP_CACHE_DIR"))
         # We don't use the text part so delete it
         del self.model.transformer
         self.antialias = antialias

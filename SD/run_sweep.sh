@@ -8,6 +8,14 @@
 
 set -e
 
+# Redirect all caches to /shared/results to avoid home-directory quota issues
+export HF_HOME="/shared/results/common/miksa/.cache/huggingface"
+export TORCH_HOME="/shared/results/common/miksa/.cache/torch"
+export XDG_CACHE_HOME="/shared/results/common/miksa/.cache"
+export WANDB_DIR="/shared/results/common/miksa/.cache/wandb"
+export WANDB_CACHE_DIR="/shared/results/common/miksa/.cache/wandb"
+export CLIP_CACHE_DIR="/shared/results/common/miksa/.cache/clip"
+
 MAIN_DIR="configs"
 PROJECT_NAME="intact-sd"
 
