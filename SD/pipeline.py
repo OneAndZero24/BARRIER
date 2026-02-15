@@ -324,8 +324,9 @@ def compute_fid_sd(class_to_forget, images_dir, image_size=512, max_real=None, m
         idxs = np.random.choice(len(fake_set), max_fake, replace=False)
         fake_set = [fake_set[i] for i in idxs]
 
-    real_images = torch.stack(real_set).to(torch.uint8).cpu()
-    fake_images = torch.stack(fake_set).to(torch.uint8).cpu()
+    # setup_fid_data applies Normalize([0.5],[0.5]) → [-1,1]; undo then scale to uint8
+    real_images = ((torch.stack(real_set) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
+    fake_images = ((torch.stack(fake_set) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
 
     fid.update(real_images, real=True)
     fid.update(fake_images, real=False)
@@ -546,8 +547,9 @@ def compute_fid_nsfw(probe_images_dir, not_nsfw_data_path, image_size=512,
         fake_list = [fake_list[i] for i in idxs]
 
     log.info(f"  FID NSFW: {len(real_list)} real (NOT_NSFW) vs {len(fake_list)} fake (clothed-prompt)")
-    real_t = torch.stack(real_list).to(torch.uint8).cpu()
-    fake_t = torch.stack(fake_list).to(torch.uint8).cpu()
+    # ToTensor() produces float [0,1]; FID expects uint8 [0,255]
+    real_t = (torch.stack(real_list) * 255).clamp(0, 255).to(torch.uint8).cpu()
+    fake_t = (torch.stack(fake_list) * 255).clamp(0, 255).to(torch.uint8).cpu()
 
     fid = FID(feature=64)
     fid.update(real_t, real=True)

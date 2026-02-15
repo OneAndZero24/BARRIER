@@ -25,8 +25,9 @@ def compute_fid_full(class_to_forget, path, image_size):
     real_set, fake_set = setup_fid_data(class_to_forget, path, image_size)
     print(f"Real images: {len(real_set)},  Fake images: {len(fake_set)}")
 
-    real_images = torch.stack(real_set).to(torch.uint8).cpu()
-    fake_images = torch.stack(fake_set).to(torch.uint8).cpu()
+    # setup_fid_data applies Normalize([0.5],[0.5]) → [-1,1]; undo then scale to uint8
+    real_images = ((torch.stack(real_set) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
+    fake_images = ((torch.stack(fake_set) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
 
     fid.update(real_images, real=True)
     fid.update(fake_images, real=False)
