@@ -448,7 +448,10 @@ def generate_nsfw_probe_images(model_name, output_dir, eval_cfg, device_str, cfg
     """
     Generate probe images from explicit nude / clothed prompts for NSFW eval.
 
-    Returns the path to the directory containing the probe images.
+    Generates images from **both** the unlearned model and the original
+    (base) model so they can be compared side-by-side in wandb.
+
+    Returns ``(unlearned_probe_dir, original_probe_dir)``.
     Images are named ``0_<n>.png`` (nude prompt) and ``1_<n>.png`` (clothed prompt).
     """
     import csv
@@ -470,21 +473,48 @@ def generate_nsfw_probe_images(model_name, output_dir, eval_cfg, device_str, cfg
     sys.path.insert(0, eval_scripts_dir)
     gen_module = import_module("generate-images")
 
-    gen_module.generate_images(
-        model_name=model_name,
+    common_kwargs = dict(
         prompts_path=csv_path,
-        save_path=probe_base,
         device=device_str,
         guidance_scale=eval_cfg.get("guidance_scale", 7.5),
         image_size=cfg["unlearn"].get("image_size", 512),
         ddim_steps=eval_cfg.get("ddim_steps", 100),
         num_samples=num_samples,
-        model_dir=cfg["paths"].get("model_save_dir", "models"),
+        base_model_path=cfg["paths"].get("sd_ckpt", "CompVis/stable-diffusion-v1-4"),
+        base_config_path=cfg["paths"].get("sd_config"),
     )
 
-    probe_dir = os.path.join(probe_base, model_name)
-    log.info(f"Probe images saved to {probe_dir}")
-    return probe_dir
+    # --- 1. Unlearned model ---
+    log.info("Generating probe images with UNLEARNED model …")
+    unlearned_save = os.path.join(probe_base, "unlearned")
+    os.makedirs(unlearned_save, exist_ok=True)
+    gen_module.generate_images(
+        model_name=model_name,
+        save_path=unlearned_save,
+        model_dir=cfg["paths"].get("model_save_dir", "models"),
+        **common_kwargs,
+    )
+    unlearned_dir = os.path.join(unlearned_save, model_name)
+    log.info(f"Unlearned probe images saved to {unlearned_dir}")
+
+    # --- 2. Original (base) model ---
+    log.info("Generating probe images with ORIGINAL model …")
+    original_save = os.path.join(probe_base, "original")
+    os.makedirs(original_save, exist_ok=True)
+    # Pass empty model_name so no fine-tuned weights are loaded
+    original_model_tag = "original-sd"
+    gen_module.generate_images(
+        model_name="",
+        save_path=original_save,
+        model_dir=cfg["paths"].get("model_save_dir", "models"),
+        **common_kwargs,
+    )
+    # generate-images saves into save_path/model_name; with model_name="" it
+    # saves directly into original_save/ (folder_path = save_path/"")
+    original_dir = os.path.join(original_save, "")
+    log.info(f"Original probe images saved to {original_dir}")
+
+    return unlearned_dir, original_dir
 
 
 def compute_fid_nsfw(probe_images_dir, not_nsfw_data_path, image_size=512,
@@ -558,12 +588,14 @@ def compute_fid_nsfw(probe_images_dir, not_nsfw_data_path, image_size=512,
 
 
 def log_sample_images_per_class(images_dir, setting, class_to_forget=None,
-                                n_per_class=4, probe_dir=None):
+                                n_per_class=4, probe_dir=None,
+                                original_probe_dir=None):
     """
-    Upload a grid of sample images to wandb, grouped by class.
+    Upload sample images to wandb, grouped by class.
 
     For SD class forgetting: one panel per Imagenette class (including forgotten).
-    For SD NSFW: panels for nude-prompt and clothed-prompt probe images.
+    For SD NSFW: side-by-side panels for unlearned vs original model,
+                 both for nude and clothed prompts.  ALL generated images are uploaded.
     """
     import wandb
 
@@ -580,24 +612,64 @@ def log_sample_images_per_class(images_dir, setting, class_to_forget=None,
                         wandb.Image(str(p), caption=label) for p in imgs
                     ]
                 })
-    elif setting == "sd_nsfw" and probe_dir:
-        pdir = pathlib.Path(probe_dir)
-        # Nude-prompt images (case_number=0)
-        nude_imgs = sorted(pdir.glob("0_*.png"))[:n_per_class]
-        if nude_imgs:
+    elif setting == "sd_nsfw":
+        # Upload ALL generated images from the main NSFW prompt set
+        all_generated = sorted([
+            str(f) for ext in ["png", "jpg", "jpeg"]
+            for f in img_dir.rglob(f"*.{ext}")
+        ])
+        if all_generated:
             wandb.log({
-                "samples/nude_prompt": [
-                    wandb.Image(str(p), caption="nude prompt") for p in nude_imgs
+                "generated/all_nsfw_prompt_images": [
+                    wandb.Image(p, caption=f"Unlearned | {os.path.basename(p)}")
+                    for p in all_generated
                 ]
             })
-        # Clothed-prompt images (case_number=1)
-        clothed_imgs = sorted(pdir.glob("1_*.png"))[:n_per_class]
-        if clothed_imgs:
-            wandb.log({
-                "samples/clothed_prompt": [
-                    wandb.Image(str(p), caption="clothed prompt") for p in clothed_imgs
-                ]
-            })
+            log.info(f"Uploaded {len(all_generated)} generated NSFW-prompt images to wandb")
+
+        # --- Side-by-side probe images: Unlearned vs Original ---
+        def _collect_images(directory, pattern):
+            if directory is None:
+                return []
+            d = pathlib.Path(directory)
+            return sorted(d.glob(pattern))
+
+        for case_num, prompt_label in [(0, "nude_prompt"), (1, "clothed_prompt")]:
+            unlearned_imgs = _collect_images(probe_dir, f"{case_num}_*.png")
+            original_imgs = _collect_images(original_probe_dir, f"{case_num}_*.png")
+
+            # Upload ALL unlearned probe images
+            if unlearned_imgs:
+                wandb.log({
+                    f"probe_unlearned/{prompt_label}": [
+                        wandb.Image(str(p), caption=f"UNLEARNED | {prompt_label}")
+                        for p in unlearned_imgs
+                    ]
+                })
+
+            # Upload ALL original probe images
+            if original_imgs:
+                wandb.log({
+                    f"probe_original/{prompt_label}": [
+                        wandb.Image(str(p), caption=f"ORIGINAL | {prompt_label}")
+                        for p in original_imgs
+                    ]
+                })
+
+            # Side-by-side comparison table (pair by index)
+            if unlearned_imgs and original_imgs:
+                n_pairs = min(len(unlearned_imgs), len(original_imgs))
+                columns = ["index", "prompt", "original", "unlearned"]
+                table = wandb.Table(columns=columns)
+                for idx in range(n_pairs):
+                    table.add_data(
+                        idx,
+                        prompt_label,
+                        wandb.Image(str(original_imgs[idx])),
+                        wandb.Image(str(unlearned_imgs[idx])),
+                    )
+                wandb.log({f"comparison/{prompt_label}": table})
+                log.info(f"Uploaded {n_pairs} side-by-side pairs for {prompt_label}")
 
 
 # =============================================================================
@@ -680,9 +752,10 @@ def main():
 
     # --- Probe images for NSFW ---
     probe_dir = None
+    original_probe_dir = None
     if setting == "sd_nsfw":
-        log.info("Generating probe images (nude + clothed prompts) …")
-        probe_dir = generate_nsfw_probe_images(
+        log.info("Generating probe images (nude + clothed prompts) for BOTH models …")
+        probe_dir, original_probe_dir = generate_nsfw_probe_images(
             model_name, cfg["paths"].get("output_dir", "./evaluation"),
             eval_cfg, device_str, cfg,
         )
@@ -720,7 +793,8 @@ def main():
     log_sample_images_per_class(images_dir, setting,
                                 class_to_forget=class_to_forget,
                                 n_per_class=n_sample_imgs,
-                                probe_dir=probe_dir)
+                                probe_dir=probe_dir,
+                                original_probe_dir=original_probe_dir)
 
     # Model artifact
     model_save_dir = cfg["paths"].get("model_save_dir", "models")
