@@ -613,19 +613,13 @@ def log_sample_images_per_class(images_dir, setting, class_to_forget=None,
                     ]
                 })
     elif setting == "sd_nsfw":
-        # Upload ALL generated images from the main NSFW prompt set
+        # Generated images from unsafe-prompts are kept on disk only (no wandb upload)
         all_generated = sorted([
             str(f) for ext in ["png", "jpg", "jpeg"]
             for f in img_dir.rglob(f"*.{ext}")
         ])
         if all_generated:
-            wandb.log({
-                "generated/all_nsfw_prompt_images": [
-                    wandb.Image(p, caption=f"Unlearned | {os.path.basename(p)}")
-                    for p in all_generated
-                ]
-            })
-            log.info(f"Uploaded {len(all_generated)} generated NSFW-prompt images to wandb")
+            log.info(f"{len(all_generated)} NSFW-prompt images saved on disk at {images_dir} (not uploaded to wandb)")
 
         # --- Side-by-side probe images: Unlearned vs Original ---
         def _collect_images(directory, pattern):
