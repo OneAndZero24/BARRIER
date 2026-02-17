@@ -310,8 +310,13 @@ def compute_fid_sd(class_to_forget, images_dir, image_size=512, max_real=None, m
     When max_real / max_fake are set, a random subset of that size is used
     (fast in-pipeline evaluation).  Pass None to use the full sets.
     """
-    sys.path.insert(0, str(Path(__file__).parent / "eval-scripts"))
-    from dataset import setup_fid_data
+    import importlib.util
+    eval_dataset_path = Path(__file__).parent / "eval-scripts" / "dataset.py"
+    spec = importlib.util.spec_from_file_location("eval_dataset", eval_dataset_path)
+    eval_dataset = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eval_dataset)
+    setup_fid_data = eval_dataset.setup_fid_data
+    
     from torchmetrics.image.fid import FID
 
     fid = FID(feature=64)
