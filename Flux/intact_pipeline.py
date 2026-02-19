@@ -1,0 +1,578 @@
+"""
+Unified Pipeline for Flux Concept Unlearning with InTAct.
+
+Orchestrates: Unlearn → Generate Images → Evaluate (UA + FID + CLIP) → Log to wandb.
+
+Supports settings:
+  flux_concept  — Concept erasure (nudity, artistic style, etc.)
+  flux_class    — Imagenette class forgetting (analogous to SD class-wise)
+
+Base methods (all combined with InTAct protection):
+  esd — Erased Stable Diffusion
+  rl  — Random Label / Negative prompt
+  ea  — EraseAnything (ESD + attention deactivation)
+
+Usage:
+    cd Flux
+    python intact_pipeline.py --config configs/intact/pipeline.yaml
+"""
+
+import argparse
+import csv
+import logging
+import os
+import pathlib
+import sys
+from importlib import import_module
+from pathlib import Path
+
+import numpy as np
+import torch
+import yaml
+
+sys.path.insert(0, str(Path(__file__).parent.parent))  # For InTAct
+sys.path.insert(0, str(Path(__file__).parent))          # For Flux modules
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Config helpers
+# =============================================================================
+
+def load_config(path):
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def merge_wandb_config(cfg):
+    """Merge wandb sweep overrides into nested config."""
+    import wandb
+    for key, val in dict(wandb.config).items():
+        parts = key.split(".")
+        d = cfg
+        for p in parts[:-1]:
+            d = d.setdefault(p, {})
+        d[parts[-1]] = val
+    return cfg
+
+
+def get_model_name(cfg):
+    """Derive deterministic model name from config parameters."""
+    uc = cfg.get("unlearn", {})
+    ic = cfg.get("intact", {})
+    method = uc.get("method", "intact")
+    base = uc.get("base_method", "esd")
+    concept = uc.get("key_word", uc.get("concept", "concept"))
+    blocks = ic.get("target_blocks", [12, 14, 16, 18])
+    layers = ic.get("target_layers", ["attn.add_q_proj", "attn.add_k_proj", "attn.add_v_proj"])
+    blocks_str = "-".join(str(b) for b in blocks)
+    layers_str = "_".join([l.split(".")[-1] for l in layers])
+    targets_str = f"blk{blocks_str}_{layers_str}"
+    lam = ic.get("lambda_interval", 1.0)
+    steps = uc.get("max_train_steps", 200)
+    lr = uc.get("learning_rate", 1e-5)
+
+    setting = cfg.get("pipeline", {}).get("setting", "flux_concept")
+    if setting == "flux_class":
+        cls = uc.get("class_to_forget", 0)
+        return f"flux-intact-{base}-class_{cls}-targets_{targets_str}-lambda_{lam}-steps_{steps}-lr_{lr}"
+    else:
+        concept_clean = concept.replace(" ", "_")
+        return f"flux-intact-{base}-{concept_clean}-targets_{targets_str}-lambda_{lam}-steps_{steps}-lr_{lr}"
+
+
+# =============================================================================
+# Step 1: Unlearning
+# =============================================================================
+
+def run_unlearn(cfg, device_str):
+    """Run InTAct unlearning training."""
+    uc = cfg.get("unlearn", {})
+    ic = cfg.get("intact", {})
+    pc = cfg.get("paths", {})
+
+    # Build args namespace from config
+    args = argparse.Namespace()
+
+    # Model
+    args.pretrained_model_name_or_path = uc.get("pretrained_model_name_or_path",
+                                                 "black-forest-labs/FLUX.1-dev")
+    args.revision = uc.get("revision", None)
+    args.variant = uc.get("variant", None)
+    args.mixed_precision = uc.get("mixed_precision", "bf16")
+    args.max_sequence_length = uc.get("max_sequence_length", 256)
+
+    # Training
+    args.base_method = uc.get("base_method", "esd")
+    args.instance_prompt = uc.get("instance_prompt", "")
+    args.neg_prompt = uc.get("neg_prompt", "")
+    args.key_word = uc.get("key_word", None)
+    args.resolution = uc.get("resolution", 512)
+    args.ddim_steps = uc.get("ddim_steps", 28)
+    args.negative_guidance = uc.get("negative_guidance", 1.0)
+    args.learning_rate = uc.get("learning_rate", 1e-5)
+    args.max_train_steps = uc.get("max_train_steps", 200)
+    args.checkpointing_steps = uc.get("checkpointing_steps", 500)
+    args.device = device_str.replace("cuda:", "")
+
+    # EA-specific
+    args.lamb_esd = uc.get("lamb_esd", 1.0)
+    args.lamb_attn = uc.get("lamb_attn", 0.001)
+
+    # InTAct — block-specific targeting
+    args.intact_target_blocks = ic.get("target_blocks", [12, 14, 16, 18])
+    args.intact_target_layers = ic.get("target_layers", ["attn.add_q_proj", "attn.add_k_proj", "attn.add_v_proj"])
+    # Legacy fallback (if someone passes pre-built targets list instead)
+    args.intact_targets = ic.get("targets", None)
+    args.intact_lambda = ic.get("lambda_interval", 1.0)
+    args.intact_lower_pct = ic.get("lower_percentile", 0.05)
+    args.intact_upper_pct = ic.get("upper_percentile", 0.95)
+    args.intact_reduced_dim = ic.get("reduced_dim", 32)
+    args.intact_infinity_scale = ic.get("infinity_scale", 20.0)
+    args.intact_use_actual_bounds = ic.get("use_actual_bounds", True)
+    args.intact_normalize_protection = ic.get("normalize_protection", True)
+    args.intact_n_samples = ic.get("n_samples", 50)
+    args.remain_prompts = uc.get("remain_prompts", None)
+
+    # Paths
+    args.output_dir = pc.get("model_save_dir", "models")
+
+    from intact_train import intact_unlearn
+    model_name = intact_unlearn(args)
+
+    return model_name
+
+
+# =============================================================================
+# Step 2: Generate Images
+# =============================================================================
+
+def generate_evaluation_images(cfg, model_name, device_str):
+    """Generate evaluation images using the fine-tuned model."""
+    ec = cfg.get("evaluate", {})
+    pc = cfg.get("paths", {})
+    uc = cfg.get("unlearn", {})
+    setting = cfg.get("pipeline", {}).get("setting", "flux_concept")
+
+    prompts_path = pc.get("prompts")
+    output_dir = pc.get("output_dir", "evaluation")
+    model_dir = pc.get("model_save_dir", "models")
+
+    save_path = os.path.join(output_dir, "generated")
+    os.makedirs(save_path, exist_ok=True)
+
+    num_samples = ec.get("num_samples_per_prompt", 10)
+    max_prompts = ec.get("max_prompts", None)
+
+    log.info(f"Generating images: model={model_name}, prompts={prompts_path}")
+
+    from eval.generate_images import generate_images
+
+    base_model = uc.get("pretrained_model_name_or_path", "black-forest-labs/FLUX.1-dev")
+
+    images_dir = generate_images(
+        model_name=model_name,
+        prompts_path=prompts_path,
+        save_path=save_path,
+        device=device_str,
+        guidance_scale=ec.get("guidance_scale", 3.5),
+        image_size=uc.get("resolution", 512),
+        ddim_steps=ec.get("ddim_steps", 28),
+        num_samples=num_samples,
+        base_model_path=base_model,
+        model_dir=model_dir,
+        max_prompts=max_prompts,
+    )
+
+    return images_dir
+
+
+def generate_probe_images(cfg, model_name, device_str):
+    """
+    Generate probe images from BOTH the unlearned and original models for comparison.
+
+    Returns (unlearned_dir, original_dir).
+    """
+    ec = cfg.get("evaluate", {})
+    pc = cfg.get("paths", {})
+    uc = cfg.get("unlearn", {})
+    output_dir = pc.get("output_dir", "evaluation")
+
+    probe_base = os.path.join(output_dir, "probe")
+    os.makedirs(probe_base, exist_ok=True)
+
+    # Create probe prompts CSV
+    concept_prompt = uc.get("instance_prompt", "")
+    neg_prompt = uc.get("neg_prompt", "a photo")
+    retain_prompts = uc.get("retain_eval_prompts", [
+        "a photo of a beautiful landscape",
+        "a photo of a cat sitting on a couch",
+    ])
+
+    csv_path = os.path.join(probe_base, "probe_prompts.csv")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["case_number", "prompt", "evaluation_seed"])
+        writer.writeheader()
+        writer.writerow({"case_number": 0, "prompt": concept_prompt, "evaluation_seed": 42})
+        writer.writerow({"case_number": 1, "prompt": neg_prompt, "evaluation_seed": 42})
+        for i, rp in enumerate(retain_prompts, start=2):
+            writer.writerow({"case_number": i, "prompt": rp, "evaluation_seed": 42})
+
+    num_samples = ec.get("n_probe_samples", 5)
+    base_model = uc.get("pretrained_model_name_or_path", "black-forest-labs/FLUX.1-dev")
+    model_dir = pc.get("model_save_dir", "models")
+
+    from eval.generate_images import generate_images as gen_images
+
+    common_kwargs = dict(
+        prompts_path=csv_path,
+        device=device_str,
+        guidance_scale=ec.get("guidance_scale", 3.5),
+        image_size=uc.get("resolution", 512),
+        ddim_steps=ec.get("ddim_steps", 28),
+        num_samples=num_samples,
+        base_model_path=base_model,
+    )
+
+    # Unlearned model
+    log.info("Generating probe images with UNLEARNED model...")
+    unlearned_save = os.path.join(probe_base, "unlearned")
+    os.makedirs(unlearned_save, exist_ok=True)
+    gen_images(model_name=model_name, save_path=unlearned_save,
+               model_dir=model_dir, **common_kwargs)
+    unlearned_dir = os.path.join(unlearned_save, model_name)
+
+    # Original model
+    log.info("Generating probe images with ORIGINAL model...")
+    original_save = os.path.join(probe_base, "original")
+    os.makedirs(original_save, exist_ok=True)
+    gen_images(model_name="", save_path=original_save,
+               model_dir=model_dir, **common_kwargs)
+    original_dir = original_save
+
+    return unlearned_dir, original_dir
+
+
+# =============================================================================
+# Step 3: Evaluate
+# =============================================================================
+
+IMAGENETTE_CLASSES = [
+    "tench", "english_springer", "cassette_player", "chain_saw", "church",
+    "french_horn", "garbage_truck", "gas_pump", "golf_ball", "parachute",
+]
+
+
+def run_evaluation(cfg, model_name, images_dir, device_str):
+    """Run all configured evaluations."""
+    ec = cfg.get("evaluate", {})
+    uc = cfg.get("unlearn", {})
+    pc = cfg.get("paths", {})
+    setting = cfg.get("pipeline", {}).get("setting", "flux_concept")
+
+    metrics = {}
+
+    # --- UA ---
+    if setting == "flux_class":
+        class_to_forget = uc.get("class_to_forget", 0)
+        from eval.evaluate import compute_ua_classification
+        ua = compute_ua_classification(images_dir, class_to_forget, device_str)
+        if ua is not None:
+            metrics["UA"] = ua
+            log.info(f"UA = {ua:.4f}")
+
+    elif setting == "flux_concept":
+        # NSFW detection if enabled
+        if ec.get("nudenet", {}).get("enabled", False):
+            from eval.evaluate import compute_ua_nudenet
+            thresh = ec.get("nudenet", {}).get("threshold", 0.0)
+            ua, nn_extra = compute_ua_nudenet(images_dir, threshold=thresh)
+            if ua is not None:
+                metrics["UA_nudenet"] = ua
+            metrics.update(nn_extra)
+
+        # Concept CLIP similarity
+        if ec.get("clip_ua", {}).get("enabled", True):
+            concept_prompt = uc.get("instance_prompt", "")
+            from eval.evaluate import compute_ua_concept, collect_image_paths
+            img_paths = collect_image_paths(images_dir)
+            if img_paths:
+                clip_sim = compute_ua_concept(images_dir, [concept_prompt], device_str)
+                if clip_sim is not None:
+                    metrics["concept_clip_similarity"] = clip_sim
+
+    # --- FID ---
+    if ec.get("fid", {}).get("enabled", True):
+        fid_cfg = ec.get("fid", {})
+
+        if setting == "flux_class":
+            class_to_forget = uc.get("class_to_forget", 0)
+            from eval.evaluate import compute_fid
+            from eval.dataset import setup_fid_data
+
+            real_list, fake_list = setup_fid_data(class_to_forget, images_dir,
+                                                   uc.get("resolution", 512))
+            if real_list and fake_list:
+                # FID expects file paths; setup_fid_data returns tensors.
+                # Use in-memory approach
+                try:
+                    from torchmetrics.image.fid import FID as FIDMetric
+                    fid = FIDMetric(feature=fid_cfg.get("feature", 64))
+
+                    max_r = fid_cfg.get("max_real")
+                    max_f = fid_cfg.get("max_fake")
+                    if max_r and len(real_list) > max_r:
+                        idxs = np.random.choice(len(real_list), max_r, replace=False)
+                        real_list = [real_list[i] for i in idxs]
+                    if max_f and len(fake_list) > max_f:
+                        idxs = np.random.choice(len(fake_list), max_f, replace=False)
+                        fake_list = [fake_list[i] for i in idxs]
+
+                    real_t = ((torch.stack(real_list) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8)
+                    fake_t = ((torch.stack(fake_list) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8)
+                    fid.update(real_t, real=True)
+                    fid.update(fake_t, real=False)
+                    fid_score = fid.compute().item()
+                    metrics["FID"] = fid_score
+                    log.info(f"FID = {fid_score:.2f}")
+                except Exception as e:
+                    log.warning(f"FID computation failed: {e}")
+
+        elif setting == "flux_concept":
+            # For concept erasure: FID of retain prompts vs. reference
+            ref_data_path = pc.get("reference_data")
+            if ref_data_path and os.path.exists(ref_data_path):
+                from eval.evaluate import compute_fid, collect_image_paths
+                real_paths = collect_image_paths(ref_data_path)
+                fake_paths = collect_image_paths(images_dir)
+                fid_score = compute_fid(
+                    real_paths, fake_paths,
+                    image_size=uc.get("resolution", 512),
+                    max_real=fid_cfg.get("max_real"),
+                    max_fake=fid_cfg.get("max_fake"),
+                )
+                if fid_score is not None:
+                    metrics["FID"] = fid_score
+                    log.info(f"FID = {fid_score:.2f}")
+
+    # --- CLIP Score ---
+    if ec.get("clip_score", {}).get("enabled", True):
+        from eval.evaluate import compute_clip_score, collect_image_paths
+        import pandas as pd
+        prompts_path = pc.get("prompts")
+        if prompts_path and os.path.exists(prompts_path):
+            df = pd.read_csv(prompts_path)
+            img_dir = pathlib.Path(images_dir)
+            all_paths = []
+            all_prompts = []
+            for _, row in df.iterrows():
+                case = int(row.case_number)
+                prompt_text = str(row.prompt)
+                # Find all images for this case
+                for img_path in sorted(img_dir.glob(f"{case}_*.png")):
+                    all_paths.append(str(img_path))
+                    all_prompts.append(prompt_text)
+
+            if all_paths:
+                clip_score = compute_clip_score(all_paths, all_prompts, device_str)
+                if clip_score is not None:
+                    metrics["CLIP_score"] = clip_score
+                    log.info(f"CLIP Score = {clip_score:.4f}")
+
+    return metrics
+
+
+# =============================================================================
+# Step 4: Logging
+# =============================================================================
+
+def log_to_wandb(cfg, metrics, images_dir, probe_dir=None, original_probe_dir=None):
+    """Log metrics and sample images to wandb."""
+    import wandb
+
+    setting = cfg.get("pipeline", {}).get("setting", "flux_concept")
+    uc = cfg.get("unlearn", {})
+    ec = cfg.get("evaluate", {})
+
+    wandb.log(metrics)
+    wandb.summary.update(metrics)
+
+    img_dir = pathlib.Path(images_dir)
+    n_samples = ec.get("n_sample_images_per_class", 4)
+
+    if setting == "flux_class":
+        class_to_forget = uc.get("class_to_forget", 0)
+        for cls_idx, cls_name in enumerate(IMAGENETTE_CLASSES):
+            imgs = sorted(img_dir.glob(f"{cls_idx}_*.png"))[:n_samples]
+            if imgs:
+                label = f"(FORGET) {cls_name}" if cls_idx == int(class_to_forget) else cls_name
+                wandb.log({
+                    f"samples/{cls_idx}_{cls_name}": [
+                        wandb.Image(str(p), caption=label) for p in imgs
+                    ]
+                })
+
+    elif setting == "flux_concept":
+        # Log concept images
+        concept_imgs = sorted(img_dir.glob("0_*.png"))[:n_samples]
+        if concept_imgs:
+            wandb.log({
+                "samples/concept": [
+                    wandb.Image(str(p), caption="FORGET concept")
+                    for p in concept_imgs
+                ]
+            })
+
+        # Log retain images
+        for case_num in range(1, 10):
+            retain_imgs = sorted(img_dir.glob(f"{case_num}_*.png"))[:n_samples]
+            if retain_imgs:
+                wandb.log({
+                    f"samples/retain_{case_num}": [
+                        wandb.Image(str(p), caption=f"retain prompt {case_num}")
+                        for p in retain_imgs
+                    ]
+                })
+
+    # Probe comparison
+    if probe_dir and original_probe_dir:
+        for case_num, prompt_label in [(0, "concept"), (1, "negative")]:
+            unlearned_imgs = sorted(pathlib.Path(probe_dir).glob(f"{case_num}_*.png"))
+            original_imgs = sorted(pathlib.Path(original_probe_dir).glob(f"{case_num}_*.png"))
+
+            if unlearned_imgs:
+                wandb.log({
+                    f"probe_unlearned/{prompt_label}": [
+                        wandb.Image(str(p), caption=f"UNLEARNED | {prompt_label}")
+                        for p in unlearned_imgs
+                    ]
+                })
+            if original_imgs:
+                wandb.log({
+                    f"probe_original/{prompt_label}": [
+                        wandb.Image(str(p), caption=f"ORIGINAL | {prompt_label}")
+                        for p in original_imgs
+                    ]
+                })
+
+            if unlearned_imgs and original_imgs:
+                n_pairs = min(len(unlearned_imgs), len(original_imgs))
+                columns = ["index", "prompt", "original", "unlearned"]
+                table = wandb.Table(columns=columns)
+                for idx in range(n_pairs):
+                    table.add_data(
+                        idx, prompt_label,
+                        wandb.Image(str(original_imgs[idx])),
+                        wandb.Image(str(unlearned_imgs[idx])),
+                    )
+                wandb.log({f"comparison/{prompt_label}": table})
+
+    # Model artifact
+    pc = cfg.get("paths", {})
+    model_dir = pc.get("model_save_dir", "models")
+    model_name = get_model_name(cfg)
+    weights_path = os.path.join(model_dir, f"{model_name}.safetensors")
+    if os.path.exists(weights_path):
+        art = wandb.Artifact(
+            name=f"flux-{setting}-{wandb.run.id}",
+            type="model",
+            metadata=metrics,
+        )
+        art.add_file(weights_path)
+        wandb.log_artifact(art)
+        log.info(f"Model artifact logged: {weights_path}")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(description="Flux InTAct Unlearning Pipeline")
+    parser.add_argument("--config", type=str, required=True)
+    parser.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
+    cli = parser.parse_args()
+
+    cfg = load_config(cli.config)
+
+    # --- wandb ---
+    use_wandb = not cli.no_wandb and cfg.get("wandb", {}).get("project")
+    if use_wandb:
+        import wandb
+        wandb.init(
+            project=cfg["wandb"]["project"],
+            entity=cfg["wandb"].get("entity"),
+            group=cfg["wandb"].get("group"),
+            tags=cfg["wandb"].get("tags", []),
+            config=cfg,
+        )
+        cfg = merge_wandb_config(cfg)
+
+    seed = cfg.get("pipeline", {}).get("seed", 42)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    device_id = cfg.get("pipeline", {}).get("device", "0")
+    device_str = f"cuda:{device_id}"
+    setting = cfg.get("pipeline", {}).get("setting", "flux_concept")
+
+    # =========================================================================
+    # Step 1: Unlearn
+    # =========================================================================
+    log.info(f"=== Step 1: InTAct Unlearning ({setting}) ===")
+    model_name = run_unlearn(cfg, device_str)
+    log.info(f"Model name: {model_name}")
+
+    # Free GPU memory after training
+    torch.cuda.empty_cache()
+
+    # =========================================================================
+    # Step 2: Generate images
+    # =========================================================================
+    log.info("=== Step 2: Generating evaluation images ===")
+    images_dir = generate_evaluation_images(cfg, model_name, device_str)
+    log.info(f"Images saved to {images_dir}")
+
+    # =========================================================================
+    # Step 2b: Probe images
+    # =========================================================================
+    probe_dir = None
+    original_probe_dir = None
+    ec = cfg.get("evaluate", {})
+    if ec.get("probe", {}).get("enabled", True):
+        log.info("=== Step 2b: Generating probe images ===")
+        probe_dir, original_probe_dir = generate_probe_images(cfg, model_name, device_str)
+
+    # Free GPU memory
+    torch.cuda.empty_cache()
+
+    # =========================================================================
+    # Step 3: Evaluate
+    # =========================================================================
+    log.info("=== Step 3: Evaluation ===")
+    metrics = run_evaluation(cfg, model_name, images_dir, device_str)
+    log.info(f"Metrics: {metrics}")
+
+    # =========================================================================
+    # Step 4: Log
+    # =========================================================================
+    if use_wandb:
+        log.info("=== Step 4: Logging to wandb ===")
+        log_to_wandb(cfg, metrics, images_dir,
+                     probe_dir=probe_dir, original_probe_dir=original_probe_dir)
+        import wandb
+        wandb.finish()
+
+    log.info(f"Pipeline complete. Final metrics: {metrics}")
+    return metrics
+
+
+if __name__ == "__main__":
+    main()
