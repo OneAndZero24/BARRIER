@@ -17,14 +17,17 @@ Usage:
     python intact_pipeline.py --config configs/intact/pipeline.yaml
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root for setup_cache
+import setup_cache  # noqa: E402  — must precede torch / HF imports
+
 import argparse
 import csv
 import logging
 import os
 import pathlib
-import sys
 from importlib import import_module
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -140,7 +143,8 @@ def run_unlearn(cfg, device_str):
     args.remain_prompts = uc.get("remain_prompts", None)
 
     # Paths
-    args.output_dir = pc.get("model_save_dir", "models")
+    args.output_dir = pc.get("model_save_dir", "/shared/results/common/miksa/Flux/models")
+    args.logs_dir = pc.get("logs_dir", "/shared/results/common/miksa/Flux/logs")
 
     from intact_train import intact_unlearn
     model_name = intact_unlearn(args)

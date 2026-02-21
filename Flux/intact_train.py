@@ -28,16 +28,18 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Add parent directories to path (must be before library imports for setup_cache)
+sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root for InTAct + setup_cache
+sys.path.insert(0, str(Path(__file__).parent))          # For Flux modules
+
+import setup_cache  # noqa: E402  — must precede torch / HF imports
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import yaml
 from tqdm.auto import tqdm
-
-# Add parent directories to path
-sys.path.insert(0, str(Path(__file__).parent.parent))  # For InTAct
-sys.path.insert(0, str(Path(__file__).parent))          # For Flux modules
 
 from InTAct.intact import UnlearnIntervalProtection
 
@@ -823,7 +825,8 @@ def intact_unlearn(args):
 
     # Final save
     save_model_weights(transformer, args.output_dir, name, weight_dtype)
-    save_history(losses_history, args.output_dir, name)
+    logs_dir = getattr(args, "logs_dir", args.output_dir)
+    save_history(losses_history, logs_dir, name)
 
     log.info("Training complete!")
     return name
@@ -868,6 +871,7 @@ if __name__ == "__main__":
 
     PATHS_KEY_MAP = {
         "model_save_dir": "output_dir",
+        "logs_dir": "logs_dir",
     }
 
     for section_key, section_val in config.items():
@@ -898,7 +902,8 @@ if __name__ == "__main__":
         "neg_prompt": "",
         "key_word": None,
         "checkpointing_steps": 500,
-        "output_dir": "models",
+        "output_dir": "/shared/results/common/miksa/Flux/models",
+        "logs_dir": "/shared/results/common/miksa/Flux/logs",
         "lamb_esd": 1.0,
         "lamb_attn": 0.001,
         "intact_target_blocks": [12, 14, 16, 18],
