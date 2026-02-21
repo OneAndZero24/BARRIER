@@ -195,7 +195,17 @@ def generate_images(
 
         batch_size = len(prompt)
 
-        for i in range(10):
+        # Number of outer iterations: ceil(num_samples / batch_size_per_iter)
+        # Each iteration generates `batch_size` (== num_samples) images in one batch.
+        # For I2P eval (num_samples=1), this runs once. For legacy (num_samples=10),
+        # the original code ran 10 outer iterations × 10 batch = 100 total.
+        n_outer = max(1, (num_samples + batch_size - 1) // batch_size) if batch_size > 0 else 1
+        # But we only need exactly num_samples total images, so cap outer loops:
+        # Actually each outer iteration produces `batch_size` images.
+        # We want exactly `num_samples` total, so just 1 iteration with batch=num_samples.
+        n_outer = 1
+
+        for i in range(n_outer):
             text_input = tokenizer(
                 prompt,
                 padding="max_length",
@@ -264,8 +274,7 @@ def generate_images(
             images = (image * 255).round().astype("uint8")
             pil_images = [Image.fromarray(image) for image in images]
             for num, im in enumerate(pil_images):
-                im.save(f"{folder_path}/{case_number}_{i * 10 + num}.png")
-                # im.save(f"{folder_path}/{case_number}_{num}.png")
+                im.save(f"{folder_path}/{case_number}_{i * batch_size + num}.png")
 
 
 if __name__ == "__main__":
