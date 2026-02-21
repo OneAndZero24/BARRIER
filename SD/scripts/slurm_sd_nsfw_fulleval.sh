@@ -1,10 +1,10 @@
 #!/bin/bash
 # ============================================================================
-# SLURM Array Job – SD NSFW Full Evaluation (best hyperparameter combos)
+# SLURM Array Job – SD NSFW Full Evaluation (I2P Benchmark)
 # ============================================================================
-# Runs the full SD NSFW unlearning pipeline (unlearn → generate all 4703
-# prompts × 10 → NudeNet UA + FID + probe images → wandb)
-# with reference-paper data sizes.
+# Runs the full SD NSFW unlearning pipeline:
+#   Unlearn → Generate 4703 I2P images (1 per prompt) → NudeNet I2P (thr=0.6)
+#   per-class counts → MS-COCO 10K FID & CLIP → probe images → wandb
 #
 # HOW TO USE:
 #   1. Fill in the HPARAM arrays below with your best sweep results
