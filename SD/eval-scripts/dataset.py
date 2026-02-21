@@ -96,10 +96,9 @@ def setup_fid_data(class_to_forget, path, image_size, interpolation="bicubic"):
     interpolation = INTERPOLATIONS[interpolation]
     transform = get_transform(interpolation, image_size)
 
-    real_set = Fake_Imagenette(
-        "imagenette_without_label_6", class_to_forget, transform=transform
-    )
-    real_set = [data[0] for data in real_set]
+    # Real images: Imagenette train set EXCLUDING the forgotten class
+    real_dataset = Imagenette("train", transform=transform)
+    real_set = [img for img, label in real_dataset if label != class_to_forget]
 
     fake_set = Fake_Imagenette(path, class_to_forget, transform=transform)
     fake_set = [data[0] for data in fake_set]
