@@ -1,8 +1,11 @@
 #!/bin/bash
 # ============================================================================
-# SLURM Array Job – SD NSFW Evaluation Only (pre-trained models)
+# SLURM Array Job – SD NSFW Eval-Only (I2P Benchmark, pre-trained models)
 # ============================================================================
-# Evaluates already-trained models: generate all 4703 prompts → eval → wandb
+# Evaluates already-trained models with the I2P benchmark protocol:
+#   Generate 4703 I2P images (1 per prompt) → NudeNet I2P (thr=0.6, detailed)
+#   → MS-COCO 10K FID & CLIP → probe images → wandb
+#
 # Skips the unlearning step entirely.
 #
 # HOW TO USE:
@@ -43,7 +46,7 @@ MODEL_DIR=$(dirname "$MODEL_PATH")
 MODEL_NAME=$(basename "$MODEL_DIR")
 
 echo "============================================"
-echo "SD NSFW Eval-Only – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
+echo "SD NSFW Eval-Only (I2P) – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
 echo "  Combo #${COMBO_NUM}"
 echo "  Model: ${MODEL_NAME}"
 echo "  Path: ${MODEL_PATH}"
@@ -59,19 +62,16 @@ fi
 TMPCONFIG="/tmp/sd_nsfw_eval_${SLURM_ARRAY_JOB_ID}_${IDX}.yaml"
 
 python - <<PYEOF
-import yaml, os, sys
+import yaml, os
 
 with open("configs/pipeline_nsfw_fulleval.yaml") as f:
     cfg = yaml.safe_load(f)
 
-# Add skip_unlearn flag
-cfg["pipeline"]["skip_unlearn"] = True
-cfg["pipeline"]["pretrained_model_name"] = "${MODEL_NAME}"
-
 # Tag the wandb run
 cfg["wandb"]["tags"].append("eval-only")
+cfg["wandb"]["tags"].append("i2p")
 cfg["wandb"]["tags"].append("combo${COMBO_NUM}")
-cfg["wandb"]["group"] = "nsfw-eval-only"
+cfg["wandb"]["group"] = "nsfw-eval-only-i2p"
 
 # Unique output dir per job
 suffix = f"eval_combo{${COMBO_NUM}}"
@@ -84,122 +84,11 @@ print(f"Config written to ${TMPCONFIG}")
 PYEOF
 
 # ---- Run eval-only pipeline ----
-# We need to modify the pipeline call to skip unlearning
-python - <<PYEOF
-import sys
-sys.path.insert(0, ".")
+# --eval-only: skip unlearning, use pre-trained model weights
+# The model_name is derived from the config; the weights at MODEL_PATH
+# must match the expected path pattern: <model_save_dir>/<model_name>/diffusers-*.pt
+python pipeline.py \
+    --config "${TMPCONFIG}" \
+    --eval-only
 
-# Import and patch the pipeline to skip unlearning
-import pipeline as pipe_module
-import yaml
-import logging
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
-
-# Load config
-with open("${TMPCONFIG}") as f:
-    cfg = yaml.safe_load(f)
-
-# Import wandb and init
-import wandb
-wandb.init(
-    project=cfg["wandb"]["project"],
-    entity=cfg["wandb"].get("entity"),
-    group=cfg["wandb"].get("group"),
-    tags=cfg["wandb"].get("tags", []),
-    config=cfg,
-)
-
-# Merge any wandb config overrides
-cfg = pipe_module.merge_wandb_config(cfg)
-
-import os
-import torch
-import numpy as np
-from pathlib import Path
-
-# Set seeds
-seed = cfg["pipeline"].get("seed", 42)
-torch.manual_seed(seed)
-np.random.seed(seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(seed)
-
-device_id = cfg["pipeline"].get("device", "0")
-device_str = f"cuda:{device_id}"
-setting = cfg["pipeline"]["setting"]
-eval_cfg = cfg.get("evaluate", {})
-metrics = {}
-
-# =========================================================================
-# Skip Step 1: Unlearning (use pre-trained model)
-# =========================================================================
-model_name = cfg["pipeline"]["pretrained_model_name"]
-log.info(f"=== Step 1: SKIPPED (using pre-trained model: {model_name}) ===")
-
-# =========================================================================
-# Step 2: Generate images
-# =========================================================================
-log.info("=== Step 2: Generating images ===")
-images_dir = pipe_module.generate_images(cfg, model_name, device_str)
-log.info(f"Images saved to {images_dir}")
-
-# =========================================================================
-# Step 3: Evaluate
-# =========================================================================
-log.info("=== Step 3: Evaluation ===")
-
-image_size = cfg["unlearn"].get("image_size", 512)
-
-# --- Probe images for NSFW ---
-log.info("Generating probe images (nude + clothed prompts) for BOTH models …")
-probe_dir, original_probe_dir = pipe_module.generate_nsfw_probe_images(
-    model_name, cfg["paths"].get("output_dir", "./evaluation"),
-    eval_cfg, device_str, cfg,
-)
-
-# --- UA (NudeNet) ---
-nudenet_thresh = eval_cfg.get("nudenet", {}).get("threshold", 0.0)
-ua, nn_extra = pipe_module.compute_ua_nsfw(images_dir, threshold=nudenet_thresh)
-if ua is not None:
-    metrics["UA"] = ua
-    log.info(f"  UA (NSFW) = {ua:.4f}")
-metrics.update(nn_extra)
-
-# --- FID (clothed prompt images vs NOT_NSFW reference) ---
-if eval_cfg.get("fid", {}).get("enabled", True):
-    fid_cfg = eval_cfg.get("fid", {})
-    max_real = fid_cfg.get("max_real", None)
-    max_fake = fid_cfg.get("max_fake", None)
-    not_nsfw_path = cfg["paths"].get("not_nsfw_data", "data/not-nsfw")
-    fid_score = pipe_module.compute_fid_nsfw(
-        probe_dir, not_nsfw_path, image_size,
-        max_real=max_real, max_fake=max_fake,
-    )
-    if fid_score is not None:
-        metrics["FID"] = fid_score
-        log.info(f"  FID (clothed) = {fid_score:.2f}")
-
-# =========================================================================
-# Step 4: Log to wandb
-# =========================================================================
-log.info("=== Step 4: Logging ===")
-wandb.log(metrics)
-wandb.summary.update(metrics)
-
-# Sample images
-n_sample_imgs = eval_cfg.get("n_sample_images_per_class", 4)
-pipe_module.log_sample_images_per_class(
-    images_dir, setting,
-    class_to_forget=None,
-    n_per_class=n_sample_imgs,
-    probe_dir=probe_dir,
-    original_probe_dir=original_probe_dir,
-)
-
-wandb.finish()
-log.info(f"Eval-only pipeline complete. Metrics: {metrics}")
-PYEOF
-
-echo "SD NSFW Eval-Only – Job ${IDX} complete."
+echo "SD NSFW Eval-Only (I2P) – Job ${IDX} complete."
