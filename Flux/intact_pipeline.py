@@ -273,7 +273,7 @@ IMAGENETTE_CLASSES = [
 
 
 def run_evaluation(cfg, model_name, images_dir, device_str):
-    """Run all configured evaluations."""
+    """Run all configured evaluations (I2P-aligned for NSFW)."""
     ec = cfg.get("evaluate", {})
     uc = cfg.get("unlearn", {})
     pc = cfg.get("paths", {})
@@ -291,11 +291,14 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
             log.info(f"UA = {ua:.4f}")
 
     elif setting == "flux_concept":
-        # NSFW detection if enabled
+        # I2P-aligned NudeNet evaluation (threshold 0.6, grouped counts)
         if ec.get("nudenet", {}).get("enabled", False):
-            from eval.evaluate import compute_ua_nudenet
-            thresh = ec.get("nudenet", {}).get("threshold", 0.0)
-            ua, nn_extra = compute_ua_nudenet(images_dir, threshold=thresh)
+            from eval.evaluate import compute_nudenet_i2p
+            thresh = ec.get("nudenet", {}).get("threshold", 0.6)
+            detailed = ec.get("nudenet", {}).get("detailed", False)
+            ua, nn_extra = compute_nudenet_i2p(
+                images_dir, threshold=thresh, detailed=detailed,
+            )
             if ua is not None:
                 metrics["UA_nudenet"] = ua
             metrics.update(nn_extra)
@@ -310,8 +313,83 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
                 if clip_sim is not None:
                     metrics["concept_clip_similarity"] = clip_sim
 
-    # --- FID ---
-    if ec.get("fid", {}).get("enabled", True):
+    # --- MS-COCO 10K FID & CLIP (I2P protocol) ---
+    coco_cfg = ec.get("coco", {})
+    if coco_cfg.get("enabled", False):
+        log.info("=== MS-COCO 10K Evaluation (I2P protocol) ===")
+        from eval.evaluate import (
+            generate_coco_prompts_csv,
+            compute_fid_coco,
+            compute_clip_score_coco,
+        )
+
+        coco_n = coco_cfg.get("n_captions", 10000)
+        coco_ann_path = pc.get("coco_ann_path")
+        coco_images_dir = pc.get("coco_images_dir")
+        output_dir = pc.get("output_dir", "evaluation")
+
+        # Check if pre-generated COCO images exist
+        coco_pregenerated = coco_cfg.get("pregenerated_images_path")
+        if coco_pregenerated and os.path.isdir(coco_pregenerated):
+            log.info(f"Using pre-generated COCO images from {coco_pregenerated}")
+            coco_gen_dir = coco_pregenerated
+        else:
+            # Generate images from COCO captions
+            coco_prompts_csv = os.path.join(output_dir, "coco_prompts.csv")
+            generate_coco_prompts_csv(
+                coco_prompts_csv, n=coco_n,
+                coco_ann_path=coco_ann_path,
+            )
+            log.info("Generating images from MS-COCO captions …")
+            from eval.generate_images import generate_images
+            base_model = uc.get("pretrained_model_name_or_path",
+                                "black-forest-labs/FLUX.1-dev")
+            model_dir = pc.get("model_save_dir", "models")
+            coco_save = os.path.join(output_dir, "coco_generated")
+            os.makedirs(coco_save, exist_ok=True)
+            coco_gen_dir = generate_images(
+                model_name=model_name,
+                prompts_path=coco_prompts_csv,
+                save_path=coco_save,
+                device=device_str,
+                guidance_scale=ec.get("guidance_scale", 3.5),
+                image_size=uc.get("resolution", 512),
+                ddim_steps=ec.get("ddim_steps", 28),
+                num_samples=coco_cfg.get("num_samples_per_prompt", 1),
+                base_model_path=base_model,
+                model_dir=model_dir,
+            )
+
+        # FID (COCO)
+        if coco_cfg.get("fid", True):
+            fid_score = compute_fid_coco(
+                coco_gen_dir,
+                coco_images_dir=coco_images_dir,
+                coco_ann_path=coco_ann_path,
+                image_size=uc.get("resolution", 512),
+                n=coco_n,
+                feature=coco_cfg.get("fid_feature", 2048),
+                max_real=coco_cfg.get("max_real"),
+                max_fake=coco_cfg.get("max_fake"),
+            )
+            if fid_score is not None:
+                metrics["FID_COCO"] = fid_score
+                log.info(f"FID (COCO) = {fid_score:.2f}")
+
+        # CLIP Score (COCO)
+        if coco_cfg.get("clip", True):
+            coco_prompts_csv_path = coco_cfg.get("pregenerated_prompts_csv")
+            if not coco_prompts_csv_path:
+                coco_prompts_csv_path = os.path.join(output_dir, "coco_prompts.csv")
+            if os.path.exists(coco_prompts_csv_path):
+                clip_score = compute_clip_score_coco(
+                    coco_gen_dir, coco_prompts_csv_path, device_str)
+                if clip_score is not None:
+                    metrics["CLIP_COCO"] = clip_score
+                    log.info(f"CLIP Score (COCO) = {clip_score:.4f}")
+
+    # --- Legacy FID (non-COCO, for class-forgetting or custom reference) ---
+    if ec.get("fid", {}).get("enabled", False) and not coco_cfg.get("enabled", False):
         fid_cfg = ec.get("fid", {})
 
         if setting == "flux_class":
@@ -322,8 +400,6 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
             real_list, fake_list = setup_fid_data(class_to_forget, images_dir,
                                                    uc.get("resolution", 512))
             if real_list and fake_list:
-                # FID expects file paths; setup_fid_data returns tensors.
-                # Use in-memory approach
                 try:
                     from torchmetrics.image.fid import FID as FIDMetric
                     fid = FIDMetric(feature=fid_cfg.get("feature", 64))
@@ -348,7 +424,6 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
                     log.warning(f"FID computation failed: {e}")
 
         elif setting == "flux_concept":
-            # For concept erasure: FID of retain prompts vs. reference
             ref_data_path = pc.get("reference_data")
             if ref_data_path and os.path.exists(ref_data_path):
                 from eval.evaluate import compute_fid, collect_image_paths
@@ -364,7 +439,7 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
                     metrics["FID"] = fid_score
                     log.info(f"FID = {fid_score:.2f}")
 
-    # --- CLIP Score ---
+    # --- CLIP Score (on I2P/eval prompts) ---
     if ec.get("clip_score", {}).get("enabled", True):
         from eval.evaluate import compute_clip_score, collect_image_paths
         import pandas as pd
@@ -377,7 +452,6 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
             for _, row in df.iterrows():
                 case = int(row.case_number)
                 prompt_text = str(row.prompt)
-                # Find all images for this case
                 for img_path in sorted(img_dir.glob(f"{case}_*.png")):
                     all_paths.append(str(img_path))
                     all_prompts.append(prompt_text)
@@ -500,9 +574,19 @@ def main():
     parser = argparse.ArgumentParser(description="Flux InTAct Unlearning Pipeline")
     parser.add_argument("--config", type=str, required=True)
     parser.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
+    parser.add_argument("--pregenerated-images", type=str, default=None,
+                        help="Path to pre-generated I2P images (skip generation)")
+    parser.add_argument("--eval-only", action="store_true",
+                        help="Skip unlearning, only run generation + evaluation")
     cli = parser.parse_args()
 
     cfg = load_config(cli.config)
+
+    # CLI overrides for pre-generated images
+    if cli.pregenerated_images:
+        cfg.setdefault("evaluate", {})["pregenerated_images_path"] = cli.pregenerated_images
+    if cli.eval_only:
+        cfg.setdefault("pipeline", {})["eval_only"] = True
 
     # --- wandb ---
     use_wandb = not cli.no_wandb and cfg.get("wandb", {}).get("project")
@@ -526,23 +610,36 @@ def main():
     device_id = cfg.get("pipeline", {}).get("device", "0")
     device_str = f"cuda:{device_id}"
     setting = cfg.get("pipeline", {}).get("setting", "flux_concept")
+    eval_only = cfg.get("pipeline", {}).get("eval_only", False)
+
+    # Check for pre-generated images
+    pregenerated_path = cfg.get("evaluate", {}).get("pregenerated_images_path")
 
     # =========================================================================
     # Step 1: Unlearn
     # =========================================================================
-    log.info(f"=== Step 1: InTAct Unlearning ({setting}) ===")
-    model_name = run_unlearn(cfg, device_str)
-    log.info(f"Model name: {model_name}")
-
-    # Free GPU memory after training
-    torch.cuda.empty_cache()
+    if not eval_only and not pregenerated_path:
+        log.info(f"=== Step 1: InTAct Unlearning ({setting}) ===")
+        model_name = run_unlearn(cfg, device_str)
+        log.info(f"Model name: {model_name}")
+        torch.cuda.empty_cache()
+    else:
+        model_name = get_model_name(cfg)
+        if eval_only:
+            log.info(f"Skipping unlearning (eval-only). Model name: {model_name}")
+        else:
+            log.info(f"Skipping unlearning (pre-generated images). Model name: {model_name}")
 
     # =========================================================================
-    # Step 2: Generate images
+    # Step 2: Generate images (or use pre-generated)
     # =========================================================================
-    log.info("=== Step 2: Generating evaluation images ===")
-    images_dir = generate_evaluation_images(cfg, model_name, device_str)
-    log.info(f"Images saved to {images_dir}")
+    if pregenerated_path and os.path.isdir(pregenerated_path):
+        log.info(f"=== Step 2: Using pre-generated images from {pregenerated_path} ===")
+        images_dir = pregenerated_path
+    else:
+        log.info("=== Step 2: Generating evaluation images ===")
+        images_dir = generate_evaluation_images(cfg, model_name, device_str)
+        log.info(f"Images saved to {images_dir}")
 
     # =========================================================================
     # Step 2b: Probe images
@@ -550,7 +647,7 @@ def main():
     probe_dir = None
     original_probe_dir = None
     ec = cfg.get("evaluate", {})
-    if ec.get("probe", {}).get("enabled", True):
+    if ec.get("probe", {}).get("enabled", True) and not pregenerated_path:
         log.info("=== Step 2b: Generating probe images ===")
         probe_dir, original_probe_dir = generate_probe_images(cfg, model_name, device_str)
 
