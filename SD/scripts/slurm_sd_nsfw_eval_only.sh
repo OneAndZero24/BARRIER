@@ -77,6 +77,9 @@ cfg["wandb"]["group"] = "nsfw-eval-only-i2p"
 suffix = f"eval_combo{${COMBO_NUM}}"
 cfg["paths"]["output_dir"] = os.path.join(cfg["paths"]["output_dir"], suffix)
 
+# Set explicit model_name so get_model_name() is bypassed in eval-only mode
+cfg["pipeline"]["model_name"] = "${MODEL_NAME}"
+
 with open("${TMPCONFIG}", "w") as f:
     yaml.dump(cfg, f, default_flow_style=False)
 

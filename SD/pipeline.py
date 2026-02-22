@@ -1057,7 +1057,8 @@ def main():
         else:
             log.info("Skipping unlearning (pre-generated images provided)")
 
-    model_name = get_model_name(cfg)
+    # Allow explicit model_name override (useful in eval-only mode)
+    model_name = cfg.get("pipeline", {}).get("model_name") or get_model_name(cfg)
     log.info(f"Model name: {model_name}")
 
     # =========================================================================
