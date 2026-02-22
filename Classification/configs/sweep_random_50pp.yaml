@@ -1,13 +1,13 @@
 # ============================================================================
-# wandb sweep – Classification Class-Wise (example)
+# wandb sweep – Classification Random Data Forgetting (example)
 # ============================================================================
 # Usage:
 #   cd Classification
-#   wandb sweep configs/sweep_classwise.yaml
+#   wandb sweep configs/sweep_random.yaml
 #   wandb agent <sweep-id>
 
 program: pipeline.py
-method: grid                          # grid | random | bayes
+method: grid
 entity: oneandzero24
 project: intact-classification
 
@@ -16,11 +16,11 @@ command:
   - python
   - ${program}
   - --config
-  - configs/pipeline_classwise.yaml
+  - configs/pipeline_random_50pp.yaml
 
 parameters:
   unlearn.unlearn_lr:
-    values: [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2]
+    values: [0.05, 0.013, 0.005, 0.001]
   unlearn.unlearn_epochs:
     values: [5, 10, 20]
   intact.lambda_interval:
