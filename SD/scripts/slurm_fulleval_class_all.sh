@@ -54,11 +54,11 @@ cfg["unlearn"]["lr"] = 5.0e-6
 cfg["unlearn"]["epochs"] = 2
 cfg["intact"]["lambda_interval"] = 10.0
 
-# 500 images per class: 10 batch × 50 outer → 4500 fake (9 remaining classes)
-# Subsample real Imagenette to 4500 to match
+# 100 images per class: 10 batch × 10 outer → 900 fake (9 remaining classes)
+# Subsample real Imagenette to 900 to match
 cfg["evaluate"]["num_samples_per_prompt"] = 10
-cfg["evaluate"]["n_outer"] = 50
-cfg["evaluate"]["fid"]["max_real"] = 4500
+cfg["evaluate"]["n_outer"] = 10
+cfg["evaluate"]["fid"]["max_real"] = 900
 cfg["evaluate"]["fid"]["max_fake"] = None
 
 # wandb tags
