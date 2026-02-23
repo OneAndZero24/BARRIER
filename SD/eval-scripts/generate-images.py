@@ -27,6 +27,7 @@ def generate_images(
     base_config_path=None,
     model_dir="models",
     max_prompts=None,
+    n_outer=1,
 ):
     """
     Function to generate images from diffusers code
@@ -194,16 +195,6 @@ def generate_images(
         )  # Seed generator to create the inital latent noise
 
         batch_size = len(prompt)
-
-        # Number of outer iterations: ceil(num_samples / batch_size_per_iter)
-        # Each iteration generates `batch_size` (== num_samples) images in one batch.
-        # For I2P eval (num_samples=1), this runs once. For legacy (num_samples=10),
-        # the original code ran 10 outer iterations × 10 batch = 100 total.
-        n_outer = max(1, (num_samples + batch_size - 1) // batch_size) if batch_size > 0 else 1
-        # But we only need exactly num_samples total images, so cap outer loops:
-        # Actually each outer iteration produces `batch_size` images.
-        # We want exactly `num_samples` total, so just 1 iteration with batch=num_samples.
-        n_outer = 1
 
         for i in range(n_outer):
             text_input = tokenizer(

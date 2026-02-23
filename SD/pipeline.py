@@ -283,6 +283,8 @@ def generate_images(cfg, model_name, device_str):
     sys.path.insert(0, eval_scripts_dir)
     gen_module = import_module("generate-images")
 
+    n_outer = eval_cfg.get("n_outer", 1)
+
     gen_module.generate_images(
         model_name=model_name,
         prompts_path=prompts_path,
@@ -294,6 +296,7 @@ def generate_images(cfg, model_name, device_str):
         num_samples=num_samples,
         model_dir=model_save_dir,
         max_prompts=max_prompts,
+        n_outer=n_outer,
     )
 
     return os.path.join(save_path, model_name)
