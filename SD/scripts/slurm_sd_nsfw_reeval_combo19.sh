@@ -21,6 +21,10 @@ conda activate ldm
 cd $HOME/InTAct-Unl/SD
 export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 
+# ---- Fix onnxruntime thread-affinity errors on SLURM ----
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
+export ORT_DISABLE_CPU_AFFINITY=1
+
 # ---- Paths ----
 EVAL_ROOT="/shared/results/common/miksa/intact/SD/fulleval/eval_combo19"
 
