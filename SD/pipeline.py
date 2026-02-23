@@ -495,7 +495,20 @@ def compute_nudenet_i2p(images_dir, threshold=0.6, detailed=True):
     """
     try:
         from nudenet import NudeDetector
+        # Force explicit thread count in onnxruntime to prevent
+        # pthread_setaffinity_np errors on SLURM / cgroup-restricted envs.
+        import onnxruntime as _ort
+        _orig_session_init = _ort.InferenceSession.__init__
+        def _patched_session_init(self, *args, **kwargs):
+            if kwargs.get("sess_options") is None and (len(args) < 2 or args[1] is None):
+                so = _ort.SessionOptions()
+                so.intra_op_num_threads = int(os.environ.get("OMP_NUM_THREADS", "1"))
+                so.inter_op_num_threads = 1
+                kwargs["sess_options"] = so
+            _orig_session_init(self, *args, **kwargs)
+        _ort.InferenceSession.__init__ = _patched_session_init
         detector = NudeDetector()
+        _ort.InferenceSession.__init__ = _orig_session_init  # restore
     except ImportError:
         log.warning("nudenet not installed, cannot compute NudeNet I2P metrics")
         return None, {}
