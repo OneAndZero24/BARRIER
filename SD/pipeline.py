@@ -17,7 +17,15 @@ Usage:
     python pipeline.py --config configs/pipeline_nsfw.yaml
 
     # Use pre-generated images:
-    python pipeline.py --config configs/pipeline_nsfw.yaml --pregenerated-images /path/to/images
+    python pipeline.py --config configs/pipeline_nsfw.yaml --pregenerated-images /path/to/i2p_images
+    python pipeline.py --config configs/pipeline_nsfw.yaml --pregenerated-coco-images /path/to/coco_gen
+    python pipeline.py --config configs/pipeline_nsfw.yaml \\
+        --pregenerated-images /path/to/i2p_images \\
+        --pregenerated-coco-images /path/to/coco_gen \\
+        --pregenerated-coco-prompts-csv /path/to/coco_prompts.csv
+
+    # Lower FID batch size if GPU memory is tight:
+    python pipeline.py --config configs/pipeline_nsfw.yaml --fid-batch-size 32
 
     # wandb sweep:
     wandb sweep configs/sweep_class.yaml
@@ -313,12 +321,15 @@ IMAGENETTE_CLASSES = [
 ]
 
 
-def compute_fid_sd(class_to_forget, images_dir, image_size=512, max_real=None, max_fake=None):
+def compute_fid_sd(class_to_forget, images_dir, image_size=512, max_real=None, max_fake=None,
+                   batch_size=64):
     """
     Compute FID score for SD class forgetting (remaining classes only).
 
     When max_real / max_fake are set, a random subset of that size is used
     (fast in-pipeline evaluation).  Pass None to use the full sets.
+
+    Images are processed **in batches** to keep memory usage bounded.
     """
     import importlib.util
     eval_dataset_path = Path(__file__).parent / "eval-scripts" / "dataset.py"
@@ -340,11 +351,16 @@ def compute_fid_sd(class_to_forget, images_dir, image_size=512, max_real=None, m
         fake_set = [fake_set[i] for i in idxs]
 
     # setup_fid_data applies Normalize([0.5],[0.5]) → [-1,1]; undo then scale to uint8
-    real_images = ((torch.stack(real_set) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
-    fake_images = ((torch.stack(fake_set) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
+    # Process in batches to avoid OOM
+    for i in range(0, len(real_set), batch_size):
+        chunk = real_set[i:i + batch_size]
+        batch = ((torch.stack(chunk) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
+        fid.update(batch, real=True)
+    for i in range(0, len(fake_set), batch_size):
+        chunk = fake_set[i:i + batch_size]
+        batch = ((torch.stack(chunk) * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8).cpu()
+        fid.update(batch, real=False)
 
-    fid.update(real_images, real=True)
-    fid.update(fake_images, real=False)
     return fid.compute().item()
 
 
@@ -609,11 +625,74 @@ def generate_coco_prompts_csv(output_path, n=10000, seed=42, coco_ann_path=None)
     return output_path
 
 
+def _fid_transform(image_size):
+    """Shared transform for FID image loading."""
+    return transforms.Compose([
+        transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.CenterCrop(image_size),
+        transforms.Lambda(lambda img: img.convert("RGB")),
+        transforms.ToTensor(),
+    ])
+
+
+def _update_fid_from_paths(fid, paths, transform, real, batch_size=64):
+    """
+    Feed images to a FID metric **in batches** to avoid OOM.
+    Images are loaded, transformed to uint8 [0,255], and immediately
+    passed to ``fid.update()`` so only one batch lives in memory at a time.
+    """
+    count = 0
+    buf = []
+    for p in paths:
+        try:
+            img = Image.open(p)
+            buf.append(transform(img))
+        except Exception:
+            continue
+        if len(buf) >= batch_size:
+            batch = (torch.stack(buf) * 255).clamp(0, 255).to(torch.uint8)
+            fid.update(batch, real=real)
+            count += len(buf)
+            buf = []
+    if buf:
+        batch = (torch.stack(buf) * 255).clamp(0, 255).to(torch.uint8)
+        fid.update(batch, real=real)
+        count += len(buf)
+    return count
+
+
+def _update_fid_from_hf_dataset(fid, ds, idxs, transform, real, batch_size=64):
+    """
+    Feed images from a HuggingFace dataset to FID **in batches**.
+    """
+    count = 0
+    buf = []
+    for i in idxs:
+        try:
+            img = ds[int(i)]["image"]
+            buf.append(transform(img))
+        except Exception:
+            continue
+        if len(buf) >= batch_size:
+            batch = (torch.stack(buf) * 255).clamp(0, 255).to(torch.uint8)
+            fid.update(batch, real=real)
+            count += len(buf)
+            buf = []
+    if buf:
+        batch = (torch.stack(buf) * 255).clamp(0, 255).to(torch.uint8)
+        fid.update(batch, real=real)
+        count += len(buf)
+    return count
+
+
 def compute_fid_coco(generated_images_dir, coco_images_dir=None,
                      coco_ann_path=None, image_size=512, n=10000, seed=42,
-                     feature=2048, max_real=None, max_fake=None):
+                     feature=2048, max_real=None, max_fake=None,
+                     batch_size=64):
     """
     FID between generated images (from COCO captions) and real COCO val images.
+
+    Images are processed **in batches** to keep memory usage bounded.
     """
     try:
         from torchmetrics.image.fid import FID
@@ -621,29 +700,25 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
         log.warning("torchmetrics not installed, cannot compute FID")
         return None
 
-    transform = transforms.Compose([
-        transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.CenterCrop(image_size),
-        transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.ToTensor(),
-    ])
+    transform = _fid_transform(image_size)
+    fid = FID(feature=feature)
 
-    # Real COCO images
-    real_imgs = []
+    # --- Real COCO images (batched) ---
+    n_real = 0
     if coco_images_dir and os.path.exists(coco_images_dir):
         all_real = sorted([
             str(f) for ext in ["png", "jpg", "jpeg"]
             for f in pathlib.Path(coco_images_dir).rglob(f"*.{ext}")
         ])
         rng = np.random.RandomState(seed)
-        if len(all_real) > n:
+        if max_real and len(all_real) > max_real:
+            idxs = rng.choice(len(all_real), max_real, replace=False)
+            all_real = [all_real[i] for i in idxs]
+        elif len(all_real) > n:
             idxs = rng.choice(len(all_real), n, replace=False)
             all_real = [all_real[i] for i in idxs]
-        for p in all_real:
-            try:
-                real_imgs.append(transform(Image.open(p)))
-            except Exception:
-                continue
+        n_real = _update_fid_from_paths(fid, all_real, transform, real=True,
+                                        batch_size=batch_size)
     else:
         try:
             from datasets import load_dataset
@@ -653,52 +728,40 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
                 split="test",
             )
             rng = np.random.RandomState(seed)
-            idxs = rng.choice(len(ds), min(n, len(ds)), replace=False)
-            for i in idxs:
-                try:
-                    img = ds[int(i)]["image"]
-                    real_imgs.append(transform(img))
-                except Exception:
-                    continue
+            k = min(n, len(ds))
+            if max_real and k > max_real:
+                k = max_real
+            idxs = rng.choice(len(ds), k, replace=False)
+            n_real = _update_fid_from_hf_dataset(fid, ds, idxs, transform,
+                                                  real=True,
+                                                  batch_size=batch_size)
+            del ds  # free HF dataset from memory
         except Exception as e:
             log.warning(f"Cannot load COCO images: {e}")
             return None
 
-    if not real_imgs:
+    if n_real == 0:
         log.warning("No real COCO images loaded for FID")
         return None
 
-    # Generated images
+    # --- Generated images (batched) ---
     gen_dir = pathlib.Path(generated_images_dir)
     gen_paths = sorted([
         str(f) for ext in ["png", "jpg", "jpeg"]
         for f in gen_dir.rglob(f"*.{ext}")
     ])
-    fake_imgs = []
-    for p in gen_paths:
-        try:
-            fake_imgs.append(transform(Image.open(p)))
-        except Exception:
-            continue
+    if max_fake and len(gen_paths) > max_fake:
+        idxs = np.random.choice(len(gen_paths), max_fake, replace=False)
+        gen_paths = [gen_paths[i] for i in idxs]
 
-    if not fake_imgs:
+    n_fake = _update_fid_from_paths(fid, gen_paths, transform, real=False,
+                                    batch_size=batch_size)
+
+    if n_fake == 0:
         log.warning("No generated images found for COCO FID")
         return None
 
-    if max_real and len(real_imgs) > max_real:
-        idxs = np.random.choice(len(real_imgs), max_real, replace=False)
-        real_imgs = [real_imgs[i] for i in idxs]
-    if max_fake and len(fake_imgs) > max_fake:
-        idxs = np.random.choice(len(fake_imgs), max_fake, replace=False)
-        fake_imgs = [fake_imgs[i] for i in idxs]
-
-    real_t = (torch.stack(real_imgs) * 255).clamp(0, 255).to(torch.uint8).cpu()
-    fake_t = (torch.stack(fake_imgs) * 255).clamp(0, 255).to(torch.uint8).cpu()
-
-    log.info(f"FID (COCO): {len(real_imgs)} real vs {len(fake_imgs)} fake")
-    fid = FID(feature=feature)
-    fid.update(real_t, real=True)
-    fid.update(fake_t, real=False)
+    log.info(f"FID (COCO): {n_real} real vs {n_fake} fake")
     score = fid.compute().item()
     log.info(f"FID (COCO) = {score:.2f}")
     return score
@@ -843,72 +906,67 @@ def generate_nsfw_probe_images(model_name, output_dir, eval_cfg, device_str, cfg
 
 
 def compute_fid_nsfw(probe_images_dir, not_nsfw_data_path, image_size=512,
-                     max_real=None, max_fake=None):
+                     max_real=None, max_fake=None, batch_size=64):
     """
     FID on clothed images: compares clothed-prompt generations against NOT_NSFW
     reference data.  Uses ``FID(feature=64)`` to match SalUn class-forgetting FID.
+
+    Images are processed **in batches** to keep memory usage bounded.
     """
     from torchmetrics.image.fid import FID
 
-    transform = transforms.Compose([
-        transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.CenterCrop(image_size),
-        transforms.Lambda(lambda img: img.convert("RGB") if hasattr(img, "convert") else img),
-        transforms.ToTensor(),
-    ])
+    transform = _fid_transform(image_size)
+    fid = FID(feature=64)
 
-    # --- Load NOT_NSFW reference images ---
-    real_list = []
+    # --- Load NOT_NSFW reference images (batched) ---
     ref_path = pathlib.Path(not_nsfw_data_path)
-    # Try as a plain image directory first
     img_files = sorted([
-        f for ext in ["png", "jpg", "jpeg"]
+        str(f) for ext in ["png", "jpg", "jpeg"]
         for f in ref_path.rglob(f"*.{ext}")
     ])
+
     if img_files:
-        for f in img_files:
-            real_list.append(transform(Image.open(f)))
+        if max_real and len(img_files) > max_real:
+            idxs = np.random.choice(len(img_files), max_real, replace=False)
+            img_files = [img_files[i] for i in idxs]
+        n_real = _update_fid_from_paths(fid, img_files, transform, real=True,
+                                        batch_size=batch_size)
     else:
         # Fall back to HuggingFace datasets format
         try:
             from datasets import load_dataset
             ds = load_dataset(str(not_nsfw_data_path))["train"]
-            for example in ds:
-                real_list.append(transform(example["image"]))
+            idxs = list(range(len(ds)))
+            if max_real and len(idxs) > max_real:
+                idxs = list(np.random.choice(len(idxs), max_real, replace=False))
+            n_real = _update_fid_from_hf_dataset(fid, ds, idxs, transform,
+                                                  real=True,
+                                                  batch_size=batch_size)
+            del ds
         except Exception as e:
             log.warning(f"Cannot load NOT_NSFW reference data from {not_nsfw_data_path}: {e}")
             return None
+        n_real = n_real if 'n_real' in dir() else 0
 
-    if not real_list:
+    if n_real == 0:
         log.warning("No NOT_NSFW reference images found")
         return None
 
     # --- Load clothed-prompt generated images (case_number=1) ---
     probe_dir = pathlib.Path(probe_images_dir)
-    fake_list = []
-    for img_path in sorted(probe_dir.glob("1_*.png")):
-        fake_list.append(transform(Image.open(img_path).convert("RGB")))
+    fake_paths = sorted([str(p) for p in probe_dir.glob("1_*.png")])
+    if max_fake and len(fake_paths) > max_fake:
+        idxs = np.random.choice(len(fake_paths), max_fake, replace=False)
+        fake_paths = [fake_paths[i] for i in idxs]
 
-    if not fake_list:
+    n_fake = _update_fid_from_paths(fid, fake_paths, transform, real=False,
+                                    batch_size=batch_size)
+
+    if n_fake == 0:
         log.warning("No clothed-prompt images found for FID")
         return None
 
-    # Subsetting
-    if max_real and len(real_list) > max_real:
-        idxs = np.random.choice(len(real_list), max_real, replace=False)
-        real_list = [real_list[i] for i in idxs]
-    if max_fake and len(fake_list) > max_fake:
-        idxs = np.random.choice(len(fake_list), max_fake, replace=False)
-        fake_list = [fake_list[i] for i in idxs]
-
-    log.info(f"  FID NSFW: {len(real_list)} real (NOT_NSFW) vs {len(fake_list)} fake (clothed-prompt)")
-    # ToTensor() produces float [0,1]; FID expects uint8 [0,255]
-    real_t = (torch.stack(real_list) * 255).clamp(0, 255).to(torch.uint8).cpu()
-    fake_t = (torch.stack(fake_list) * 255).clamp(0, 255).to(torch.uint8).cpu()
-
-    fid = FID(feature=64)
-    fid.update(real_t, real=True)
-    fid.update(fake_t, real=False)
+    log.info(f"  FID NSFW: {n_real} real (NOT_NSFW) vs {n_fake} fake (clothed-prompt)")
     return fid.compute().item()
 
 
@@ -1002,9 +1060,15 @@ def main():
     parser.add_argument("--config", type=str, required=True)
     parser.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
     parser.add_argument("--pregenerated-images", type=str, default=None,
-                        help="Path to pre-generated I2P images (skip I2P generation)")
+                        help="Path to pre-generated I2P / unsafe-prompt images (skip generation)")
+    parser.add_argument("--pregenerated-coco-images", type=str, default=None,
+                        help="Path to pre-generated COCO images (skip COCO generation)")
+    parser.add_argument("--pregenerated-coco-prompts-csv", type=str, default=None,
+                        help="CSV with COCO prompts matching pre-generated COCO images")
     parser.add_argument("--eval-only", action="store_true",
                         help="Skip unlearning, only run generation + evaluation")
+    parser.add_argument("--fid-batch-size", type=int, default=64,
+                        help="Batch size for FID feature extraction (lower = less memory)")
     cli = parser.parse_args()
 
     cfg = load_config(cli.config)
@@ -1012,8 +1076,13 @@ def main():
     # CLI overrides
     if cli.pregenerated_images:
         cfg.setdefault("evaluate", {})["pregenerated_images_path"] = cli.pregenerated_images
+    if cli.pregenerated_coco_images:
+        cfg.setdefault("evaluate", {}).setdefault("coco", {})["pregenerated_images_path"] = cli.pregenerated_coco_images
+    if cli.pregenerated_coco_prompts_csv:
+        cfg.setdefault("evaluate", {}).setdefault("coco", {})["pregenerated_prompts_csv"] = cli.pregenerated_coco_prompts_csv
     if cli.eval_only:
         cfg.setdefault("pipeline", {})["eval_only"] = True
+    cfg["_fid_batch_size"] = cli.fid_batch_size
 
     # --- wandb ---
     use_wandb = not cli.no_wandb and cfg.get("wandb", {}).get("project")
@@ -1154,6 +1223,7 @@ def main():
 
         # FID (COCO)
         if coco_cfg.get("fid", True):
+            fid_batch = cfg.get("_fid_batch_size", 64)
             fid_score = compute_fid_coco(
                 coco_gen_dir,
                 coco_images_dir=coco_images_dir,
@@ -1163,6 +1233,7 @@ def main():
                 feature=coco_cfg.get("fid_feature", 2048),
                 max_real=coco_cfg.get("max_real"),
                 max_fake=coco_cfg.get("max_fake"),
+                batch_size=fid_batch,
             )
             if fid_score is not None:
                 metrics["FID_COCO"] = fid_score

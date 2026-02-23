@@ -39,7 +39,7 @@ echo "============================================"
 # ---- Build per-class config ----
 TMPCONFIG="/tmp/sd_fulleval_${SLURM_ARRAY_JOB_ID}_${CLASS}.yaml"
 
-python - <<'PYEOF'
+python - "$CLASS" "$TMPCONFIG" <<'PYEOF'
 import yaml, sys
 
 cls = int(sys.argv[1])
@@ -72,7 +72,7 @@ with open(out, "w") as f:
     yaml.dump(cfg, f, default_flow_style=False)
 
 print(f"Config written to {out}")
-PYEOF "$CLASS" "$TMPCONFIG"
+PYEOF
 
 # ---- Run pipeline ----
 python pipeline.py --config "${TMPCONFIG}"
