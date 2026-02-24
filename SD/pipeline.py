@@ -812,8 +812,9 @@ def compute_clip_score_coco(generated_images_dir, coco_prompts_csv, device_str):
         log.warning("No image-prompt pairs found for CLIP score (COCO)")
         return None
 
-    model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(device_str)
-    processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
+    # Use ViT-B/32 for consistency with reference scripts
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", use_safetensors=True).to(device_str)
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     model.eval()
 
     scores = []
