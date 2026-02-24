@@ -1195,27 +1195,35 @@ def main():
                 eval_cfg, device_str, cfg,
             )
 
-    # --- MS-COCO 10K FID & CLIP (I2P protocol) ---
+    # --- MS-COCO 30K FID & CLIP (I2P protocol) ---
     coco_cfg = eval_cfg.get("coco", {})
     if coco_cfg.get("enabled", False):
-        log.info("=== MS-COCO 10K Evaluation (I2P protocol) ===")
-        coco_n = coco_cfg.get("n_captions", 10000)
+        log.info("=== MS-COCO 30K Evaluation (I2P protocol) ===")
+        coco_n = coco_cfg.get("n_captions", 30000)
         coco_ann_path = cfg["paths"].get("coco_ann_path")
         coco_images_dir = cfg["paths"].get("coco_images_dir")
         output_dir = cfg["paths"].get("output_dir", "./evaluation")
+
+        # Always use the provided CSV if present
+        coco_prompts_csv_path = coco_cfg.get("pregenerated_prompts_csv")
+        if coco_prompts_csv_path and os.path.exists(coco_prompts_csv_path):
+            log.info(f"Using provided COCO prompts CSV: {coco_prompts_csv_path}")
+            prompts_path = coco_prompts_csv_path
+        else:
+            prompts_path = os.path.join(output_dir, "coco_prompts.csv")
+            log.warning(f"No COCO prompts CSV provided, will attempt to generate {prompts_path} with {coco_n} prompts.")
+            generate_coco_prompts_csv(
+                prompts_path, n=coco_n,
+                coco_ann_path=coco_ann_path,
+            )
 
         coco_pregenerated = coco_cfg.get("pregenerated_images_path")
         if coco_pregenerated and os.path.isdir(coco_pregenerated):
             log.info(f"Using pre-generated COCO images from {coco_pregenerated}")
             coco_gen_dir = coco_pregenerated
         else:
-            # Generate images from COCO captions
-            coco_prompts_csv = os.path.join(output_dir, "coco_prompts.csv")
-            generate_coco_prompts_csv(
-                coco_prompts_csv, n=coco_n,
-                coco_ann_path=coco_ann_path,
-            )
-            log.info("Generating images from MS-COCO captions …")
+            # Generate images from the prompts_path (CSV)
+            log.info(f"Generating images from COCO prompts: {prompts_path}")
             coco_save = os.path.join(output_dir, "coco_generated")
             os.makedirs(coco_save, exist_ok=True)
 
@@ -1224,7 +1232,7 @@ def main():
             gen_module = import_module("generate-images")
             gen_module.generate_images(
                 model_name=model_name,
-                prompts_path=coco_prompts_csv,
+                prompts_path=prompts_path,
                 save_path=coco_save,
                 device=device_str,
                 guidance_scale=eval_cfg.get("guidance_scale", 7.5),
@@ -1255,12 +1263,10 @@ def main():
 
         # CLIP Score (COCO)
         if coco_cfg.get("clip", True):
-            coco_prompts_csv_path = coco_cfg.get("pregenerated_prompts_csv")
-            if not coco_prompts_csv_path:
-                coco_prompts_csv_path = os.path.join(output_dir, "coco_prompts.csv")
-            if os.path.exists(coco_prompts_csv_path):
+            # Use the same prompts_path as above
+            if os.path.exists(prompts_path):
                 clip_score = compute_clip_score_coco(
-                    coco_gen_dir, coco_prompts_csv_path, device_str)
+                    coco_gen_dir, prompts_path, device_str)
                 if clip_score is not None:
                     metrics["CLIP_COCO"] = clip_score
                     log.info(f"  CLIP Score (COCO) = {clip_score:.4f}")
