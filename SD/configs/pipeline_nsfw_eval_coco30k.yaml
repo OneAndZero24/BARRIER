@@ -46,6 +46,7 @@ intact:
   normalize_protection: true
 
 evaluate:
+  num_samples_per_prompt: 1
   probe:
     enabled: false
   fid:
