@@ -20,12 +20,20 @@ conda activate ldm
 cd $HOME/InTAct-Unl/SD
 export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 MODEL_NAME="compvis-intact-nsfw-targets_attn2.to_q_attn2.to_k_attn2.to_v-lambda_1-lr_5e-06"
 MODEL_PATH="/shared/results/common/miksa/intact/SD/models/${MODEL_NAME}/diffusers-intact-nsfw-targets_attn2.to_q_attn2.to_k_attn2.to_v-lambda_1-lr_5e-06.pt"
 
 COCO_CSV="prompts/coco_30k.csv"
 COCO_REF_DIR="/shared/results/common/miksa/intact/SD/data/coco_val2014_30k_ref"
 EVAL_OUTPUT_DIR="/shared/results/common/miksa/intact/SD/coco30k_eval"
+
+# ---- Paths: I2P logic from reeval_combo19 ----
+EVAL_ROOT="/shared/results/common/miksa/intact/SD/fulleval/eval_combo19"
+I2P_DIR=$(find "${EVAL_ROOT}/generated" -mindepth 1 -maxdepth 1 -type d | head -1)
+if [ -z "$I2P_DIR" ]; then
+    I2P_DIR="${EVAL_ROOT}/generated"
+fi
 
 # Verify model exists
 if [ ! -f "$MODEL_PATH" ]; then
@@ -51,6 +59,9 @@ cfg["pipeline"]["model_name"] = "${MODEL_NAME}"
 cfg["evaluate"]["coco"]["pregenerated_prompts_csv"] = "${COCO_CSV}"
 cfg["evaluate"]["coco"]["n_captions"] = 30000
 
+# Add I2P path
+cfg.setdefault("evaluate", {})["pregenerated_images_path"] = "${I2P_DIR}"
+
 with open("${TMPCONFIG}", "w") as f:
     yaml.dump(cfg, f, default_flow_style=False)
 
@@ -60,6 +71,9 @@ PYEOF
 python pipeline.py \
     --config "${TMPCONFIG}" \
     --eval-only \
+    --pregenerated-images "${I2P_DIR}" \
+    --pregenerated-coco-prompts-csv "${COCO_CSV}" \
     --fid-batch-size 64
 
+echo "I2P images:  ${I2P_DIR}"
 echo "SD NSFW Eval-Only COCO30k – done."
