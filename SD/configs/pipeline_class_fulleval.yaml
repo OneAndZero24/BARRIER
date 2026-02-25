@@ -38,14 +38,14 @@ unlearn:
   class_to_forget: 0
   alpha: 0.0
   batch_size: 8
-  epochs: 5
+  epochs: 2
   lr: 5.0e-6
   image_size: 512
 
 intact:
   base_method: "rl"
   targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
-  lambda_interval: 10.0
+  lambda_interval: 1.0
   lower_percentile: 0.05
   upper_percentile: 0.95
   reduced_dim: 64

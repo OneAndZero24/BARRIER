@@ -16,7 +16,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --partition=dgxh100
-#SBATCH --array=0-9
+#SBATCH --array=0-8
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -26,13 +26,13 @@ export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
 CLASS=${SLURM_ARRAY_TASK_ID}
 
-CLASSES=("tench" "english_springer" "cassette_player" "chain_saw" "church"
+CLASSES=("english_springer" "cassette_player" "chain_saw" "church"
          "french_horn" "garbage_truck" "gas_pump" "golf_ball" "parachute")
 CLASS_NAME=${CLASSES[$CLASS]}
 
 echo "============================================"
 echo "Full eval – class ${CLASS} (${CLASS_NAME})"
-echo "  lr=5e-6  epochs=2  lambda=10"
+echo "  lr=5e-6  epochs=2  lambda=1"
 echo "  Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "============================================"
 
@@ -52,7 +52,7 @@ with open("configs/pipeline_class_fulleval.yaml") as f:
 cfg["unlearn"]["class_to_forget"] = cls
 cfg["unlearn"]["lr"] = 5.0e-6
 cfg["unlearn"]["epochs"] = 2
-cfg["intact"]["lambda_interval"] = 10.0
+cfg["intact"]["lambda_interval"] = 1.0
 
 # 100 images per class: 10 batch × 10 outer → 900 fake (9 remaining classes)
 # Subsample real Imagenette to 900 to match
