@@ -32,7 +32,7 @@ CLASS_NAME=${CLASSES[$CLASS]}
 
 echo "============================================"
 echo "Full eval – class ${CLASS} (${CLASS_NAME})"
-echo "  lr=1e-4  epochs=5  lambda=1"
+echo "  lr=1e-5  epochs=3  lambda=1"
 echo "  Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "============================================"
 
@@ -50,8 +50,8 @@ with open("configs/pipeline_class_fulleval.yaml") as f:
 
 # Hyperparameters
 cfg["unlearn"]["class_to_forget"] = cls
-cfg["unlearn"]["lr"] = 1.0e-4
-cfg["unlearn"]["epochs"] = 5
+cfg["unlearn"]["lr"] = 1.0e-5
+cfg["unlearn"]["epochs"] = 3
 cfg["intact"]["lambda_interval"] = 1.0
 
 # 100 images per class: 10 batch × 10 outer → 900 fake (9 remaining classes)
