@@ -54,7 +54,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-
 # ============================================================================
 # Config Loading
 # ============================================================================
@@ -440,6 +439,19 @@ def intact_unlearn_class(
     """
     log.info(f"InTAct Unlearning: base_method={base_method}, class={class_to_forget}, targets={targets}")
     
+    MAPPING_PROMPTS = [
+        "a photo of fish",
+        "a photo of dog",
+        "a photo of electronic device",
+        "a photo of power tool",
+        "a photo of building",
+        "a photo of musical instrument",
+        "a photo of vehicle",
+        "a photo of fuel equipment",
+        "a photo of sports equipment",
+        "a photo of safety gear"
+    ]
+
     # Setup model
     model = setup_model(config_path, ckpt_path, device)
     
@@ -514,7 +526,7 @@ def intact_unlearn_class(
                     )
                 elif base_method == "rl":
                     pseudo_prompts = [
-                        descriptions[(int(class_to_forget) + 1) % 10]
+                        MAPPING_PROMPTS[int(class_to_forget)]
                         for _ in forget_labels
                     ]
                     base_loss, forget_loss_val, remain_loss_val = compute_rl_loss(

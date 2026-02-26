@@ -16,7 +16,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --partition=dgxh100
-#SBATCH --array=0-8
+#SBATCH --array=0-9
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -26,7 +26,7 @@ export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
 CLASS=${SLURM_ARRAY_TASK_ID}
 
-CLASSES=("english_springer" "cassette_player" "chain_saw" "church"
+CLASSES=("tench" "english_springer" "cassette_player" "chain_saw" "church"
          "french_horn" "garbage_truck" "gas_pump" "golf_ball" "parachute")
 CLASS_NAME=${CLASSES[$CLASS]}
 
