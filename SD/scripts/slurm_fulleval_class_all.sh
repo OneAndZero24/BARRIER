@@ -50,8 +50,8 @@ with open("configs/pipeline_class_fulleval.yaml") as f:
 
 # Hyperparameters
 cfg["unlearn"]["class_to_forget"] = cls
-cfg["unlearn"]["lr"] = 5.0e-6
-cfg["unlearn"]["epochs"] = 2
+cfg["unlearn"]["lr"] = 1.0e-4
+cfg["unlearn"]["epochs"] = 5
 cfg["intact"]["lambda_interval"] = 1.0
 
 # 100 images per class: 10 batch × 10 outer → 900 fake (9 remaining classes)
