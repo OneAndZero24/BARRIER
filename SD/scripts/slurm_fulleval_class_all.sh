@@ -32,7 +32,7 @@ CLASS_NAME=${CLASSES[$CLASS]}
 
 echo "============================================"
 echo "Full eval – class ${CLASS} (${CLASS_NAME})"
-echo "  lr=5e-6  epochs=2  lambda=1"
+echo "  lr=1e-4  epochs=5  lambda=1"
 echo "  Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "============================================"
 
