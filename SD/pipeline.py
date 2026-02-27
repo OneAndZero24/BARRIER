@@ -50,6 +50,8 @@ import torchvision.transforms as transforms
 import yaml
 from PIL import Image
 
+from typing import Optional
+
 # Ensure project root and SD dirs are on path
 sys.path.insert(0, str(Path(__file__).parent.parent))  # InTAct
 sys.path.insert(0, str(Path(__file__).parent))           # SD root
@@ -707,7 +709,7 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
                      coco_ann_path=None, image_size=512, n=10000, seed=42,
                      feature=2048, max_real=None, max_fake=None,
                      batch_size=64, coco_prompts_csv=None,
-                     coco_hf_dataset: str | None = None):
+                     coco_hf_dataset: Optional[str] = None):
     """
     FID between generated images (from COCO captions) and real COCO val images.
 
@@ -720,6 +722,11 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
     subsets of COCO.
 
     Images are processed **in batches** to keep memory usage bounded.
+
+    If ``coco_hf_dataset`` is provided the named HF dataset (for example
+    ``sayakpaul/coco-30-val-2014``) will be loaded and used as the reference
+    set; the local ``coco_images_dir`` is ignored in that case.  This ensures
+    the full 30 000 validation images are available.
     """
     try:
         from torchmetrics.image.fid import FID
