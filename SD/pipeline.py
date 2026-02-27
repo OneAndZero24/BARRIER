@@ -1150,50 +1150,50 @@ def main():
     # =========================================================================
     # Step 2: Generate I2P images (or use pre-generated)
     # =========================================================================
-    # if pregenerated_path and os.path.isdir(pregenerated_path):
-    #     log.info(f"=== Step 2: Using pre-generated I2P images from {pregenerated_path} ===")
-    #     images_dir = pregenerated_path
-    # else:
-    #     log.info("=== Step 2: Generating images ===")
-    #     images_dir = generate_images(cfg, model_name, device_str)
-    #     log.info(f"Images saved to {images_dir}")
+    if pregenerated_path and os.path.isdir(pregenerated_path):
+        log.info(f"=== Step 2: Using pre-generated I2P images from {pregenerated_path} ===")
+        images_dir = pregenerated_path
+    else:
+        log.info("=== Step 2: Generating images ===")
+        images_dir = generate_images(cfg, model_name, device_str)
+        log.info(f"Images saved to {images_dir}")
 
     # =========================================================================
     # Step 3: Evaluate
     # =========================================================================
-    # log.info("=== Step 3: Evaluation ===")
+    log.info("=== Step 3: Evaluation ===")
 
     class_to_forget = cfg["unlearn"].get("class_to_forget", 0)
     image_size = cfg["unlearn"].get("image_size", 512)
 
-    # # --- UA (NudeNet I2P or classification) ---
-    # if setting == "sd":
-    #     ua = compute_ua_class(images_dir, class_to_forget, device_str)
-    #     if ua is not None:
-    #         metrics["UA"] = ua
-    #         log.info(f"  UA = {ua:.4f}")
-    # elif setting == "sd_nsfw":
-    #     # I2P-aligned NudeNet evaluation (threshold 0.6, detailed per-class counts)
-    #     nudenet_thresh = eval_cfg.get("nudenet", {}).get("threshold", 0.6)
-    #     nudenet_detailed = eval_cfg.get("nudenet", {}).get("detailed", True)
-    #     ua, nn_extra = compute_nudenet_i2p(
-    #         images_dir, threshold=nudenet_thresh, detailed=nudenet_detailed,
-    #     )
-    #     if ua is not None:
-    #         metrics["UA"] = ua
-    #         log.info(f"  UA (NSFW) = {ua:.4f}")
-    #     metrics.update(nn_extra)
+    # --- UA (NudeNet I2P or classification) ---
+    if setting == "sd":
+        ua = compute_ua_class(images_dir, class_to_forget, device_str)
+        if ua is not None:
+            metrics["UA"] = ua
+            log.info(f"  UA = {ua:.4f}")
+    elif setting == "sd_nsfw":
+        # I2P-aligned NudeNet evaluation (threshold 0.6, detailed per-class counts)
+        nudenet_thresh = eval_cfg.get("nudenet", {}).get("threshold", 0.6)
+        nudenet_detailed = eval_cfg.get("nudenet", {}).get("detailed", True)
+        ua, nn_extra = compute_nudenet_i2p(
+            images_dir, threshold=nudenet_thresh, detailed=nudenet_detailed,
+        )
+        if ua is not None:
+            metrics["UA"] = ua
+            log.info(f"  UA (NSFW) = {ua:.4f}")
+        metrics.update(nn_extra)
 
-    # # --- Probe images for NSFW (skip if pre-generated) ---
-    # probe_dir = None
-    # original_probe_dir = None
-    # if setting == "sd_nsfw" and not pregenerated_path:
-    #     if eval_cfg.get("probe", {}).get("enabled", True):
-    #         log.info("Generating probe images (nude + clothed prompts) for BOTH models …")
-    #         probe_dir, original_probe_dir = generate_nsfw_probe_images(
-    #             model_name, cfg["paths"].get("output_dir", "./evaluation"),
-    #             eval_cfg, device_str, cfg,
-    #         )
+    # --- Probe images for NSFW (skip if pre-generated) ---
+    probe_dir = None
+    original_probe_dir = None
+    if setting == "sd_nsfw" and not pregenerated_path:
+        if eval_cfg.get("probe", {}).get("enabled", True):
+            log.info("Generating probe images (nude + clothed prompts) for BOTH models …")
+            probe_dir, original_probe_dir = generate_nsfw_probe_images(
+                model_name, cfg["paths"].get("output_dir", "./evaluation"),
+                eval_cfg, device_str, cfg,
+            )
 
     # --- MS-COCO 30K FID & CLIP (I2P protocol) ---
     coco_cfg = eval_cfg.get("coco", {})
@@ -1271,26 +1271,26 @@ def main():
                     metrics["CLIP_COCO"] = clip_score
                     log.info(f"  CLIP Score (COCO) = {clip_score:.4f}")
 
-    # # --- Legacy FID (remaining classes for class-forget, clothed for NSFW) ---
-    # if eval_cfg.get("fid", {}).get("enabled", True) and not coco_cfg.get("enabled", False):
-    #     fid_cfg = eval_cfg.get("fid", {})
-    #     max_real = fid_cfg.get("max_real", None)
-    #     max_fake = fid_cfg.get("max_fake", None)
-    #     if setting == "sd":
-    #         fid_score = compute_fid_sd(class_to_forget, images_dir, image_size,
-    #                                    max_real=max_real, max_fake=max_fake)
-    #         if fid_score is not None:
-    #             metrics["FID"] = fid_score
-    #             log.info(f"  FID = {fid_score:.2f}")
-    #     elif setting == "sd_nsfw" and probe_dir:
-    #         not_nsfw_path = cfg["paths"].get("not_nsfw_data", "data/not-nsfw")
-    #         fid_score = compute_fid_nsfw(
-    #             probe_dir, not_nsfw_path, image_size,
-    #             max_real=max_real, max_fake=max_fake,
-    #         )
-    #         if fid_score is not None:
-    #             metrics["FID"] = fid_score
-    #             log.info(f"  FID (clothed) = {fid_score:.2f}")
+    # --- Legacy FID (remaining classes for class-forget, clothed for NSFW) ---
+    if eval_cfg.get("fid", {}).get("enabled", True) and not coco_cfg.get("enabled", False):
+        fid_cfg = eval_cfg.get("fid", {})
+        max_real = fid_cfg.get("max_real", None)
+        max_fake = fid_cfg.get("max_fake", None)
+        if setting == "sd":
+            fid_score = compute_fid_sd(class_to_forget, images_dir, image_size,
+                                       max_real=max_real, max_fake=max_fake)
+            if fid_score is not None:
+                metrics["FID"] = fid_score
+                log.info(f"  FID = {fid_score:.2f}")
+        elif setting == "sd_nsfw" and probe_dir:
+            not_nsfw_path = cfg["paths"].get("not_nsfw_data", "data/not-nsfw")
+            fid_score = compute_fid_nsfw(
+                probe_dir, not_nsfw_path, image_size,
+                max_real=max_real, max_fake=max_fake,
+            )
+            if fid_score is not None:
+                metrics["FID"] = fid_score
+                log.info(f"  FID (clothed) = {fid_score:.2f}")
 
     # =========================================================================
     # Step 4: Log to wandb
@@ -1300,13 +1300,13 @@ def main():
         wandb.log(metrics)
         wandb.summary.update(metrics)
 
-        # # Sample images
-        # n_sample_imgs = eval_cfg.get("n_sample_images_per_class", 4)
-        # log_sample_images_per_class(images_dir, setting,
-        #                             class_to_forget=class_to_forget,
-        #                             n_per_class=n_sample_imgs,
-        #                             probe_dir=probe_dir,
-        #                             original_probe_dir=original_probe_dir)
+        # Sample images
+        n_sample_imgs = eval_cfg.get("n_sample_images_per_class", 4)
+        log_sample_images_per_class(images_dir, setting,
+                                    class_to_forget=class_to_forget,
+                                    n_per_class=n_sample_imgs,
+                                    probe_dir=probe_dir,
+                                    original_probe_dir=original_probe_dir)
 
         # Model artifact
         model_save_dir = cfg["paths"].get("model_save_dir", "models")
