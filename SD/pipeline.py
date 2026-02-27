@@ -603,7 +603,7 @@ def _load_coco_captions(n=10000, seed=42, coco_ann_path=None):
         from datasets import load_dataset
         log.info("Loading MS-COCO captions from HuggingFace …")
         ds = load_dataset(
-            "nlphuji/mscoco_2014_5k_test_image_text_retrieval",
+            "sayakpaul/coco-30-val-2014",
             split="test",
         )
         idxs = rng.choice(len(ds), min(n, len(ds)), replace=False)
@@ -706,7 +706,8 @@ def _coco_filename(coco_id: int) -> str:
 def compute_fid_coco(generated_images_dir, coco_images_dir=None,
                      coco_ann_path=None, image_size=512, n=10000, seed=42,
                      feature=2048, max_real=None, max_fake=None,
-                     batch_size=64, coco_prompts_csv=None):
+                     batch_size=64, coco_prompts_csv=None,
+                     coco_hf_dataset: str | None = None):
     """
     FID between generated images (from COCO captions) and real COCO val images.
 
@@ -731,31 +732,61 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
 
     # --- Real COCO images (batched) ---
     n_real = 0
-    if coco_images_dir and os.path.exists(coco_images_dir):
+    # if a HF dataset name is provided, prefer it and ignore local directory
+    if coco_hf_dataset:
+        try:
+            from datasets import load_dataset
+            log.info("Loading real COCO images from HF dataset %s for FID …", coco_hf_dataset)
+            ds = load_dataset(coco_hf_dataset, split="train" if "train" in load_dataset.__code__.co_varnames else "test")
+            if len(ds) < n:
+                log.error("HF dataset %s contains %d examples but %d requested", len(ds), n, n)
+                return None
+            rng = np.random.RandomState(seed)
+            idxs = rng.choice(len(ds), n, replace=False)
+            n_real = _update_fid_from_hf_dataset(fid, ds, idxs, _fid_transform(image_size), real=True, batch_size=batch_size)
+            del ds
+        except Exception as e:
+            log.warning("Cannot load HF dataset %s: %s", coco_hf_dataset, e)
+            return None
+    elif coco_images_dir and os.path.exists(coco_images_dir):
         # collect candidates; optionally filter by CSV ids
+        all_real = []
         if coco_prompts_csv and os.path.exists(coco_prompts_csv):
             try:
                 df = pd.read_csv(coco_prompts_csv)
                 if "coco_id" in df.columns:
                     ids = df["coco_id"].dropna().astype(int).tolist()
                 else:
-                    # fall back to last column if headerless
                     ids = df.iloc[:, -1].dropna().astype(int).tolist()
             except Exception:
                 ids = []
-            all_real = []
+            missing = 0
             for cid in ids:
                 fname = _coco_filename(cid)
                 path = os.path.join(coco_images_dir, fname)
                 if os.path.exists(path):
                     all_real.append(path)
-            if not all_real:
-                log.warning("No real COCO images matched IDs from %s", coco_prompts_csv)
+                else:
+                    missing += 1
+            if missing:
+                log.warning("%d COCO IDs from %s were not found in %s", missing,
+                            coco_prompts_csv, coco_images_dir)
+            # if the provided CSV requested more images than we actually found,
+            # we consider this a fatal mismatch when n was large.
+            if n and len(all_real) < n:
+                log.error(
+                    "Only %d/%d reference images present in %s – cannot compute FID",
+                    len(all_real), n, coco_images_dir,
+                )
+                return None
         else:
             all_real = sorted([
                 str(f) for ext in ["png", "jpg", "jpeg"]
                 for f in pathlib.Path(coco_images_dir).rglob(f"*.{ext}")
             ])
+            if n and len(all_real) < n:
+                log.warning("Only %d real images found in %s (requested %d)",
+                            len(all_real), coco_images_dir, n)
         rng = np.random.RandomState(seed)
         if max_real and len(all_real) > max_real:
             idxs = rng.choice(len(all_real), max_real, replace=False)
@@ -766,13 +797,18 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
         n_real = _update_fid_from_paths(fid, all_real, transform, real=True,
                                         batch_size=batch_size)
     else:
+        # no local directory and no HF dataset specified – fall back to 5k test set
+        if n and n > 5000:
+            log.warning("No reference directory or HF dataset; will sample up to 5000 images from default HF set")
         try:
             from datasets import load_dataset
             log.info("Loading COCO images from HuggingFace for FID …")
             ds = load_dataset(
-                "nlphuji/mscoco_2014_5k_test_image_text_retrieval",
+                "sayakpaul/coco-30-val-2014",
                 split="test",
             )
+            if n and len(ds) < n:
+                log.warning("HuggingFace COCO dataset contains only %d examples; requested %d", len(ds), n)
             rng = np.random.RandomState(seed)
             k = min(n, len(ds))
             if max_real and k > max_real:
@@ -1307,6 +1343,7 @@ def main():
                 max_fake=coco_cfg.get("max_fake"),
                 batch_size=fid_batch,
                 coco_prompts_csv=prompts_path,
+                coco_hf_dataset=coco_cfg.get("hf_dataset"),
             )
             if fid_score is not None:
                 metrics["FID_COCO"] = fid_score

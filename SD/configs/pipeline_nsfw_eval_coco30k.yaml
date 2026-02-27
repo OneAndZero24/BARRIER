@@ -59,6 +59,9 @@ evaluate:
     enabled: true
     n_captions: 30000
     num_samples_per_prompt: 1
+    # name of HF dataset providing 30k validation images
+    # if provided, the local ``coco_images_dir`` is ignored
+    hf_dataset: "sayakpaul/coco-30-val-2014"
     fid: true
     clip: true
     fid_feature: 2048
