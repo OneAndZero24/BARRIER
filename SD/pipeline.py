@@ -744,7 +744,8 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
         try:
             from datasets import load_dataset
             log.info("Loading real COCO images from HF dataset %s for FID …", coco_hf_dataset)
-            ds = load_dataset(coco_hf_dataset, split="train" if "train" in load_dataset.__code__.co_varnames else "test")
+            # the validation subset of the 30k dataset lives in the 'train' split
+            ds = load_dataset(coco_hf_dataset, split="train")
             if len(ds) < n:
                 log.error("HF dataset %s contains %d examples but %d requested", len(ds), n, n)
                 return None
