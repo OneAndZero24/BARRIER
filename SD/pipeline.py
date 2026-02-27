@@ -698,12 +698,25 @@ def _update_fid_from_hf_dataset(fid, ds, idxs, transform, real, batch_size=64):
     return count
 
 
+def _coco_filename(coco_id: int) -> str:
+    """Return the standard COCO val2014 filename for a given integer ID."""
+    return f"COCO_val2014_{int(coco_id):012d}.jpg"
+
+
 def compute_fid_coco(generated_images_dir, coco_images_dir=None,
                      coco_ann_path=None, image_size=512, n=10000, seed=42,
                      feature=2048, max_real=None, max_fake=None,
-                     batch_size=64):
+                     batch_size=64, coco_prompts_csv=None):
     """
     FID between generated images (from COCO captions) and real COCO val images.
+
+    By default, if ``coco_images_dir`` exists we will randomly sample up to
+    ``n`` images from that directory.  When ``coco_prompts_csv`` is provided we
+    instead restrict the reference set to the COCO IDs listed in the CSV (see
+    ``generate_coco_prompts_csv`` or external prompts files such as
+    ``prompts/coco_30k.csv``).  This ensures the real images correspond exactly
+    to the prompts used for generation and avoids any mismatch with other
+    subsets of COCO.
 
     Images are processed **in batches** to keep memory usage bounded.
     """
@@ -719,10 +732,30 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
     # --- Real COCO images (batched) ---
     n_real = 0
     if coco_images_dir and os.path.exists(coco_images_dir):
-        all_real = sorted([
-            str(f) for ext in ["png", "jpg", "jpeg"]
-            for f in pathlib.Path(coco_images_dir).rglob(f"*.{ext}")
-        ])
+        # collect candidates; optionally filter by CSV ids
+        if coco_prompts_csv and os.path.exists(coco_prompts_csv):
+            try:
+                df = pd.read_csv(coco_prompts_csv)
+                if "coco_id" in df.columns:
+                    ids = df["coco_id"].dropna().astype(int).tolist()
+                else:
+                    # fall back to last column if headerless
+                    ids = df.iloc[:, -1].dropna().astype(int).tolist()
+            except Exception:
+                ids = []
+            all_real = []
+            for cid in ids:
+                fname = _coco_filename(cid)
+                path = os.path.join(coco_images_dir, fname)
+                if os.path.exists(path):
+                    all_real.append(path)
+            if not all_real:
+                log.warning("No real COCO images matched IDs from %s", coco_prompts_csv)
+        else:
+            all_real = sorted([
+                str(f) for ext in ["png", "jpg", "jpeg"]
+                for f in pathlib.Path(coco_images_dir).rglob(f"*.{ext}")
+            ])
         rng = np.random.RandomState(seed)
         if max_real and len(all_real) > max_real:
             idxs = rng.choice(len(all_real), max_real, replace=False)
@@ -813,7 +846,7 @@ def compute_clip_score_coco(generated_images_dir, coco_prompts_csv, device_str):
         return None
 
     # Use ViT-B/32 for consistency with reference scripts
-    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", use_safetensors=True).to(device_str)
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device_str)
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     model.eval()
 
@@ -996,6 +1029,10 @@ def log_sample_images_per_class(images_dir, setting, class_to_forget=None,
     """
     import wandb
 
+    if not images_dir:
+        log.info("log_sample_images_per_class: no images_dir provided, skipping upload")
+        return
+
     img_dir = pathlib.Path(images_dir)
 
     if setting == "sd":
@@ -1125,6 +1162,7 @@ def main():
 
     # Check for pre-generated I2P images
     pregenerated_path = eval_cfg.get("pregenerated_images_path")
+    skip_i2p = eval_cfg.get("skip_i2p", False)
 
     # =========================================================================
     # Step 1: Unlearn
@@ -1150,7 +1188,16 @@ def main():
     # =========================================================================
     # Step 2: Generate I2P images (or use pre-generated)
     # =========================================================================
-    if pregenerated_path and os.path.isdir(pregenerated_path):
+    # In certain evaluation-only scenarios we explicitly skip I2P generation
+    # (e.g. when only COCO metrics are needed).  The flag ``evaluate.skip_i2p``
+    # or setting ``eval_only`` with ``setting=='sd_nsfw'`` will trigger this
+    # behaviour.
+    if eval_only and setting == "sd_nsfw" and skip_i2p:
+        log.info("Skipping I2P generation (eval-only and skip_i2p requested)")
+        # if a valid pregenerated path exists we could still reuse it, otherwise
+        # leave images_dir None so evaluation steps know no images are available.
+        images_dir = pregenerated_path if pregenerated_path and os.path.isdir(pregenerated_path) else None
+    elif pregenerated_path and os.path.isdir(pregenerated_path):
         log.info(f"=== Step 2: Using pre-generated I2P images from {pregenerated_path} ===")
         images_dir = pregenerated_path
     else:
@@ -1173,21 +1220,24 @@ def main():
             metrics["UA"] = ua
             log.info(f"  UA = {ua:.4f}")
     elif setting == "sd_nsfw":
-        # I2P-aligned NudeNet evaluation (threshold 0.6, detailed per-class counts)
-        nudenet_thresh = eval_cfg.get("nudenet", {}).get("threshold", 0.6)
-        nudenet_detailed = eval_cfg.get("nudenet", {}).get("detailed", True)
-        ua, nn_extra = compute_nudenet_i2p(
-            images_dir, threshold=nudenet_thresh, detailed=nudenet_detailed,
-        )
-        if ua is not None:
-            metrics["UA"] = ua
-            log.info(f"  UA (NSFW) = {ua:.4f}")
-        metrics.update(nn_extra)
+        if images_dir:
+            # I2P-aligned NudeNet evaluation (threshold 0.6, detailed per-class counts)
+            nudenet_thresh = eval_cfg.get("nudenet", {}).get("threshold", 0.6)
+            nudenet_detailed = eval_cfg.get("nudenet", {}).get("detailed", True)
+            ua, nn_extra = compute_nudenet_i2p(
+                images_dir, threshold=nudenet_thresh, detailed=nudenet_detailed,
+            )
+            if ua is not None:
+                metrics["UA"] = ua
+                log.info(f"  UA (NSFW) = {ua:.4f}")
+            metrics.update(nn_extra)
+        else:
+            log.info("No I2P images available; skipping UA/NSFW evaluation")
 
-    # --- Probe images for NSFW (skip if pre-generated) ---
+    # --- Probe images for NSFW (skip if pre-generated or I2P disabled) ---
     probe_dir = None
     original_probe_dir = None
-    if setting == "sd_nsfw" and not pregenerated_path:
+    if setting == "sd_nsfw" and not (eval_only and skip_i2p) and not pregenerated_path:
         if eval_cfg.get("probe", {}).get("enabled", True):
             log.info("Generating probe images (nude + clothed prompts) for BOTH models …")
             probe_dir, original_probe_dir = generate_nsfw_probe_images(
@@ -1256,6 +1306,7 @@ def main():
                 max_real=coco_cfg.get("max_real"),
                 max_fake=coco_cfg.get("max_fake"),
                 batch_size=fid_batch,
+                coco_prompts_csv=prompts_path,
             )
             if fid_score is not None:
                 metrics["FID_COCO"] = fid_score

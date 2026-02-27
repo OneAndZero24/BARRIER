@@ -53,6 +53,8 @@ evaluate:
     enabled: false
   nudenet:
     enabled: false
+  # do not generate I2P / unsafe-prompt images; only use pre-generated (or none)
+  skip_i2p: true
   coco:
     enabled: true
     n_captions: 30000

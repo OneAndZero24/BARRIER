@@ -2,7 +2,9 @@
 # ============================================================================
 # SLURM – SD NSFW Eval-Only COCO30k (FID & CLIP)
 # ============================================================================
-# Loads a specific model, generates 30k COCO images, computes FID & CLIP
+# Loads a specific model, runs COCO30k evaluation (FID & CLIP) without
+# regenerating any I2P/unsafe-prompt images.  The script points the
+# pipeline at pre-generated I2P and COCO directories and sets skip_i2p.
 # Usage:
 #   sbatch scripts/slurm_sd_nsfw_eval_coco30k.sh
 # ============================================================================
@@ -27,6 +29,8 @@ MODEL_PATH="/shared/results/common/miksa/intact/SD/models/${MODEL_NAME}/diffuser
 COCO_CSV="prompts/coco_30k.csv"
 COCO_REF_DIR="/shared/results/common/miksa/intact/SD/data/coco_val2014_30k_ref"
 EVAL_OUTPUT_DIR="/shared/results/common/miksa/intact/SD/coco30k_eval"
+# directory containing already-generated COCO30k images for this model
+COCO_GEN_DIR="${EVAL_OUTPUT_DIR}/coco_generated/${MODEL_NAME}"
 
 # ---- Paths: I2P logic from reeval_combo19 ----
 EVAL_ROOT="/shared/results/common/miksa/intact/SD/fulleval/eval_combo19"
@@ -58,9 +62,13 @@ cfg["paths"]["coco_images_dir"] = "${COCO_REF_DIR}"
 cfg["pipeline"]["model_name"] = "${MODEL_NAME}"
 cfg["evaluate"]["coco"]["pregenerated_prompts_csv"] = "${COCO_CSV}"
 cfg["evaluate"]["coco"]["n_captions"] = 30000
+# point pipeline at already-generated COCO images so generation is skipped
+cfg["evaluate"]["coco"]["pregenerated_images_path"] = "${COCO_GEN_DIR}"
+# also disable any I2P production (safety net)
+cfg.setdefault("evaluate", {})["skip_i2p"] = True
 
-# Add I2P path
-cfg.setdefault("evaluate", {})["pregenerated_images_path"] = "${I2P_DIR}"
+# Add I2P path (used for class/nsfw images)
+cfg["evaluate"]["pregenerated_images_path"] = "${I2P_DIR}"
 
 with open("${TMPCONFIG}", "w") as f:
     yaml.dump(cfg, f, default_flow_style=False)
@@ -72,6 +80,7 @@ python pipeline.py \
     --config "${TMPCONFIG}" \
     --eval-only \
     --pregenerated-images "${I2P_DIR}" \
+    --pregenerated-coco-images "${COCO_GEN_DIR}" \
     --pregenerated-coco-prompts-csv "${COCO_CSV}" \
     --fid-batch-size 64
 
