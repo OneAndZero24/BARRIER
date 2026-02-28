@@ -610,10 +610,18 @@ def main():
         cfg = merge_wandb_config(cfg)
 
     seed = cfg.get("pipeline", {}).get("seed", 42)
-    torch.manual_seed(seed)
+    # some torch builds may lack manual_seed (e.g. minimal installs); guard.
+    if hasattr(torch, "manual_seed"):
+        torch.manual_seed(seed)
+    elif hasattr(torch, "seed"):
+        torch.seed(seed)
+    else:
+        log.warning("torch module has no manual_seed/seed, skipping seeding")
     np.random.seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch, "cuda") and torch.cuda.is_available():
+        # cuda may also lack manual_seed_all in stripped builds
+        if hasattr(torch.cuda, "manual_seed_all"):
+            torch.cuda.manual_seed_all(seed)
 
     device_id = cfg.get("pipeline", {}).get("device", "0")
     device_str = f"cuda:{device_id}"
