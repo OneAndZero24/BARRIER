@@ -45,6 +45,7 @@ if [ $# -eq 0 ]; then
   echo "Usage: $0 <sweep_name>"
   echo "  e.g.: $0 sweep_concept"
   echo "  e.g.: $0 sweep_class"
+  echo "  e.g.: $0 sweep_nsfw"  # NSFW erasure using dataset paths
   exit 1
 fi
 

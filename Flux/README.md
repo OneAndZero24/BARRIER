@@ -18,6 +18,7 @@ EraseAnything: Enabling Concept Erasure in Rectified Flow Transformers is an ope
 
 - ✅ Supports **[diffusers]**
 - ✅ Easy to extend and integrate
+- ✅ NSFW concept erasure with dataset‑based InTAct (same paths as SD)
 
 ## Installation & Environment Setup
 
@@ -76,6 +77,16 @@ EraseAnything: Enabling Concept Erasure in Rectified Flow Transformers is an ope
 - Training script: `train.sh`
 - Inference script: `inference.py`
 - Results will be saved in the `results/` directory (if applicable).
+
+### Sweeps
+
+Use `./run_sweep.sh` from the `Flux` folder.  New sweep targets are:
+
+```bash
+./run_sweep.sh sweep_concept    # concept erasure
+./run_sweep.sh sweep_class      # class forgetting (Imagenette)
+./run_sweep.sh sweep_nsfw       # NSFW erasure (RL loss, dataset paths used)
+```
 
 ## Acknowledgments
 

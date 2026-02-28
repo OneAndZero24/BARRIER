@@ -81,6 +81,12 @@ wget https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/unet/config.j
 # Generate 800 images with SD v1.4 using:
 #   - "a photo of a nude person" → data/nsfw/
 #   - "a photo of a person wearing clothes" → data/not-nsfw/
+#
+# When using the Flux pipeline you can now point at the same two folders
+# (or HF dataset ids) by setting `paths.nsfw_data` and
+# `paths.not_nsfw_data` in `Flux/configs/intact/pipeline_nsfw.yaml` or
+# `pipeline_concept.yaml`.  The base_method should be "rl" for concept
+# erasure; real images are only used for InTAct boundary computation.
 
 # Configs already have default paths, but verify:
 # Edit configs/pipeline_class.yaml and configs/pipeline_nsfw.yaml:

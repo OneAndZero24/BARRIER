@@ -142,6 +142,14 @@ def run_unlearn(cfg, device_str):
     args.intact_n_samples = ic.get("n_samples", 50)
     args.remain_prompts = uc.get("remain_prompts", None)
 
+    # Optional NSFW dataset (paths used for InTAct boundaries)
+    args.nsfw_data_path = pc.get("nsfw_data", None)
+    args.not_nsfw_data_path = pc.get("not_nsfw_data", None)
+    # training parameters used only when dataset paths are given
+    args.batch_size = uc.get("batch_size", None)
+    args.epochs = uc.get("epochs", None)
+    args.alpha = uc.get("alpha", None)
+
     # Paths
     args.output_dir = pc.get("model_save_dir", "/shared/results/common/miksa/Flux/models")
     args.logs_dir = pc.get("logs_dir", "/shared/results/common/miksa/Flux/logs")
@@ -290,7 +298,7 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
             metrics["UA"] = ua
             log.info(f"UA = {ua:.4f}")
 
-    elif setting == "flux_concept":
+    elif setting in ("flux_concept", "flux_nsfw"):
         # I2P-aligned NudeNet evaluation (threshold 0.6, grouped counts)
         if ec.get("nudenet", {}).get("enabled", False):
             from eval.evaluate import compute_nudenet_i2p
@@ -495,7 +503,7 @@ def log_to_wandb(cfg, metrics, images_dir, probe_dir=None, original_probe_dir=No
                     ]
                 })
 
-    elif setting == "flux_concept":
+    elif setting in ("flux_concept", "flux_nsfw"):
         # Log concept images
         concept_imgs = sorted(img_dir.glob("0_*.png"))[:n_samples]
         if concept_imgs:

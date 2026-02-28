@@ -23,6 +23,10 @@ paths:
   model_save_dir: "/shared/results/common/miksa/Flux/models"                # where safetensors checkpoints go
   logs_dir: "/shared/results/common/miksa/Flux/logs"                        # where training logs/losses are saved
   reference_data: null                                                       # (optional) real reference images for FID
+  # optional NSFW dataset paths (if you want to use a real dataset instead of
+  # synthetic prompts for InTAct activation bounds):
+  # nsfw_data: "/path/to/nsfw"
+  # not_nsfw_data: "/path/to/not-nsfw"
 
 unlearn:
   pretrained_model_name_or_path: "black-forest-labs/FLUX.1-dev"
@@ -34,8 +38,8 @@ unlearn:
   base_method: "esd"
 
   # Concept to forget
-  instance_prompt: "a nude girl"
-  neg_prompt: "a girl wearing clothes"
+  instance_prompt: "a photo of a nude person"
+  neg_prompt: "a photo of a person wearing clothes"
   key_word: "nude"
 
   # Training
@@ -96,13 +100,13 @@ intact:
     - "attn.add_k_proj"                    # text key    — concept matching
     - "attn.add_v_proj"                    # text value  — concept content
     # Additional options (image stream, rarely needed for concept erasure):
-    # - "attn.to_q"                        # image query
-    # - "attn.to_k"                        # image key
-    # - "attn.to_v"                        # image value
+    - "attn.to_q"                        # image query
+    - "attn.to_k"                        # image key
+    - "attn.to_v"                        # image value
   lambda_interval: 1.0
   lower_percentile: 0.05
   upper_percentile: 0.95
-  reduced_dim: 32
+  reduced_dim: 64
   infinity_scale: 20.0
   use_actual_bounds: true
   normalize_protection: true

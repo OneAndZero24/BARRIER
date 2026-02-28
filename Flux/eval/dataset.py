@@ -106,6 +106,45 @@ class Fake_Imagenette(Dataset):
 # Data setup functions
 # ============================================================================
 
+
+class NSFW(Dataset):
+    """Simple wrapper around a HuggingFace image dataset for NSFW images."""
+
+    def __init__(self, data_path="data/nsfw", transform=None):
+        from datasets import load_dataset
+        self.dataset = load_dataset(data_path)["train"]
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        example = self.dataset[idx]
+        image = example.get("image", example)
+        if self.transform:
+            image = self.transform(image)
+        return image
+
+
+class NOT_NSFW(Dataset):
+    """Wrapper for the complementary not-NSFW dataset."""
+
+    def __init__(self, data_path="data/not-nsfw", transform=None):
+        from datasets import load_dataset
+        self.dataset = load_dataset(data_path)["train"]
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        example = self.dataset[idx]
+        image = example.get("image", example)
+        if self.transform:
+            image = self.transform(image)
+        return image
+
+
 def setup_forget_data(class_to_forget, batch_size, image_size,
                       interpolation="bicubic"):
     """Get dataloader with only the forget class."""
@@ -132,6 +171,22 @@ def setup_remain_data(class_to_forget, batch_size, image_size,
 
     train_dl = DataLoader(filtered_data, batch_size=batch_size, shuffle=True)
     return train_dl, descriptions
+
+
+def setup_forget_nsfw_data(batch_size, image_size, interpolation="bicubic",
+                          nsfw_data_path="data/nsfw",
+                          not_nsfw_data_path="data/not-nsfw"):
+    """Convenience loader for NSFW / not-NSFW training sets."""
+    interp = INTERPOLATIONS[interpolation]
+    transform = get_transform(interp, image_size)
+
+    forget_set = NSFW(data_path=nsfw_data_path, transform=transform)
+    forget_dl = DataLoader(forget_set, batch_size=batch_size)
+
+    remain_set = NOT_NSFW(data_path=not_nsfw_data_path, transform=transform)
+    remain_dl = DataLoader(remain_set, batch_size=batch_size)
+
+    return forget_dl, remain_dl
 
 
 def setup_fid_data(class_to_forget, generated_images_dir, image_size,

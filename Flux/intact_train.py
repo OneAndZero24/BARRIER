@@ -708,24 +708,40 @@ def intact_unlearn(args):
     for p in trainable_params:
         p.data = p.data.float()
 
-    # ---- Generate synthetic forget data for InTAct setup ----
-    forget_data = generate_synthetic_forget_data(
-        transformer, noise_scheduler_copy, compute_text_embeddings,
-        prompt, device, weight_dtype, n_samples=args.intact_n_samples,
-        image_size=args.resolution,
-    )
-
-    # Optionally generate remain data for actual bounds
+    # ---- Setup forget/remaining data for InTAct ----
+    forget_data = None
     remain_data = None
-    if args.intact_use_actual_bounds and hasattr(args, "remain_prompts") and args.remain_prompts:
-        remain_prompts = args.remain_prompts
-        if isinstance(remain_prompts, str):
-            remain_prompts = [p.strip() for p in remain_prompts.split(";")]
-        remain_data = generate_synthetic_forget_data(
+
+    # if NSFW dataset paths are provided, use real images for activation bounds
+    if hasattr(args, "nsfw_data_path") and args.nsfw_data_path and \
+       hasattr(args, "not_nsfw_data_path") and args.not_nsfw_data_path:
+        from eval.dataset import setup_forget_nsfw_data
+        batch_sz = args.batch_size or 8
+        forget_dl, remain_dl = setup_forget_nsfw_data(
+            batch_sz,
+            args.resolution,
+            nsfw_data_path=args.nsfw_data_path,
+            not_nsfw_data_path=args.not_nsfw_data_path,
+        )
+        forget_data = forget_dl
+        if args.intact_use_actual_bounds:
+            remain_data = remain_dl
+    else:
+        # no dataset, fall back to synthetic prompts as before
+        forget_data = generate_synthetic_forget_data(
             transformer, noise_scheduler_copy, compute_text_embeddings,
-            remain_prompts, device, weight_dtype, n_samples=args.intact_n_samples,
+            prompt, device, weight_dtype, n_samples=args.intact_n_samples,
             image_size=args.resolution,
         )
+        if args.intact_use_actual_bounds and hasattr(args, "remain_prompts") and args.remain_prompts:
+            remain_prompts = args.remain_prompts
+            if isinstance(remain_prompts, str):
+                remain_prompts = [p.strip() for p in remain_prompts.split(";")]
+            remain_data = generate_synthetic_forget_data(
+                transformer, noise_scheduler_copy, compute_text_embeddings,
+                remain_prompts, device, weight_dtype, n_samples=args.intact_n_samples,
+                image_size=args.resolution,
+            )
 
     # ---- Setup InTAct protection ----
     protection = setup_intact_protection(
