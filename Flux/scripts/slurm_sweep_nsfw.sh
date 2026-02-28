@@ -19,9 +19,12 @@
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
-conda activate flux          # adjust to the appropriate env if needed
+conda activate flux          # adjust to the appropriate env if needed (was "ldm" previously)
 cd $HOME/InTAct-Unl/Flux
 export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
+
+# project name used by wandb
+PROJECT_NAME="intact-flux"
 
 # caches to shared storage
 export HF_HOME="/shared/results/common/miksa/.cache/huggingface"
