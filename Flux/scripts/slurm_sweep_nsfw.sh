@@ -23,7 +23,8 @@ conda activate flux          # adjust to the appropriate env if needed (was "ldm
 cd $HOME/InTAct-Unl/Flux
 export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
-# project name used by wandb
+# wandb configuration (must have permission to create sweeps here)
+export WANDB_ENTITY="oneandzero24"    # adjust to your account/org
 PROJECT_NAME="intact-flux"
 
 # caches to shared storage
