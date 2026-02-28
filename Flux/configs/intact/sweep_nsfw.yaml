@@ -10,7 +10,7 @@
 program: intact_pipeline.py
 method: grid
 name: flux-nsfw-sweep
-entity: null
+entity: oneandzero24   # must match your WANDB entity
 project: intact-flux
 
 command:

@@ -43,9 +43,14 @@ YAML_PATH="configs/intact/${SWEEP_NAME}.yaml"
 
 echo "Using config: $YAML_PATH"
 set -x
-SWEEP_OUT=$(wandb sweep --project "$PROJECT_NAME" --name "$SWEEP_NAME" "$YAML_PATH")
+# capture both stdout and stderr because wandb prints ID to stderr
+SWEEP_OUT=$(wandb sweep --project "$PROJECT_NAME" --name "$SWEEP_NAME" "$YAML_PATH" 2>&1)
 echo "$SWEEP_OUT"
-SWEEP_ID=$(echo "$SWEEP_OUT" | awk '/wandb agent/{ match($0, /wandb agent (.+)/, arr); print arr[1]; }')
+# try a couple of patterns for the agent command or ID
+SWEEP_ID=$(echo "$SWEEP_OUT" | awk '/wandb agent/{ match($0, /wandb agent ([^ ]+)/, arr); print arr[1]; }')
+if [ -z "$SWEEP_ID" ]; then
+    SWEEP_ID=$(echo "$SWEEP_OUT" | awk '/Creating sweep with ID/{ match($0, /ID: ([^ ]+)/, arr); print arr[1]; }')
+fi
 if [ -z "$SWEEP_ID" ]; then
     echo "Failed to parse sweep ID from output"
     exit 1
