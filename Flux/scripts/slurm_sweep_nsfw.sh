@@ -33,7 +33,23 @@ export CLIP_CACHE_DIR="/shared/results/common/miksa/.cache/clip"
 
 echo "Starting Flux NSFW sweep on $(hostname)"
 
-# Launch the sweep (this script will run until the agent exits).
-./run_sweep.sh sweep_nsfw
+echo "=== launching wandb sweep ==="
+SWEEP_NAME="sweep_nsfw"
+YAML_PATH="configs/intact/${SWEEP_NAME}.yaml"
+
+echo "Using config: $YAML_PATH"
+set -x
+SWEEP_OUT=$(wandb sweep --project "$PROJECT_NAME" --name "$SWEEP_NAME" "$YAML_PATH")
+echo "$SWEEP_OUT"
+SWEEP_ID=$(echo "$SWEEP_OUT" | awk '/wandb agent/{ match($0, /wandb agent (.+)/, arr); print arr[1]; }')
+if [ -z "$SWEEP_ID" ]; then
+    echo "Failed to parse sweep ID from output"
+    exit 1
+fi
+
+echo "Starting WandB agent for sweep ID: $SWEEP_ID"
+wandb agent "$SWEEP_ID"
+
+# wandb agent blocks until the sweep completes or is stopped
 
 echo "Flux NSFW sweep finished."
