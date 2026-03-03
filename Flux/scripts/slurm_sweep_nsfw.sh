@@ -1,9 +1,12 @@
 #!/bin/bash
 # ============================================================================
-# SLURM Job – NSFW Sweep (Flux)
+# SLURM Job – NSFW Sweep (Flux) — Single GPU
 # ============================================================================
-# Runs a full wandb sweep for NSFW erasure on Flux with H100 / 256 GB nodes.
+# Runs a full wandb sweep for NSFW erasure on Flux with H100 / 256 GB nodes.
 # The sweep configuration lives at `configs/intact/sweep_nsfw.yaml`.
+#
+# For PARALLEL multi-GPU execution, use:
+#   sbatch scripts/slurm_sweep_nsfw_parallel.sh
 #
 # Usage:
 #   cd Flux
@@ -28,12 +31,12 @@ export WANDB_ENTITY="oneandzero24"    # adjust to your account/org
 PROJECT_NAME="intact-flux"
 
 # caches to shared storage
-export HF_HOME="/shared/results/common/miksa/.cache/huggingface"
-export TORCH_HOME="/shared/results/common/miksa/.cache/torch"
-export XDG_CACHE_HOME="/shared/results/common/miksa/.cache"
-export WANDB_DIR="/shared/results/common/miksa/.cache/wandb"
-export WANDB_CACHE_DIR="/shared/results/common/miksa/.cache/wandb"
-export CLIP_CACHE_DIR="/shared/results/common/miksa/.cache/clip"
+export HF_HOME="/net/tscratch/people/plgphelm/unl/.cache/huggingface"
+export TORCH_HOME="/net/tscratch/people/plgphelm/unl/.cache/torch"
+export XDG_CACHE_HOME="/net/tscratch/people/plgphelm/unl/.cache"
+export WANDB_DIR="/net/tscratch/people/plgphelm/unl/.cache/wandb"
+export WANDB_CACHE_DIR="/net/tscratch/people/plgphelm/unl/.cache/wandb"
+export CLIP_CACHE_DIR="/net/tscratch/people/plgphelm/unl/.cache/clip"
 
 echo "Starting Flux NSFW sweep on $(hostname)"
 

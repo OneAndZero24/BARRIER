@@ -1,10 +1,17 @@
 # =============================================================================
 # wandb Sweep — Flux InTAct NSFW Erasure
 # =============================================================================
-# Usage:
+# Usage (single GPU):
 #   cd Flux
 #   wandb sweep configs/intact/sweep_nsfw.yaml
 #   wandb agent <sweep-id>
+#
+# Parallel (multi-GPU on one node via SLURM):
+#   cd Flux
+#   sbatch scripts/slurm_sweep_nsfw_parallel.sh          # creates sweep + 4 agents
+#   sbatch scripts/slurm_sweep_nsfw_parallel.sh <id>     # reuse existing sweep
+#
+# Each run: Unlearn → early nude-vs-clothed upload → I2P NudeNet → COCO 30K FID/CLIP
 # =============================================================================
 
 program: intact_pipeline.py

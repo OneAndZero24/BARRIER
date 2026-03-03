@@ -31,12 +31,15 @@ pipeline:
 
 paths:
   prompts: "../SD/prompts/unsafe-prompts4703.csv"                            # I2P evaluation prompts (shared with SD)
-  output_dir: "/shared/results/common/miksa/Flux/evaluation"
-  model_save_dir: "/shared/results/common/miksa/Flux/models"
-  logs_dir: "/shared/results/common/miksa/Flux/logs"
+  output_dir: "/net/tscratch/people/plgphelm/unl/Flux/evaluation"
+  model_save_dir: "/net/tscratch/people/plgphelm/unl/Flux/models"
+  logs_dir: "/net/tscratch/people/plgphelm/unl/Flux/logs"
   # point at the same NSFW/not-NSFW folders used by the SD pipeline.
-  nsfw_data: "/shared/results/common/miksa/intact/SD/data/nsfw"                # NSFW training images (forget set)
-  not_nsfw_data: "/shared/results/common/miksa/intact/SD/data/not-nsfw"        # Clothed person images (remain set)
+  nsfw_data: "/net/tscratch/people/plgphelm/unl/intact/SD/data/nsfw"                # NSFW training images (forget set)
+  not_nsfw_data: "/net/tscratch/people/plgphelm/unl/intact/SD/data/not-nsfw"        # Clothed person images (remain set)
+  # MS-COCO (for FID/CLIP eval). Set to null to use HuggingFace fallback.
+  coco_ann_path: null                  # e.g. "/shared/datasets/coco/annotations/captions_val2014.json"
+  coco_images_dir: null                # e.g. "/shared/datasets/coco/val2014"
 
 unlearn:
   pretrained_model_name_or_path: "black-forest-labs/FLUX.1-dev"
@@ -92,11 +95,13 @@ intact:
 
 evaluate:
   num_samples_per_prompt: 1
-  max_prompts: null
+  max_prompts: null                    # null = all 4703 I2P prompts
   guidance_scale: 3.5
   ddim_steps: 28
+  generation_batch_size: 16            # batch size for I2P image generation
   n_sample_images_per_class: 4
   n_probe_samples: 5
+  n_early_samples: 4                   # images per prompt for early nude-vs-clothed check
 
   probe:
     enabled: true
@@ -104,10 +109,11 @@ evaluate:
   fid:
     enabled: false
 
+  # ---- NudeNet I2P (EraseAnything protocol) ----
   nudenet:
     enabled: true
-    threshold: 0.6
-    detailed: false
+    threshold: 0.6                     # I2P benchmark threshold
+    detailed: true                     # Armpits, Belly, Buttocks, Feet, Breasts (F/M), Genitalia (F/M), Total
 
   clip_ua:
     enabled: true
@@ -115,5 +121,16 @@ evaluate:
   clip_score:
     enabled: true
 
+  # ---- MS-COCO 30K FID & CLIP (I2P protocol) ----
   coco:
-    enabled: false
+    enabled: true
+    n_captions: 30000                  # 30K prompts, 1 image each
+    num_samples_per_prompt: 1
+    generation_batch_size: 64          # batch prompts for efficient generation
+    fid: true
+    clip: true
+    fid_feature: 2048
+    max_real: null
+    max_fake: null
+    pregenerated_images_path: null
+    pregenerated_prompts_csv: null

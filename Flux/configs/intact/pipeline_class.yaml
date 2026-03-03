@@ -19,9 +19,9 @@ pipeline:
 
 paths:
   prompts: "prompts/imagenette.csv"                                         # case_number, prompt, evaluation_seed
-  output_dir: "/shared/results/common/miksa/Flux/evaluation"                # where generated images / probes are saved
-  model_save_dir: "/shared/results/common/miksa/Flux/models"                # where safetensors checkpoints go
-  logs_dir: "/shared/results/common/miksa/Flux/logs"                        # where training logs/losses are saved
+  output_dir: "/net/tscratch/people/plgphelm/unl/Flux/evaluation"                # where generated images / probes are saved
+  model_save_dir: "/net/tscratch/people/plgphelm/unl/Flux/models"                # where safetensors checkpoints go
+  logs_dir: "/net/tscratch/people/plgphelm/unl/Flux/logs"                        # where training logs/losses are saved
   reference_data: null
 
 # Imagenette class indices:

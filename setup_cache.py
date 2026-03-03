@@ -1,5 +1,5 @@
 """
-Redirect all model / dataset caches to /shared/results/common/miksa/.cache so that
+Redirect all model / dataset caches to a shared scratch directory so that
 the home-directory disk quota is not exceeded.
 
 Import this module **before** any library that downloads models (torch,
@@ -9,11 +9,17 @@ transformers, diffusers, datasets, clip, wandb, …).
     import torch, transformers  # libraries now use the redirected paths
 
 The module is idempotent – re-importing is a no-op.
+
+Override the default root by setting ``CACHE_ROOT`` in the environment
+*before* importing this module.
 """
 
 import os
 
-_CACHE_ROOT = "/shared/results/common/miksa/.cache"
+_CACHE_ROOT = os.environ.get(
+    "CACHE_ROOT",
+    "/net/tscratch/people/plgphelm/unl/.cache",
+)
 
 # HuggingFace (hub, datasets, tokenizers, diffusers)
 os.environ.setdefault("HF_HOME", os.path.join(_CACHE_ROOT, "huggingface"))
