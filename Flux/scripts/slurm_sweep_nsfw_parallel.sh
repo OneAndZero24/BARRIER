@@ -21,16 +21,13 @@
 # ============================================================================
 
 #SBATCH --job-name=flux-nsfw-sweep-par
-#SBATCH --qos=big
-#SBATCH --gres=gpu:4                   # ← number of GPUs on this node
-#SBATCH --cpus-per-task=32             # 8 CPUs per GPU × 4
+#SBATCH --gres=gpu:6                   # ← number of GPUs on this node
+#SBATCH --cpus-per-task=48             # 8 CPUs per GPU × 4
 #SBATCH --mem=256GB
-#SBATCH --partition=dgxh100
-#SBATCH --output=logs/flux-nsfw-sweep-%j.out
-#SBATCH --error=logs/flux-nsfw-sweep-%j.err
+#SBATCH --partition=plgrid-gpu-a100
 
 set -euo pipefail
-N_GPUS=4                               # must match --gres=gpu:N above
+N_GPUS=6                               # must match --gres=gpu:N above
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -50,7 +47,6 @@ export WANDB_DIR="/net/tscratch/people/plgphelm/unl/.cache/wandb"
 export WANDB_CACHE_DIR="/net/tscratch/people/plgphelm/unl/.cache/wandb"
 export CLIP_CACHE_DIR="/net/tscratch/people/plgphelm/unl/.cache/clip"
 
-mkdir -p logs
 
 echo "================================================================"
 echo "Flux NSFW parallel sweep on $(hostname)  –  ${N_GPUS} GPUs"
