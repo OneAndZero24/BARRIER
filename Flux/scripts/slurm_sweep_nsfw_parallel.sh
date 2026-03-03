@@ -21,19 +21,19 @@
 # ============================================================================
 
 #SBATCH --job-name=flux-nsfw-sweep-par
-#SBATCH --gres=gpu:6                   # ← number of GPUs on this node
-#SBATCH --cpus-per-task=48             # 8 CPUs per GPU × 4
+#SBATCH --gres=gpu:4                   # ← number of GPUs on this node
+#SBATCH --cpus-per-task=32             # 8 CPUs per GPU × 4
 #SBATCH --mem=256GB
 #SBATCH --partition=plgrid-gpu-a100
 
 set -euo pipefail
-N_GPUS=6                               # must match --gres=gpu:N above
+N_GPUS=4                               # must match --gres=gpu:N above
 
 # ---- Environment ----
-source ~/miniconda3/etc/profile.d/conda.sh
+source /net/tscratch/people/plgphelm/miniconda3/bin/activate
 conda activate flux
-cd "$HOME/InTAct-Unl/Flux"
-export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
+cd "$HOME/repo/InTAct-Unl/Flux"
+export PYTHONPATH="$HOME/repo/InTAct-Unl:${PYTHONPATH:-}"
 
 # wandb settings
 export WANDB_ENTITY="oneandzero24"
