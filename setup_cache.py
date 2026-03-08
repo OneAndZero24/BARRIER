@@ -18,7 +18,7 @@ import os
 
 _CACHE_ROOT = os.environ.get(
     "CACHE_ROOT",
-    "/net/tscratch/people/plgphelm/unl/.cache",
+    "shared/results/common/miksa/intact/SD/.cache",
 )
 
 # HuggingFace (hub, datasets, tokenizers, diffusers)
