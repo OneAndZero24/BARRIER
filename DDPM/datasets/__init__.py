@@ -1,5 +1,6 @@
 import os
 import pathlib
+import random
 
 import torch
 import torchvision.transforms as transforms
@@ -160,7 +161,31 @@ def get_forget_dataset(args, config, label_to_drop):
 
     data_remain = [data for data in dataset if data[1] != label_to_drop]
     data_forget = [data for data in dataset if data[1] == label_to_drop]
-    print(len(data_remain), len(data_forget))
+
+    remain_fraction = float(getattr(config.training, "remain_fraction", 1.0))
+    remain_subset_seed = int(getattr(config.training, "remain_subset_seed", 1234))
+    if remain_fraction <= 0.0 or remain_fraction > 1.0:
+        raise ValueError(
+            f"training.remain_fraction must be in (0, 1], got {remain_fraction}"
+        )
+
+    if remain_fraction < 1.0:
+        # Keep class balance in the remaining set to avoid introducing label skew.
+        by_class = {}
+        for item in data_remain:
+            by_class.setdefault(item[1], []).append(item)
+
+        rng = random.Random(remain_subset_seed)
+        sampled_remain = []
+        for cls, items in by_class.items():
+            k = max(1, int(len(items) * remain_fraction))
+            sampled_remain.extend(rng.sample(items, k))
+
+        data_remain = sampled_remain
+    print(
+        f"remain={len(data_remain)} forget={len(data_forget)} "
+        f"(remain_fraction={remain_fraction})"
+    )
 
     remain_loader = DataLoader(
         data_remain,
