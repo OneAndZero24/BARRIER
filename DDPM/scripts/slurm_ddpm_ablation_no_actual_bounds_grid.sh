@@ -22,7 +22,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --partition=dgxa100
-#SBATCH --array=0-7
+#SBATCH --array=0-6
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -40,10 +40,10 @@ USE_ACTUAL_BOUNDS=false
 REDUCED_DIM=32
 NORMALIZE_PROTECTION=true
 
-# ---- Grid (8 combos) ----
-LOWER_PCTS=(   0.01 0.02 0.05 0.10 0.05 0.05 0.02 0.10 )
-UPPER_PCTS=(   0.90 0.95 0.95 0.99 0.90 0.99 0.99 0.95 )
-INFTY_SCALES=( 10   20   20   20   40   40   80   80   )
+# ---- Grid (7 combos) ----
+LOWER_PCTS=(   0.10 0.05 0.01 0.10 0.01 0.01 0.05 )
+UPPER_PCTS=(   0.90 0.95 0.99 0.90 0.99 0.99 0.95 )
+INFTY_SCALES=( 10   20   20   40   40   80   80   )
 
 IDX=${SLURM_ARRAY_TASK_ID}
 LOWER=${LOWER_PCTS[$IDX]}
