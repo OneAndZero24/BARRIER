@@ -23,7 +23,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --partition=dgxa100
-#SBATCH --array=0-2
+#SBATCH --array=0-1
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -40,7 +40,7 @@ METHOD="rl"
 USE_ACTUAL_BOUNDS=true
 
 # ---- Ablation axis ----
-REMAIN_FRACTIONS=(1.0 0.75 0.5 0.25 0.1)
+REMAIN_FRACTIONS=(0.25 0.1)
 SUBSET_SEED=1234
 
 IDX=${SLURM_ARRAY_TASK_ID}

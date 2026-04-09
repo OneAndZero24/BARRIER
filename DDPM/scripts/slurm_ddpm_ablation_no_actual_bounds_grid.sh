@@ -9,7 +9,7 @@
 #   lr=1e-4, n_iters=3000, lambda_interval=5.0, method=rl, use_actual_bounds=false
 #
 # Grid axis:
-#   lower_percentile, upper_percentile, infinity_scale
+#   infinity_scale (many values)
 #
 # Usage:
 #   cd DDPM
@@ -22,7 +22,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --partition=dgxa100
-#SBATCH --array=0-6
+#SBATCH --array=0-4
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -40,21 +40,19 @@ USE_ACTUAL_BOUNDS=false
 REDUCED_DIM=32
 NORMALIZE_PROTECTION=true
 
-# ---- Grid (7 combos) ----
-LOWER_PCTS=(   0.10 0.05 0.01 0.10 0.01 0.01 0.05 )
-UPPER_PCTS=(   0.90 0.95 0.99 0.90 0.99 0.99 0.95 )
-INFTY_SCALES=( 10   20   20   40   40   80   80   )
+# ---- Grid: infinity_scale sweep (10 values) ----
+LOWER=0.05
+UPPER=0.95
+INFTY_SCALES=(1 10 1000 1000000 1000000000)
 
 IDX=${SLURM_ARRAY_TASK_ID}
-LOWER=${LOWER_PCTS[$IDX]}
-UPPER=${UPPER_PCTS[$IDX]}
 INF_SCALE=${INFTY_SCALES[$IDX]}
 
 echo "============================================"
 echo "DDPM No-Actual-Bounds Grid – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
 echo "  forget_class=${FORGET_CLASS}  lr=${LR}  n_iters=${NITERS}  lambda=${LAMBDA}"
 echo "  method=${METHOD}  use_actual_bounds=${USE_ACTUAL_BOUNDS}"
-echo "  lower=${LOWER}  upper=${UPPER}  infinity_scale=${INF_SCALE}"
+echo "  lower=${LOWER}  upper=${UPPER}  infinity_scale=${INF_SCALE} (grid index ${IDX})"
 echo "============================================"
 
 TMPCONFIG="/tmp/ddpm_ablate_nobounds_${SLURM_ARRAY_JOB_ID}_${IDX}.yaml"
@@ -98,15 +96,15 @@ cfg["evaluate"]["n_samples_per_class"] = 500
 cfg["evaluate"].setdefault("classifier", {})["n_samples_per_class"] = 500
 
 cfg.setdefault("wandb", {})
-cfg["wandb"]["group"] = "cifar10-ablate-nobounds-grid"
+cfg["wandb"]["group"] = "cifar10-ablate-nobounds-infscale-grid"
 cfg["wandb"]["tags"] = list(cfg["wandb"].get("tags", [])) + [
-    "ablation", "no-actual-bounds", "grid-search",
-    f"lower_{lower}", f"upper_{upper}", f"infscale_{inf_scale}",
+    "ablation", "no-actual-bounds", "infscale-grid",
+    f"infscale_{inf_scale}", f"lower_0.05", f"upper_0.95",
     "lr_1e-4", "iters_3000", "lambda_5.0"
 ]
 
 suffix = (
-    f"ablate_nobounds_fc{forget_class}_l{lower}_u{upper}_inf{inf_scale}"
+    f"ablate_nobounds_infscale_{inf_scale}"
     f"_lr{lr}_ni{niters}_lam{lam}"
 )
 cfg["paths"]["output_dir"] = os.path.join(cfg["paths"]["output_dir"], suffix)
