@@ -78,6 +78,20 @@ class UnlearnIntervalProtection:
         self.target_layers: Dict[str, nn.Module] = {}  # Maps target_name -> target_module
         self.param_to_name: Dict[nn.Parameter, str] = {}  # Maps parameter -> name
 
+    def _reshape_hook_input(self, module: nn.Module, input_tensor: torch.Tensor) -> torch.Tensor:
+        if isinstance(module, nn.Conv2d):
+            B, C, H, W = input_tensor.shape
+            reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
+        elif isinstance(module, nn.Linear):
+            # For Linear layers, reshape to [N, in_features] matching layer weight
+            # Handles both 2D [B, features] and 3D [B, seq, features] inputs
+            in_features = module.weight.shape[1]
+            reshaped = input_tensor.reshape(-1, in_features)
+        else:
+            # Fallback for other layer types
+            reshaped = input_tensor.view(input_tensor.size(0), -1)
+        return reshaped
+
     def setup_protection(self, model: nn.Module, forget_dataloader, device, remain_dataloader=None,
                         forward_fn: Callable = None, data_transform_fn=None, betas=None, num_timesteps=1000):
         """
@@ -99,6 +113,11 @@ class UnlearnIntervalProtection:
             forward_fn = ddpm_forward_fn
 
         log.info("Setting up InTAct with Mean Reparametrization...")
+
+        self.pca_info = []
+        self.params_snapshot = {}
+        self.param_to_name = {}
+        self.target_layers = {}
         
         # Find target layers using named_modules
         target_names = self._find_target_layers(model)
@@ -109,116 +128,165 @@ class UnlearnIntervalProtection:
         
         log.info(f"Found {len(target_names)} target layers to collect inputs from: {target_names}")
 
-        # 1. Collect input activations from target layers (forget data)
-        acts_dict = self._collect_activations(
+        layer_stats: Dict[str, Dict[str, torch.Tensor]] = {
+            layer_name: {
+                "layer_type": None,
+                "running_sum": None,
+                "count": 0,
+                "mu": None,
+                "cov": None,
+                "U_forget": None,
+                "U_residual": None,
+                "S_residual": None,
+                "projected_activations": [],
+                "z_min": None,
+                "z_max": None,
+                "inf_low": None,
+                "inf_high": None,
+            }
+            for layer_name in target_names
+        }
+
+        def make_mean_update(name: str):
+            def update_mean(reshaped_cpu: torch.Tensor):
+                state = layer_stats[name]
+                if state["running_sum"] is None:
+                    state["running_sum"] = torch.zeros(reshaped_cpu.shape[1], device="cpu", dtype=torch.float32)
+                state["running_sum"].add_(reshaped_cpu.sum(dim=0))
+                state["count"] += int(reshaped_cpu.shape[0])
+            return update_mean
+
+        def make_cov_update(name: str):
+            def update_cov(reshaped_cpu: torch.Tensor):
+                state = layer_stats[name]
+                mu = state["mu"]
+                if mu is None:
+                    raise RuntimeError(f"Mean must be computed before covariance for layer {name}")
+                if state["cov"] is None:
+                    dim = mu.shape[0]
+                    state["cov"] = torch.zeros((dim, dim), device="cpu", dtype=torch.float32)
+
+                # Keep the accumulation CPU-bound and avoid large temporary matrices.
+                chunk_size = 16384 if reshaped_cpu.shape[1] <= 2048 else 4096
+                for start in range(0, reshaped_cpu.shape[0], chunk_size):
+                    chunk = reshaped_cpu[start:start + chunk_size]
+                    x_centered = chunk - mu
+                    state["cov"].add_(x_centered.T @ x_centered)
+            return update_cov
+
+        def make_projection_update(name: str, update_forget_bounds: bool, update_actual_bounds: bool):
+            def update_projection(reshaped_cpu: torch.Tensor):
+                state = layer_stats[name]
+                mu = state["mu"]
+                U_forget = state["U_forget"]
+                if mu is None or U_forget is None:
+                    raise RuntimeError(f"PCA basis must be computed before projection for layer {name}")
+
+                projected = (reshaped_cpu - mu) @ U_forget.T
+                state["projected_activations"].append(projected.detach().cpu())
+            return update_projection
+
+        # 1. Pass 1: stream mean
+        self._collect_activations(
             model, target_names, forget_dataloader, device,
             forward_fn=forward_fn,
-            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps
+            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+            process_fns={name: make_mean_update(name) for name in target_names}
         )
-        
-        # 2. Compute SVD on forget data and optionally collect projected remain data
-        pca_components = {}  # Store mu and U_forget for each layer
-        
-        for layer_name, acts_info in acts_dict.items():
-            acts = acts_info['activations']
-            layer_type = acts_info.get('layer_type', 'Linear')
-            
-            # PCA/SVD is not implemented for bf16 on CUDA, so upcast only the
-            # statistics working tensor while leaving the collected activations
-            # and model weights unchanged.
-            acts_gpu = acts.to(device=device, dtype=torch.float32)
 
-            if not torch.isfinite(acts_gpu).all():
-                nonfinite_count = (~torch.isfinite(acts_gpu)).sum().item()
-                log.warning(
-                    f"Layer {layer_name}: replacing {nonfinite_count} non-finite activation values before PCA/SVD"
-                )
-                acts_gpu = torch.nan_to_num(acts_gpu, nan=0.0, posinf=0.0, neginf=0.0)
-            
-            # Centered SVD
-            mu = acts_gpu.mean(dim=0)
-            Xc = acts_gpu - mu
-            _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
-            
+        for layer_name in target_names:
+            state = layer_stats[layer_name]
+            if state["count"] == 0:
+                log.warning(f"Skipping layer {layer_name} - no activations collected during mean pass")
+                continue
+            state["mu"] = state["running_sum"] / float(state["count"])
+
+        # 2. Pass 2: stream covariance
+        self._collect_activations(
+            model, target_names, forget_dataloader, device,
+            forward_fn=forward_fn,
+            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+            process_fns={name: make_cov_update(name) for name in target_names}
+        )
+
+        # 3. Final PCA components from covariance
+        pca_components: Dict[str, Dict[str, torch.Tensor]] = {}
+        for layer_name in target_names:
+            state = layer_stats[layer_name]
+            if state["cov"] is None or state["mu"] is None:
+                log.warning(f"Skipping layer {layer_name} - insufficient statistics for PCA")
+                continue
+
+            layer_type = state["layer_type"] or type(self.target_layers[layer_name]).__name__
+            _, S, Vh = torch.linalg.svd(state["cov"], full_matrices=False)
+
             k = min(self.reduced_dim, Vh.size(0))
-            U_forget = Vh[:k] 
+            U_forget = Vh[:k]
             U_residual = Vh[k:]
-            S_residual = S[k:]
+            # Recover the singular-value scale used by the original centered-data SVD.
+            S_residual = torch.sqrt(torch.clamp(S[k:], min=0.0))
 
-            # Define the Forget Box in centered PCA space
-            Z_forget = Xc @ U_forget.T
-            z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)
-            z_max = torch.quantile(Z_forget, self.upper_percentile, dim=0)
-            
-            # Store PCA components for remain data projection
+            state["U_forget"] = U_forget
+            state["U_residual"] = U_residual
+            state["S_residual"] = S_residual
+
             pca_components[layer_name] = {
-                'mu': mu,
-                'U_forget': U_forget,
-                'layer_type': layer_type
+                "mu": state["mu"],
+                "U_forget": U_forget,
+                "layer_type": layer_type,
             }
-            
-            # Free GPU memory
-            del acts_gpu, Xc
-            
-            # Calculate actual bounds from remain+forget if requested
+
+        # 4. Stream projected forget activations to compute bounds without storing activations
+        self._collect_activations(
+            model, list(pca_components.keys()), forget_dataloader, device,
+            forward_fn=forward_fn,
+            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+            process_fns={name: make_projection_update(name, update_forget_bounds=True, update_actual_bounds=False)
+                         for name in pca_components}
+        )
+
+        # 5. Optionally stream remain activations to tighten the actual bounds
+        if self.use_actual_bounds and remain_dataloader is not None:
+            log.info("Collecting and projecting remain data on-the-fly...")
+            self._collect_activations(
+                model, list(pca_components.keys()), remain_dataloader, device,
+                forward_fn=forward_fn,
+                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+                process_fns={name: make_projection_update(name, update_forget_bounds=False, update_actual_bounds=True)
+                             for name in pca_components}
+            )
+
+        # 6. Materialize the final PCA info structure used by the protection loss
+        for layer_name in pca_components:
+            state = layer_stats[layer_name]
+            if len(state["projected_activations"]) == 0:
+                log.warning(f"Skipping layer {layer_name} - no projected activations collected")
+                continue
+
+            projected_activations = torch.cat(state["projected_activations"], dim=0)
+            z_min = torch.quantile(projected_activations, self.lower_percentile, dim=0)
+            z_max = torch.quantile(projected_activations, self.upper_percentile, dim=0)
+
             if self.use_actual_bounds and remain_dataloader is not None:
-                # Start with forget data bounds
-                combined_min = Z_forget.min(dim=0)[0]
-                combined_max = Z_forget.max(dim=0)[0]
-                del Z_forget
-                
-                # Will collect and project remain data on-the-fly
-                inf_low = combined_min  # Temporary, will update after remain collection
-                inf_high = combined_max
+                inf_low = projected_activations.min(dim=0)[0]
+                inf_high = projected_activations.max(dim=0)[0]
             else:
-                # Use scaled bounds (original behavior)
                 inf_low = z_min - self.infinity_scale
                 inf_high = z_max + self.infinity_scale
-                del Z_forget
 
-            # Store PCA info (will update inf_low/inf_high after remain collection if needed)
             pca_entry = {
                 "layer_name": layer_name,
-                "mu": mu.detach().cpu(),
-                "U_forget": U_forget.detach().cpu(),
-                "U_residual": U_residual.detach().cpu(),
-                "S_residual": S_residual.detach().cpu(),
+                "mu": state["mu"].detach().cpu(),
+                "U_forget": state["U_forget"].detach().cpu(),
+                "U_residual": state["U_residual"].detach().cpu(),
+                "S_residual": state["S_residual"].detach().cpu(),
                 "z_min": z_min.detach().cpu(),
                 "z_max": z_max.detach().cpu(),
                 "inf_low": inf_low.detach().cpu(),
                 "inf_high": inf_high.detach().cpu(),
-                "layer_type": layer_type
+                "layer_type": state["layer_type"] or type(self.target_layers[layer_name]).__name__,
             }
             self.pca_info.append(pca_entry)
-        
-        # 2b. Collect projected remain data and update bounds
-        if self.use_actual_bounds and remain_dataloader is not None:
-            log.info("Collecting and projecting remain data on-the-fly...")
-            remain_projected = self._collect_activations(
-                model, list(pca_components.keys()), remain_dataloader, device,
-                forward_fn=forward_fn,
-                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
-                pca_components=pca_components  # Enable projection mode
-            )
-            
-            # Update inf_low/inf_high for each layer
-            for pca_entry in self.pca_info:
-                layer_name = pca_entry["layer_name"]
-                if layer_name in remain_projected:
-                    Z_remain = remain_projected[layer_name].to(device)
-                    
-                    # Update bounds to include remain data
-                    inf_low = pca_entry["inf_low"].to(device)
-                    inf_high = pca_entry["inf_high"].to(device)
-                    
-                    combined_min = torch.minimum(inf_low, Z_remain.min(dim=0)[0])
-                    combined_max = torch.maximum(inf_high, Z_remain.max(dim=0)[0])
-                    
-                    pca_entry["inf_low"] = combined_min.cpu()
-                    pca_entry["inf_high"] = combined_max.cpu()
-                    
-                    log.info(f"Layer {layer_name}: Updated bounds with {Z_remain.size(0)} projected remain samples")
-                    del Z_remain, inf_low, inf_high, combined_min, combined_max
 
         # 3. Build param_to_name mapping and snapshot only target layer parameters
         self.param_to_name = {p: n for n, p in model.named_parameters()}
@@ -404,76 +472,37 @@ class UnlearnIntervalProtection:
     def _collect_activations(self, model, layer_names: List[str], dataloader, device,
                             forward_fn: Callable = None,
                             data_transform_fn=None, betas=None, num_timesteps=1000,
-                            pca_components: Optional[Dict] = None):
+                            process_fns: Optional[Dict[str, Callable[[torch.Tensor], None]]] = None):
         """
-        Collect activations with optional on-the-fly projection.
-        
-        Args:
-            forward_fn: Function to call model forward. Signature: forward_fn(model, batch, device, **kwargs)
-            pca_components: If provided, project activations using {layer_name: {'mu': ..., 'U_forget': ...}}
-                           Returns projected [N, reduced_dim] instead of full [N, feature_dim]
+        Stream activations through hooks and invoke per-layer callbacks.
+
+        This method intentionally does not store activations. Callers provide a
+        per-layer callback that receives each reshaped activation batch on CPU.
         """
         if forward_fn is None:
             forward_fn = ddpm_forward_fn
             
         model.eval()
-        buf_dict = {name: [] for name in layer_names}
         layer_type_dict = {name: None for name in layer_names}
         hooks = []
         
-        # Register hooks - either raw collection or projection
-        if pca_components is None:
-            # Standard hook: collect raw activations
-            def make_hook(name):
-                def hook(module, inp, out):
-                    if len(inp) > 0 and inp[0] is not None:
-                        input_tensor = inp[0]
-                        
-                        if layer_type_dict[name] is None:
-                            layer_type_dict[name] = type(module).__name__
-                        
-                        # Handle different layer types
-                        if isinstance(module, nn.Conv2d):
-                            B, C, H, W = input_tensor.shape
-                            reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
-                        elif isinstance(module, nn.Linear):
-                            # For Linear layers, reshape to [N, in_features] matching layer weight
-                            # Handles both 2D [B, features] and 3D [B, seq, features] inputs
-                            in_features = module.weight.shape[1]
-                            reshaped = input_tensor.reshape(-1, in_features)
-                        else:
-                            # Fallback for other layer types
-                            reshaped = input_tensor.view(input_tensor.size(0), -1)
-                        buf_dict[name].append(reshaped.detach().cpu())
-                return hook
-        else:
-            # Projection hook: project on GPU, store reduced representation
-            def make_hook(name):
-                mu = pca_components[name]['mu']
-                U_forget = pca_components[name]['U_forget']
-                
-                def hook(module, inp, out):
-                    if len(inp) > 0 and inp[0] is not None:
-                        input_tensor = inp[0]
-                        
-                        # Handle different layer types
-                        if isinstance(module, nn.Conv2d):
-                            B, C, H, W = input_tensor.shape
-                            reshaped = input_tensor.permute(0, 2, 3, 1).reshape(-1, C)
-                        elif isinstance(module, nn.Linear):
-                            # For Linear layers, reshape to [N, in_features] matching mu dimension
-                            # Handles both 2D [B, features] and 3D [B, seq, features] inputs
-                            in_features = mu.shape[0]
-                            reshaped = input_tensor.reshape(-1, in_features)
-                        else:
-                            # Fallback for other layer types
-                            reshaped = input_tensor.view(input_tensor.size(0), -1)
-                        
-                        # Project on GPU, then move to CPU
-                        centered = reshaped - mu
-                        projected = centered @ U_forget.T
-                        buf_dict[name].append(projected.detach().cpu())
-                return hook
+        def make_hook(name):
+            def hook(module, inp, out):
+                if len(inp) > 0 and inp[0] is not None:
+                    input_tensor = inp[0]
+
+                    if layer_type_dict[name] is None:
+                        layer_type_dict[name] = type(module).__name__
+
+                    reshaped = self._reshape_hook_input(module, input_tensor)
+                    reshaped_cpu = reshaped.detach().to(device="cpu", dtype=torch.float32)
+                    try:
+                        process_fn = process_fns.get(name) if process_fns is not None else None
+                        if process_fn is not None:
+                            process_fn(reshaped_cpu)
+                    finally:
+                        del reshaped_cpu, reshaped, input_tensor
+            return hook
         
         hooks = [layer_module.register_forward_hook(make_hook(layer_name)) 
                 for layer_name, layer_module in self.target_layers.items() 
@@ -492,28 +521,8 @@ class UnlearnIntervalProtection:
             h.remove()
         model.train()
 
-        # Return results
-        result = {}
-        mode = "projected" if pca_components else "raw"
-        log.info(f"Collected {mode} activations for layers: {list(buf_dict.keys())}, with counts: {[len(buf_dict[name]) for name in buf_dict]}")
-        
-        for name in buf_dict:
-            if len(buf_dict[name]) > 0:
-                activations = torch.cat(buf_dict[name], dim=0)
-                
-                if pca_components is None:
-                    result[name] = {
-                        'activations': activations,
-                        'layer_type': layer_type_dict[name]
-                    }
-                    log.info(f"  Layer {name}: {result[name]['activations'].shape}, type={layer_type_dict[name]}")
-                else:
-                    result[name] = activations  # Already projected, just return tensor
-                    log.info(f"  Projected layer {name}: {activations.shape}")
-            else:
-                log.warning(f"Skipping layer {name} - no activations collected")
-        
-        return result
+        log.info(f"Streamed activations for layers: {list(layer_type_dict.keys())}")
+        return layer_type_dict
     
     def _find_target_layers(self, model: nn.Module) -> List[str]:
         """
