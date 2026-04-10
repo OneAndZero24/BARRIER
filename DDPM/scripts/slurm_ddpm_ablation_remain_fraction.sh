@@ -10,7 +10,10 @@
 #   lr=1e-4, n_iters=3000, lambda_interval=5.0, method=rl, use_actual_bounds=true
 #
 # Remain fractions tested:
-#   1.0 (full), 0.5, 0.1
+#   1.0 (full), 0.75, 0.5, 0.25, 0.1
+#
+# Repeats per remain fraction:
+#   5
 #
 # Usage:
 #   cd DDPM
@@ -23,7 +26,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --partition=dgxa100
-#SBATCH --array=0-1
+#SBATCH --array=0-24
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -40,17 +43,25 @@ METHOD="rl"
 USE_ACTUAL_BOUNDS=true
 
 # ---- Ablation axis ----
-REMAIN_FRACTIONS=(0.25 0.1)
-SUBSET_SEED=1234
+REMAIN_FRACTIONS=(1.0 0.75 0.5 0.25 0.1)
+N_REPEATS=5
+BASE_SEED=1234
 
 IDX=${SLURM_ARRAY_TASK_ID}
-REMAIN_FRAC=${REMAIN_FRACTIONS[$IDX]}
+FRAC_IDX=$((IDX / N_REPEATS))
+REPEAT_IDX=$((IDX % N_REPEATS))
+REMAIN_FRAC=${REMAIN_FRACTIONS[$FRAC_IDX]}
+
+# Vary both training seed and remain subset seed per repetition.
+RUN_SEED=$((BASE_SEED + REPEAT_IDX))
+SUBSET_SEED=$((BASE_SEED + 100 + REPEAT_IDX))
 
 echo "============================================"
 echo "DDPM Remain-Fraction Ablation – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
 echo "  forget_class=${FORGET_CLASS}  lr=${LR}  n_iters=${NITERS}  lambda=${LAMBDA}"
 echo "  method=${METHOD}  use_actual_bounds=${USE_ACTUAL_BOUNDS}"
-echo "  remain_fraction=${REMAIN_FRAC}  subset_seed=${SUBSET_SEED}"
+echo "  remain_fraction=${REMAIN_FRAC}  repeat_idx=${REPEAT_IDX}"
+echo "  run_seed=${RUN_SEED}  subset_seed=${SUBSET_SEED}"
 echo "============================================"
 
 TMPCONFIG="/tmp/ddpm_ablate_remain_${SLURM_ARRAY_JOB_ID}_${IDX}.yaml"
@@ -69,12 +80,16 @@ lam = float("${LAMBDA}")
 method = "${METHOD}"
 use_actual_bounds = "${USE_ACTUAL_BOUNDS}".lower() == "true"
 remain_frac = float("${REMAIN_FRAC}")
+repeat_idx = int("${REPEAT_IDX}")
+run_seed = int("${RUN_SEED}")
 subset_seed = int("${SUBSET_SEED}")
 
 cfg["unlearn"]["label_to_forget"] = forget_class
 cfg["unlearn"]["lr"] = lr
 cfg["unlearn"]["n_iters"] = niters
 cfg["unlearn"]["method"] = method
+cfg.setdefault("pipeline", {})
+cfg["pipeline"]["seed"] = run_seed
 
 cfg.setdefault("intact", {})
 cfg["intact"]["lambda_interval"] = lam
@@ -93,10 +108,13 @@ cfg.setdefault("wandb", {})
 cfg["wandb"]["group"] = "cifar10-ablate-remain-fraction"
 cfg["wandb"]["tags"] = list(cfg["wandb"].get("tags", [])) + [
     "ablation", "remain-fraction", f"remain_{remain_frac}",
-    "lr_1e-4", "iters_3000", "lambda_5.0"
+    f"repeat_{repeat_idx}", "lr_1e-4", "iters_3000", "lambda_5.0"
 ]
 
-suffix = f"ablate_remain_fc{forget_class}_rf{remain_frac}_lr{lr}_ni{niters}_lam{lam}"
+suffix = (
+    f"ablate_remain_fc{forget_class}_rf{remain_frac}_rep{repeat_idx}"
+    f"_rs{run_seed}_ss{subset_seed}_lr{lr}_ni{niters}_lam{lam}"
+)
 cfg["paths"]["output_dir"] = os.path.join(cfg["paths"]["output_dir"], suffix)
 cfg["paths"]["checkpoint_dir"] = os.path.join(cfg["paths"]["checkpoint_dir"], suffix)
 
