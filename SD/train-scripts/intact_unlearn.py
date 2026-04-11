@@ -433,6 +433,9 @@ def intact_unlearn_class(
     # Save paths
     model_save_dir="models",
     logs_dir="models",
+    save_compvis=True,
+    save_diffusers=True,
+    save_history_logs=True,
 ):
     """
     InTAct unlearning for class forgetting (GA/RL methods).
@@ -555,9 +558,20 @@ def intact_unlearn_class(
                 sleep(0.1)
     
     model.eval()
-    save_model(model, name, None, config_path, diffusers_config_path, 
-               model_save_dir=model_save_dir, device=device)
-    save_history(losses, name, f"class_{class_to_forget}", logs_dir=logs_dir)
+    if save_compvis or save_diffusers:
+        save_model(
+            model,
+            name,
+            None,
+            config_path,
+            diffusers_config_path,
+            model_save_dir=model_save_dir,
+            device=device,
+            save_compvis=save_compvis,
+            save_diffusers=save_diffusers,
+        )
+    if save_history_logs:
+        save_history(losses, name, f"class_{class_to_forget}", logs_dir=logs_dir)
     
     return model
 

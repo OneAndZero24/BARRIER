@@ -126,6 +126,9 @@ def run_unlearn_class(cfg, device_str):
             image_size=uc.get("image_size", 512),
             model_save_dir=model_save_dir,
             logs_dir=logs_dir,
+            save_compvis=uc.get("save_compvis", True),
+            save_diffusers=uc.get("save_diffusers", True),
+            save_history_logs=uc.get("save_history_logs", True),
         )
     elif method == "ga":
         from gradient_ascent import gradient_ascent

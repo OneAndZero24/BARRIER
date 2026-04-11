@@ -4,14 +4,14 @@
 # ============================================================================
 #   Fully parallelised: each job = one (hyperparam combo, class) pair.
 #
-#   This script now runs two sweeps in one array:
-#   1) FULL sweep across all 10 Imagenette classes with NON-ZERO alpha.
-#   2) FOCUSED sweep on {tench, chain_saw, golf_ball} with alpha=0 and
-#      alternative lambda/epoch/lr combos.
+#   This script runs two NON-ZERO-alpha stages in one array:
+#   1) RETRY of previously failed/crashed jobs.
+#   2) REFINED sweep across all 10 Imagenette classes with tighter ranges
+#      around the currently best UA/FID trade-off region.
 #
 #   Indexing:
-#     - TASK_ID < FOCUS_JOBS         -> focused alpha=0 sweep
-#     - otherwise                    -> full non-zero-alpha sweep
+#     - TASK_ID < RETRY_JOBS         -> retry non-zero-alpha failures
+#     - otherwise                    -> refined non-zero-alpha sweep
 #
 # Usage:
 #   cd SD
@@ -24,7 +24,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --partition=dgxh100
-#SBATCH --array=0-97
+#SBATCH --array=0-63
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -32,28 +32,28 @@ conda activate ldm
 cd $HOME/InTAct-Unl/SD
 export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
-# ---- Full-grid hyperparameters: non-zero alpha across all classes ----
-FULL_ALPHAS=( 0.05 0.05 0.10 0.10 0.20 0.20 0.30 0.30 )
-FULL_LAMBDAS=(5    10   5    10   3    7    3    7   )
-FULL_EPOCHS=( 2    2    3    3    4    4    5    5   )
-FULL_LRS=(    5e-6 1e-5 5e-6 1e-5 5e-6 1e-5 5e-6 1e-5)
+# ---- Retry set: failed/crashed NON-ZERO-alpha jobs from prior run ----
+RETRY_CLASSES=( 0    2    5    9 )
+RETRY_ALPHAS=( 0.10 0.05 0.05 0.05 )
+RETRY_LAMBDAS=(5    10   10   10 )
+RETRY_EPOCHS=( 3    2    2    2 )
+RETRY_LRS=(    5e-6 1e-5 1e-5 1e-5 )
 
-NUM_FULL_COMBOS=${#FULL_ALPHAS[@]}  # 8
+NUM_RETRY_JOBS=${#RETRY_CLASSES[@]}  # 4
+
+# ---- Refined NON-ZERO-alpha grid across all classes ----
+# Keep grid compact, but cover low + medium + high alpha to avoid bias.
+TUNED_ALPHAS=( 0.05 0.05 0.10 0.10 0.20 0.30 )
+TUNED_LAMBDAS=(5    10   5    10   7    3   )
+TUNED_EPOCHS=( 2    2    3    3    4    5   )
+TUNED_LRS=(    5e-6 1e-5 5e-6 1e-5 1e-5 5e-6)
+
+NUM_TUNED_COMBOS=${#TUNED_ALPHAS[@]}  # 6
 NUM_CLASSES=10
 
-# ---- Focused alpha=0 grid for selected classes only ----
-FOCUS_CLASS_IDS=(0 3 8)  # tench, chain_saw, golf_ball
-FOCUS_ALPHAS=( 0.0 0.0 0.0 0.0 0.0 0.0 )
-FOCUS_LAMBDAS=(0.5 1   2   5   10  15  )
-FOCUS_EPOCHS=( 2   3   3   5   5   7   )
-FOCUS_LRS=(    2e-6 5e-6 1e-5 1e-5 2e-5 2e-5)
-
-NUM_FOCUS_COMBOS=${#FOCUS_ALPHAS[@]}      # 6
-NUM_FOCUS_CLASSES=${#FOCUS_CLASS_IDS[@]}  # 3
-
-FULL_JOBS=$(( NUM_FULL_COMBOS * NUM_CLASSES ))
-FOCUS_JOBS=$(( NUM_FOCUS_COMBOS * NUM_FOCUS_CLASSES ))
-TOTAL_JOBS=$(( FULL_JOBS + FOCUS_JOBS ))
+RETRY_JOBS=${NUM_RETRY_JOBS}
+TUNED_JOBS=$(( NUM_TUNED_COMBOS * NUM_CLASSES ))
+TOTAL_JOBS=$(( RETRY_JOBS + TUNED_JOBS ))
 
 TASK_ID=${SLURM_ARRAY_TASK_ID}
 
@@ -65,27 +65,26 @@ fi
 CLASSES=("tench" "english_springer" "cassette_player" "chain_saw" "church"
          "french_horn" "garbage_truck" "gas_pump" "golf_ball" "parachute")
 
-if (( TASK_ID < FOCUS_JOBS )); then
-    SWEEP_KIND="focus-alpha0"
+if (( TASK_ID < RETRY_JOBS )); then
+    SWEEP_KIND="retry-nonzero-failures"
     LOCAL_ID=${TASK_ID}
-    COMBO_IDX=$(( LOCAL_ID / NUM_FOCUS_CLASSES ))
-    FOCUS_CLASS_POS=$(( LOCAL_ID % NUM_FOCUS_CLASSES ))
-    CLASS=${FOCUS_CLASS_IDS[$FOCUS_CLASS_POS]}
+    COMBO_IDX=${LOCAL_ID}
+    CLASS=${RETRY_CLASSES[$LOCAL_ID]}
 
-    ALPHA=${FOCUS_ALPHAS[$COMBO_IDX]}
-    LAMBDA=${FOCUS_LAMBDAS[$COMBO_IDX]}
-    EPOCH=${FOCUS_EPOCHS[$COMBO_IDX]}
-    LR=${FOCUS_LRS[$COMBO_IDX]}
+    ALPHA=${RETRY_ALPHAS[$LOCAL_ID]}
+    LAMBDA=${RETRY_LAMBDAS[$LOCAL_ID]}
+    EPOCH=${RETRY_EPOCHS[$LOCAL_ID]}
+    LR=${RETRY_LRS[$LOCAL_ID]}
 else
-    SWEEP_KIND="full-nonzero-alpha"
-    LOCAL_ID=$(( TASK_ID - FOCUS_JOBS ))
+    SWEEP_KIND="tuned-nonzero-alpha"
+    LOCAL_ID=$(( TASK_ID - RETRY_JOBS ))
     COMBO_IDX=$(( LOCAL_ID / NUM_CLASSES ))
     CLASS=$(( LOCAL_ID % NUM_CLASSES ))
 
-    ALPHA=${FULL_ALPHAS[$COMBO_IDX]}
-    LAMBDA=${FULL_LAMBDAS[$COMBO_IDX]}
-    EPOCH=${FULL_EPOCHS[$COMBO_IDX]}
-    LR=${FULL_LRS[$COMBO_IDX]}
+    ALPHA=${TUNED_ALPHAS[$COMBO_IDX]}
+    LAMBDA=${TUNED_LAMBDAS[$COMBO_IDX]}
+    EPOCH=${TUNED_EPOCHS[$COMBO_IDX]}
+    LR=${TUNED_LRS[$COMBO_IDX]}
 fi
 
 CLASS_NAME=${CLASSES[$CLASS]}
@@ -93,14 +92,17 @@ PARAM_TAG="a${ALPHA}-lam${LAMBDA}-ep${EPOCH}-lr${LR}"
 
 echo "============================================"
 echo "Grid search (${SWEEP_KIND}) – combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS} (${CLASS_NAME})"
-echo "  Total active tasks: ${TOTAL_JOBS} (full=${FULL_JOBS}, focus=${FOCUS_JOBS})"
+echo "  Total active tasks: ${TOTAL_JOBS} (retry=${RETRY_JOBS}, tuned=${TUNED_JOBS})"
 echo "  Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "============================================"
 
 # ---- Build per-job config ----
 TMPCONFIG="/tmp/sd_grid_${SLURM_ARRAY_JOB_ID}_${TASK_ID}.yaml"
+RUN_ID="${SLURM_ARRAY_JOB_ID}_${TASK_ID}"
+TMP_MODEL_DIR="/tmp/sd_grid_models/${RUN_ID}"
+TMP_LOGS_DIR="/tmp/sd_grid_logs/${RUN_ID}"
 
-python - "$CLASS" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" <<'PYEOF'
+python - "$CLASS" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" "$RUN_ID" "$TMP_MODEL_DIR" "$TMP_LOGS_DIR" <<'PYEOF'
 import yaml, sys
 
 cls        = int(sys.argv[1])
@@ -112,6 +114,9 @@ param_tag  = sys.argv[6]
 cls_name   = sys.argv[7]
 sweep_kind = sys.argv[8]
 out        = sys.argv[9]
+run_id     = sys.argv[10]
+tmp_model_dir = sys.argv[11]
+tmp_logs_dir = sys.argv[12]
 
 with open("configs/pipeline_class_fulleval.yaml") as f:
     cfg = yaml.safe_load(f)
@@ -121,7 +126,14 @@ cfg["unlearn"]["class_to_forget"] = cls
 cfg["unlearn"]["alpha"]           = alpha_val
 cfg["unlearn"]["lr"]              = lr
 cfg["unlearn"]["epochs"]          = epochs
+cfg["unlearn"]["save_compvis"]    = False
+cfg["unlearn"]["save_diffusers"]  = True
+cfg["unlearn"]["save_history_logs"] = False
 cfg["intact"]["lambda_interval"]  = lambda_val
+
+# Keep model artifacts off shared storage for this grid.
+cfg["paths"]["model_save_dir"] = tmp_model_dir
+cfg["paths"]["logs_dir"] = tmp_logs_dir
 
 # Evaluation budget (same as single-class fulleval)
 cfg["evaluate"]["num_samples_per_prompt"] = 10
@@ -139,7 +151,7 @@ cfg["wandb"]["tags"]  = [
 
 # Unique output dir per (combo, class)
 cfg["paths"]["output_dir"] = (
-    cfg["paths"]["output_dir"] + f"/grid/{sweep_kind}/{param_tag}/class_{cls}"
+    cfg["paths"]["output_dir"] + f"/grid/{sweep_kind}/{param_tag}/class_{cls}/run_{run_id}"
 )
 
 with open(out, "w") as f:
@@ -150,5 +162,8 @@ PYEOF
 
 # ---- Run pipeline ----
 python pipeline.py --config "${TMPCONFIG}"
+
+# Cleanup temporary model/log artifacts to avoid filling local disks over time.
+rm -rf "${TMP_MODEL_DIR}" "${TMP_LOGS_DIR}" "${TMPCONFIG}"
 
 echo "${SWEEP_KIND}: combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS} (${CLASS_NAME}) – done."
