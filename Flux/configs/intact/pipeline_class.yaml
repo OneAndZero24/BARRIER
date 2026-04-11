@@ -60,6 +60,10 @@ unlearn:
   checkpointing_steps: 500
   gradient_accumulation_steps: 1
   gradient_checkpointing: true
+  fsdp: false
+  fsdp_sharding_strategy: "full_shard"   # full_shard | shard_grad_op | no_shard | hybrid_shard
+  fsdp_use_orig_params: true
+  fsdp_sync_module_states: false
   max_sequence_length: 256
 
   # Remain prompts for InTAct boundary computation (non-forget classes)

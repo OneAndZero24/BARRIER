@@ -141,6 +141,10 @@ def run_unlearn(cfg, device_str):
     args.checkpointing_steps = uc.get("checkpointing_steps", 500)
     args.gradient_accumulation_steps = uc.get("gradient_accumulation_steps", 1)
     args.gradient_checkpointing = uc.get("gradient_checkpointing", True)
+    args.fsdp = uc.get("fsdp", False)
+    args.fsdp_sharding_strategy = uc.get("fsdp_sharding_strategy", "full_shard")
+    args.fsdp_use_orig_params = uc.get("fsdp_use_orig_params", True)
+    args.fsdp_sync_module_states = uc.get("fsdp_sync_module_states", False)
     args.device = device_str.replace("cuda:", "")
 
     # EA-specific
