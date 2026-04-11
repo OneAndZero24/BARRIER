@@ -139,8 +139,8 @@ def run_unlearn(cfg, device_str):
     args.learning_rate = uc.get("learning_rate", 1e-5)
     args.max_train_steps = uc.get("max_train_steps", 200)
     args.checkpointing_steps = uc.get("checkpointing_steps", 500)
-    args.gradient_checkpointing = uc.get("gradient_checkpointing", True)
     args.gradient_accumulation_steps = uc.get("gradient_accumulation_steps", 1)
+    args.gradient_checkpointing = uc.get("gradient_checkpointing", True)
     args.device = device_str.replace("cuda:", "")
 
     # EA-specific
@@ -161,6 +161,7 @@ def run_unlearn(cfg, device_str):
     args.intact_normalize_protection = ic.get("normalize_protection", True)
     args.intact_n_samples = ic.get("n_samples", 50)
     args.intact_dataset_fraction = ic.get("dataset_fraction", 0.5)
+    args.intact_svd_source = ic.get("svd_source", "covariance")
     args.remain_prompts = uc.get("remain_prompts", None)
 
     # Optional NSFW dataset (paths used for InTAct boundaries)

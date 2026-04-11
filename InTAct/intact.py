@@ -63,6 +63,7 @@ class UnlearnIntervalProtection:
         infinity_scale: float = 20.0,
         use_actual_bounds: bool = False,
         normalize_protection: bool = True,  # Normalize protection loss by number of layers
+        svd_source: str = "covariance",  # covariance | full_activations
     ):
         self.targets = targets
         self.lambda_interval = lambda_interval
@@ -72,6 +73,10 @@ class UnlearnIntervalProtection:
         self.infinity_scale = infinity_scale
         self.use_actual_bounds = use_actual_bounds
         self.normalize_protection = normalize_protection
+        valid_svd_sources = {"covariance", "full_activations"}
+        if svd_source not in valid_svd_sources:
+            raise ValueError(f"svd_source must be one of {valid_svd_sources}, got: {svd_source}")
+        self.svd_source = svd_source
 
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}  # Only target layer parameters
@@ -112,7 +117,7 @@ class UnlearnIntervalProtection:
         if forward_fn is None:
             forward_fn = ddpm_forward_fn
 
-        log.info("Setting up InTAct with Mean Reparametrization...")
+        log.info(f"Setting up InTAct with Mean Reparametrization (svd_source={self.svd_source})...")
 
         self.pca_info = []
         self.params_snapshot = {}
@@ -138,7 +143,10 @@ class UnlearnIntervalProtection:
                 "U_forget": None,
                 "U_residual": None,
                 "S_residual": None,
-                "projected_activations": [],
+                "full_forget_activations": [],
+                "full_remain_activations": [],
+                "projected_forget_activations": [],
+                "projected_remain_activations": [],
                 "z_min": None,
                 "z_max": None,
                 "inf_low": None,
@@ -146,6 +154,11 @@ class UnlearnIntervalProtection:
             }
             for layer_name in target_names
         }
+
+        def make_full_collection_update(name: str, bucket_key: str):
+            def update_full_collection(reshaped_cpu: torch.Tensor):
+                layer_stats[name][bucket_key].append(reshaped_cpu.detach().cpu())
+            return update_full_collection
 
         def make_mean_update(name: str):
             def update_mean(reshaped_cpu: torch.Tensor):
@@ -183,93 +196,184 @@ class UnlearnIntervalProtection:
                     raise RuntimeError(f"PCA basis must be computed before projection for layer {name}")
 
                 projected = (reshaped_cpu - mu) @ U_forget.T
-                state["projected_activations"].append(projected.detach().cpu())
+                if update_forget_bounds:
+                    state["projected_forget_activations"].append(projected.detach().cpu())
+                if update_actual_bounds:
+                    state["projected_remain_activations"].append(projected.detach().cpu())
             return update_projection
 
-        # 1. Pass 1: stream mean
-        self._collect_activations(
-            model, target_names, forget_dataloader, device,
-            forward_fn=forward_fn,
-            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
-            process_fns={name: make_mean_update(name) for name in target_names}
-        )
-
-        for layer_name in target_names:
-            state = layer_stats[layer_name]
-            if state["count"] == 0:
-                log.warning(f"Skipping layer {layer_name} - no activations collected during mean pass")
-                continue
-            state["mu"] = state["running_sum"] / float(state["count"])
-
-        # 2. Pass 2: stream covariance
-        self._collect_activations(
-            model, target_names, forget_dataloader, device,
-            forward_fn=forward_fn,
-            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
-            process_fns={name: make_cov_update(name) for name in target_names}
-        )
-
-        # 3. Final PCA components from covariance
         pca_components: Dict[str, Dict[str, torch.Tensor]] = {}
-        for layer_name in target_names:
-            state = layer_stats[layer_name]
-            if state["cov"] is None or state["mu"] is None:
-                log.warning(f"Skipping layer {layer_name} - insufficient statistics for PCA")
-                continue
 
-            layer_type = state["layer_type"] or type(self.target_layers[layer_name]).__name__
-            _, S, Vh = torch.linalg.svd(state["cov"], full_matrices=False)
+        if self.svd_source == "covariance":
+            # 1. Pass 1: stream mean
+            self._collect_activations(
+                model, target_names, forget_dataloader, device,
+                forward_fn=forward_fn,
+                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+                process_fns={name: make_mean_update(name) for name in target_names}
+            )
 
-            k = min(self.reduced_dim, Vh.size(0))
-            U_forget = Vh[:k]
-            U_residual = Vh[k:]
-            # Recover the singular-value scale used by the original centered-data SVD.
-            S_residual = torch.sqrt(torch.clamp(S[k:], min=0.0))
+            for layer_name in target_names:
+                state = layer_stats[layer_name]
+                if state["count"] == 0:
+                    log.warning(f"Skipping layer {layer_name} - no activations collected during mean pass")
+                    continue
+                state["mu"] = state["running_sum"] / float(state["count"])
 
-            state["U_forget"] = U_forget
-            state["U_residual"] = U_residual
-            state["S_residual"] = S_residual
+            # 2. Pass 2: stream covariance
+            self._collect_activations(
+                model, target_names, forget_dataloader, device,
+                forward_fn=forward_fn,
+                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+                process_fns={name: make_cov_update(name) for name in target_names}
+            )
 
-            pca_components[layer_name] = {
-                "mu": state["mu"],
-                "U_forget": U_forget,
-                "layer_type": layer_type,
-            }
+            # 3. Final PCA components from covariance
+            for layer_name in target_names:
+                state = layer_stats[layer_name]
+                if state["cov"] is None or state["mu"] is None:
+                    log.warning(f"Skipping layer {layer_name} - insufficient statistics for PCA")
+                    continue
 
-        # 4. Stream projected forget activations to compute bounds without storing activations
-        self._collect_activations(
-            model, list(pca_components.keys()), forget_dataloader, device,
-            forward_fn=forward_fn,
-            data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
-            process_fns={name: make_projection_update(name, update_forget_bounds=True, update_actual_bounds=False)
-                         for name in pca_components}
-        )
+                layer_type = state["layer_type"] or type(self.target_layers[layer_name]).__name__
+                _, S, Vh = torch.linalg.svd(state["cov"], full_matrices=False)
+
+                k = min(self.reduced_dim, Vh.size(0))
+                U_forget = Vh[:k]
+                U_residual = Vh[k:]
+                # Recover the singular-value scale used by the original centered-data SVD.
+                S_residual = torch.sqrt(torch.clamp(S[k:], min=0.0))
+
+                state["U_forget"] = U_forget
+                state["U_residual"] = U_residual
+                state["S_residual"] = S_residual
+
+                pca_components[layer_name] = {
+                    "mu": state["mu"],
+                    "U_forget": U_forget,
+                    "layer_type": layer_type,
+                }
+        else:
+            # Full-activation mode: materialize forget activations and run classic centered-data SVD.
+            self._collect_activations(
+                model, target_names, forget_dataloader, device,
+                forward_fn=forward_fn,
+                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+                process_fns={
+                    name: make_full_collection_update(name, "full_forget_activations")
+                    for name in target_names
+                }
+            )
+
+            for layer_name in target_names:
+                state = layer_stats[layer_name]
+                if len(state["full_forget_activations"]) == 0:
+                    log.warning(f"Skipping layer {layer_name} - no activations collected in full_activations mode")
+                    continue
+
+                acts = torch.cat(state["full_forget_activations"], dim=0)
+
+                # PCA/SVD is not implemented for bf16 on CUDA, so upcast only the
+                # statistics working tensor while leaving the collected activations
+                # and model weights unchanged.
+                acts_gpu = acts.to(device=device, dtype=torch.float32)
+
+                if not torch.isfinite(acts_gpu).all():
+                    nonfinite_count = (~torch.isfinite(acts_gpu)).sum().item()
+                    log.warning(
+                        f"Layer {layer_name}: replacing {nonfinite_count} non-finite activation values before PCA/SVD"
+                    )
+                    acts_gpu = torch.nan_to_num(acts_gpu, nan=0.0, posinf=0.0, neginf=0.0)
+
+                mu = acts_gpu.mean(dim=0)
+                centered = acts_gpu - mu
+                _, S, Vh = torch.linalg.svd(centered, full_matrices=False)
+
+                k = min(self.reduced_dim, Vh.size(0))
+                U_forget = Vh[:k]
+                U_residual = Vh[k:]
+                S_residual = S[k:]
+
+                mu_cpu = mu.detach().cpu()
+                U_forget_cpu = U_forget.detach().cpu()
+                U_residual_cpu = U_residual.detach().cpu()
+                S_residual_cpu = S_residual.detach().cpu()
+
+                state["mu"] = mu_cpu
+                state["U_forget"] = U_forget_cpu
+                state["U_residual"] = U_residual_cpu
+                state["S_residual"] = S_residual_cpu
+
+                pca_components[layer_name] = {
+                    "mu": mu_cpu,
+                    "U_forget": U_forget_cpu,
+                    "layer_type": state["layer_type"] or type(self.target_layers[layer_name]).__name__,
+                }
+
+                # Reuse the already-materialized forget activations to produce forget projections.
+                projected_forget = centered @ U_forget.T
+                state["projected_forget_activations"].append(projected_forget.detach().cpu())
+                del acts, acts_gpu, centered
+
+        # 4. Collect projected forget activations (for percentiles).
+        if self.svd_source == "covariance":
+            self._collect_activations(
+                model, list(pca_components.keys()), forget_dataloader, device,
+                forward_fn=forward_fn,
+                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+                process_fns={name: make_projection_update(name, update_forget_bounds=True, update_actual_bounds=False)
+                             for name in pca_components}
+            )
 
         # 5. Optionally stream remain activations to tighten the actual bounds
         if self.use_actual_bounds and remain_dataloader is not None:
             log.info("Collecting and projecting remain data on-the-fly...")
-            self._collect_activations(
-                model, list(pca_components.keys()), remain_dataloader, device,
-                forward_fn=forward_fn,
-                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
-                process_fns={name: make_projection_update(name, update_forget_bounds=False, update_actual_bounds=True)
-                             for name in pca_components}
-            )
+            if self.svd_source == "covariance":
+                self._collect_activations(
+                    model, list(pca_components.keys()), remain_dataloader, device,
+                    forward_fn=forward_fn,
+                    data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+                    process_fns={name: make_projection_update(name, update_forget_bounds=False, update_actual_bounds=True)
+                                 for name in pca_components}
+                )
+            else:
+                self._collect_activations(
+                    model, list(pca_components.keys()), remain_dataloader, device,
+                    forward_fn=forward_fn,
+                    data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
+                    process_fns={
+                        name: make_full_collection_update(name, "full_remain_activations")
+                        for name in pca_components
+                    }
+                )
+
+                for layer_name in pca_components:
+                    state = layer_stats[layer_name]
+                    if len(state["full_remain_activations"]) == 0:
+                        continue
+                    remain_acts = torch.cat(state["full_remain_activations"], dim=0)
+                    projected_remain = (remain_acts - state["mu"]) @ state["U_forget"].T
+                    state["projected_remain_activations"].append(projected_remain.detach().cpu())
+                    del remain_acts
 
         # 6. Materialize the final PCA info structure used by the protection loss
         for layer_name in pca_components:
             state = layer_stats[layer_name]
-            if len(state["projected_activations"]) == 0:
+            if len(state["projected_forget_activations"]) == 0:
                 log.warning(f"Skipping layer {layer_name} - no projected activations collected")
                 continue
 
-            projected_activations = torch.cat(state["projected_activations"], dim=0)
-            z_min = torch.quantile(projected_activations, self.lower_percentile, dim=0)
-            z_max = torch.quantile(projected_activations, self.upper_percentile, dim=0)
+            projected_forget = torch.cat(state["projected_forget_activations"], dim=0)
+            z_min = torch.quantile(projected_forget, self.lower_percentile, dim=0)
+            z_max = torch.quantile(projected_forget, self.upper_percentile, dim=0)
 
             if self.use_actual_bounds and remain_dataloader is not None:
-                inf_low = projected_activations.min(dim=0)[0]
-                inf_high = projected_activations.max(dim=0)[0]
+                projected_for_bounds = [projected_forget]
+                if len(state["projected_remain_activations"]) > 0:
+                    projected_for_bounds.append(torch.cat(state["projected_remain_activations"], dim=0))
+                stacked_bounds = torch.cat(projected_for_bounds, dim=0)
+                inf_low = stacked_bounds.min(dim=0)[0]
+                inf_high = stacked_bounds.max(dim=0)[0]
             else:
                 inf_low = z_min - self.infinity_scale
                 inf_high = z_max + self.infinity_scale

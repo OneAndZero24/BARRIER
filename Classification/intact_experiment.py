@@ -112,7 +112,8 @@ def intact_unlearn(
     lower_percentile=0.05, 
     upper_percentile=0.95, 
     reduced_dim=32,
-    infinity_scale=20.0
+    infinity_scale=20.0,
+    svd_source="covariance"
 ):
     """
     Run InTAct unlearning for classification models.
@@ -143,7 +144,8 @@ def intact_unlearn(
         lower_percentile=lower_percentile,
         upper_percentile=upper_percentile,
         reduced_dim=reduced_dim,
-        infinity_scale=infinity_scale
+        infinity_scale=infinity_scale,
+        svd_source=svd_source,
     )
 
     protection.setup_protection(model, forget_loader, device, forward_fn=classification_forward_fn)

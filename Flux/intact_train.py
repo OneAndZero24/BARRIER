@@ -661,6 +661,7 @@ def setup_intact_protection(
     infinity_scale=20.0,
     use_actual_bounds=False,
     normalize_protection=True,
+    svd_source="covariance",
     image_size=512,
 ):
     """
@@ -687,6 +688,7 @@ def setup_intact_protection(
         infinity_scale=infinity_scale,
         use_actual_bounds=use_actual_bounds,
         normalize_protection=normalize_protection,
+        svd_source=svd_source,
     )
 
     # Create forward function closure
@@ -1017,8 +1019,16 @@ def intact_unlearn(args):
         infinity_scale=args.intact_infinity_scale,
         use_actual_bounds=args.intact_use_actual_bounds,
         normalize_protection=args.intact_normalize_protection,
+        svd_source=args.intact_svd_source,
         image_size=args.resolution,
     )
+
+    if getattr(args, "gradient_checkpointing", False):
+        if hasattr(transformer, "enable_gradient_checkpointing"):
+            transformer.enable_gradient_checkpointing()
+            log.info("Enabled transformer gradient checkpointing")
+        else:
+            log.warning("gradient_checkpointing was requested but transformer has no enable_gradient_checkpointing()")
 
     # ---- Optimizer ----
     optimizer = torch.optim.Adam(trainable_params, lr=float(args.learning_rate))
@@ -1043,140 +1053,63 @@ def intact_unlearn(args):
             f"-{train_volume_tag}-lr_{args.learning_rate}")
 
     log.info(f"  Model name: {name}")
-    saved_path = None
+    log.info(f"  Starting training for {args.max_train_steps} steps...")
 
-    if base_method == "nsfw":
-        if not (hasattr(args, "nsfw_data_path") and args.nsfw_data_path and
-                hasattr(args, "not_nsfw_data_path") and args.not_nsfw_data_path):
-            raise ValueError("base_method='nsfw' requires paths.nsfw_data and paths.not_nsfw_data")
+    pbar = tqdm(range(args.max_train_steps), desc="Training")
+    for step in pbar:
+        optimizer.zero_grad()
 
-        from eval.dataset import setup_forget_nsfw_data
-        batch_sz = args.batch_size or 8
-        forget_train_dl, remain_train_dl = setup_forget_nsfw_data(
-            batch_sz,
-            args.resolution,
-            nsfw_data_path=args.nsfw_data_path,
-            not_nsfw_data_path=args.not_nsfw_data_path,
-        )
+        # Compute base method loss
+        if base_method == "esd":
+            base_loss, t_enc_ddpm = compute_esd_loss(
+                transformer, noise_scheduler_copy, compute_text_embeddings,
+                vae, prompt, neg_prompt, criteria, device, weight_dtype,
+                negative_guidance=args.negative_guidance,
+                ddim_steps=args.ddim_steps, image_size=args.resolution,
+            )
+            log_dict = {"esd": base_loss.item()}
 
-        epochs = int(getattr(args, "epochs", 1) or 1)
-        total_train_steps = epochs * len(forget_train_dl)
-        grad_accum_steps = int(getattr(args, "gradient_accumulation_steps", 1) or 1)
-        grad_accum_steps = max(1, grad_accum_steps)
-        effective_batch_size = batch_sz * grad_accum_steps
-        log.info(f"  Starting NSFW training for {epochs} epoch(s), {total_train_steps} step(s)...")
-        log.info(
-            f"  NSFW grad accumulation: {grad_accum_steps} "
-            f"(effective batch size: {effective_batch_size})"
-        )
+        elif base_method == "rl":
+            base_loss, t_enc_ddpm = compute_rl_loss(
+                transformer, noise_scheduler_copy, compute_text_embeddings,
+                vae, prompt, neg_prompt, criteria, device, weight_dtype,
+                ddim_steps=args.ddim_steps, image_size=args.resolution,
+            )
+            log_dict = {"rl": base_loss.item()}
 
-        step_idx = 0
-        pbar = tqdm(total=total_train_steps, desc="Training")
-        optimizer.zero_grad(set_to_none=True)
-        for _epoch in range(epochs):
-            remain_iter = itertools.cycle(remain_train_dl)
-            for forget_batch in forget_train_dl:
-                remain_batch = next(remain_iter)
+        elif base_method == "ea":
+            if key_word is None:
+                raise ValueError("key_word is required for EraseAnything (ea) base method")
+            base_loss, t_enc_ddpm, esd_val, attn_val = compute_ea_loss(
+                transformer, noise_scheduler_copy, compute_text_embeddings,
+                vae, prompt, neg_prompt, key_word, tokenizer_two,
+                criteria, device, weight_dtype,
+                negative_guidance=args.negative_guidance,
+                ddim_steps=args.ddim_steps, image_size=args.resolution,
+                lamb_esd=args.lamb_esd, lamb_attn=args.lamb_attn,
+            )
+            log_dict = {"esd": esd_val, "attn": attn_val}
+        else:
+            raise ValueError(f"Unknown base method: {base_method}")
 
-                alpha_val = getattr(args, "alpha", 0.0)
-                if alpha_val is None:
-                    alpha_val = 0.0
+        # Compute InTAct protection loss
+        intact_loss = protection.compute_protection_loss(transformer, device)
 
-                base_loss, forget_val, remain_val = compute_nsfw_loss(
-                    transformer, noise_scheduler_copy, compute_text_embeddings,
-                    vae, forget_batch, remain_batch,
-                    prompt=prompt,
-                    neg_prompt=neg_prompt,
-                    criteria=criteria,
-                    device=device,
-                    weight_dtype=weight_dtype,
-                    alpha=alpha_val,
-                    image_size=args.resolution,
-                )
+        # Total loss
+        total_loss = base_loss + intact_loss
+        total_loss.backward()
+        optimizer.step()
 
-                intact_loss = protection.compute_protection_loss(transformer, device)
-                total_loss = base_loss + intact_loss
+        log_dict["intact"] = intact_loss.item()
+        log_dict["total"] = total_loss.item()
+        losses_history.append(total_loss.item())
 
-                (total_loss / grad_accum_steps).backward()
+        pbar.set_postfix(**{k: f"{v:.4f}" for k, v in log_dict.items()})
 
-                should_step = (step_idx + 1) % grad_accum_steps == 0 or (step_idx + 1) == total_train_steps
-                if should_step:
-                    optimizer.step()
-                    optimizer.zero_grad(set_to_none=True)
-
-                losses_history.append(total_loss.item())
-                pbar.set_postfix(
-                    nsfw_forget=f"{forget_val:.4f}",
-                    nsfw_remain=f"{remain_val:.4f}",
-                    intact=f"{intact_loss.item():.4f}",
-                    total=f"{total_loss.item():.4f}",
-                )
-                pbar.update(1)
-
-                step_idx += 1
-                if step_idx % args.checkpointing_steps == 0 and step_idx < total_train_steps:
-                    ckpt_name = f"{name}-step_{step_idx}"
-                    save_model_weights(transformer, args.output_dir, ckpt_name, weight_dtype)
-
-        pbar.close()
-    else:
-        log.info(f"  Starting training for {args.max_train_steps} steps...")
-
-        pbar = tqdm(range(args.max_train_steps), desc="Training")
-        for step in pbar:
-            optimizer.zero_grad()
-
-            # Compute base method loss
-            if base_method == "esd":
-                base_loss, t_enc_ddpm = compute_esd_loss(
-                    transformer, noise_scheduler_copy, compute_text_embeddings,
-                    vae, prompt, neg_prompt, criteria, device, weight_dtype,
-                    negative_guidance=args.negative_guidance,
-                    ddim_steps=args.ddim_steps, image_size=args.resolution,
-                )
-                log_dict = {"esd": base_loss.item()}
-
-            elif base_method == "rl":
-                base_loss, t_enc_ddpm = compute_rl_loss(
-                    transformer, noise_scheduler_copy, compute_text_embeddings,
-                    vae, prompt, neg_prompt, criteria, device, weight_dtype,
-                    ddim_steps=args.ddim_steps, image_size=args.resolution,
-                )
-                log_dict = {"rl": base_loss.item()}
-
-            elif base_method == "ea":
-                if key_word is None:
-                    raise ValueError("key_word is required for EraseAnything (ea) base method")
-                base_loss, t_enc_ddpm, esd_val, attn_val = compute_ea_loss(
-                    transformer, noise_scheduler_copy, compute_text_embeddings,
-                    vae, prompt, neg_prompt, key_word, tokenizer_two,
-                    criteria, device, weight_dtype,
-                    negative_guidance=args.negative_guidance,
-                    ddim_steps=args.ddim_steps, image_size=args.resolution,
-                    lamb_esd=args.lamb_esd, lamb_attn=args.lamb_attn,
-                )
-                log_dict = {"esd": esd_val, "attn": attn_val}
-            else:
-                raise ValueError(f"Unknown base method: {base_method}")
-
-            # Compute InTAct protection loss
-            intact_loss = protection.compute_protection_loss(transformer, device)
-
-            # Total loss
-            total_loss = base_loss + intact_loss
-            total_loss.backward()
-            optimizer.step()
-
-            log_dict["intact"] = intact_loss.item()
-            log_dict["total"] = total_loss.item()
-            losses_history.append(total_loss.item())
-
-            pbar.set_postfix(**{k: f"{v:.4f}" for k, v in log_dict.items()})
-
-            # Periodic checkpoint
-            if (step + 1) % args.checkpointing_steps == 0 and (step + 1) < args.max_train_steps:
-                ckpt_name = f"{name}-step_{step+1}"
-                save_model_weights(transformer, args.output_dir, ckpt_name, weight_dtype)
+        # Periodic checkpoint
+        if (step + 1) % args.checkpointing_steps == 0 and (step + 1) < args.max_train_steps:
+            ckpt_name = f"{name}-step_{step+1}"
+            save_model_weights(transformer, args.output_dir, ckpt_name, weight_dtype)
 
     # Final save
     saved_path = save_model_weights(transformer, args.output_dir, name, weight_dtype)
@@ -1235,6 +1168,8 @@ if __name__ == "__main__":
         "use_actual_bounds": "intact_use_actual_bounds",
         "normalize_protection": "intact_normalize_protection",
         "n_samples": "intact_n_samples",
+        "dataset_fraction": "intact_dataset_fraction",
+        "svd_source": "intact_svd_source",
     }
 
     PATHS_KEY_MAP = {
@@ -1270,8 +1205,8 @@ if __name__ == "__main__":
         "neg_prompt": "",
         "key_word": None,
         "checkpointing_steps": 500,
-        "output_dir": os.environ.get("SCRATCH", os.path.expanduser("~/.cache")) + "/Flux/models",
-        "logs_dir": os.environ.get("SCRATCH", os.path.expanduser("~/.cache")) + "/Flux/logs",
+        "output_dir": "/net/tscratch/people/plgphelm/unl/Flux/models",
+        "logs_dir": "/net/tscratch/people/plgphelm/unl/Flux/logs",
         "lamb_esd": 1.0,
         "lamb_attn": 0.001,
         "intact_target_blocks": [12, 14, 16, 18],
@@ -1285,6 +1220,7 @@ if __name__ == "__main__":
         "intact_normalize_protection": True,
         "intact_n_samples": 50,
         "intact_dataset_fraction": 0.5,
+        "intact_svd_source": "covariance",
         "remain_prompts": None,
         "gradient_checkpointing": False,
         "gradient_accumulation_steps": 1,

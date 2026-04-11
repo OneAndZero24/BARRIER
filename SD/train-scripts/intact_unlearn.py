@@ -315,6 +315,7 @@ def setup_intact_protection(
     infinity_scale=20.0,
     use_actual_bounds=False,
     normalize_protection=True,
+    svd_source="covariance",
 ):
     """
     Setup InTAct protection for SD model.
@@ -342,6 +343,7 @@ def setup_intact_protection(
         infinity_scale=infinity_scale,
         use_actual_bounds=use_actual_bounds,
         normalize_protection=normalize_protection,
+        svd_source=svd_source,
     )
     
     # Create forward function with prompts pre-bound
@@ -523,6 +525,9 @@ def intact_unlearn_class(
     use_actual_bounds=False,
     normalize_protection=True,
     bounds_dataset_fraction=1.0,
+    svd_source="covariance",
+    gradient_accumulation_steps=1,
+    gradient_checkpointing=True,
     # SD parameters
     image_size=512,
     ddim_steps=50,
@@ -589,10 +594,28 @@ def intact_unlearn_class(
         infinity_scale=infinity_scale,
         use_actual_bounds=use_actual_bounds,
         normalize_protection=normalize_protection,
+        svd_source=svd_source,
     )
     
     # Get reference to diffusion_model for InTAct operations
     diffusion_model = model.model.diffusion_model
+
+    if gradient_checkpointing:
+        if hasattr(diffusion_model, "enable_gradient_checkpointing"):
+            diffusion_model.enable_gradient_checkpointing()
+            log.info("Enabled native diffusion_model.enable_gradient_checkpointing()")
+        elif hasattr(model, "enable_gradient_checkpointing"):
+            model.enable_gradient_checkpointing()
+            log.info("Enabled native model.enable_gradient_checkpointing()")
+        elif hasattr(diffusion_model, "gradient_checkpointing_enable"):
+            diffusion_model.gradient_checkpointing_enable()
+            log.info("Enabled native diffusion_model.gradient_checkpointing_enable()")
+        elif hasattr(model, "gradient_checkpointing_enable"):
+            model.gradient_checkpointing_enable()
+            log.info("Enabled native model.gradient_checkpointing_enable()")
+        else:
+            # CompVis SD uses `use_checkpoint` from the UNet config; no manual per-module toggles.
+            log.info("Gradient checkpointing requested: relying on SD config `use_checkpoint` (no runtime manual toggles).")
     
     # Mark non-target parameters (doesn't freeze to avoid breaking checkpointing)
     protection.freeze_non_target_params(diffusion_model)
@@ -608,12 +631,13 @@ def intact_unlearn_class(
     targets_str = compact_target_tag(targets)
     name = f"compvis-intact-{base_method}-class_{class_to_forget}-targets_{targets_str}-lambda_{lambda_interval}-epochs_{epochs}-lr_{lr}"
     
+    grad_acc_steps = max(1, int(gradient_accumulation_steps))
+
     # Training loop
     for epoch in range(epochs):
+        optimizer.zero_grad()
         with tqdm(total=len(forget_dl), desc=f"Epoch {epoch}") as pbar:
             for i in range(len(forget_dl)):
-                optimizer.zero_grad()
-                
                 forget_images, forget_labels = next(iter(forget_dl))
                 remain_images, remain_labels = next(iter(remain_dl))
                 forget_images = forget_images.to(device)
@@ -653,9 +677,12 @@ def intact_unlearn_class(
                 
                 # Total loss
                 total_loss = base_loss + intact_loss
-                total_loss.backward()
-                
-                optimizer.step()
+                (total_loss / grad_acc_steps).backward()
+
+                should_step = ((i + 1) % grad_acc_steps == 0) or ((i + 1) == len(forget_dl))
+                if should_step:
+                    optimizer.step()
+                    optimizer.zero_grad()
                 
                 losses.append(total_loss.item() / batch_size)
                 pbar.set_postfix({
@@ -703,6 +730,9 @@ def intact_unlearn_nsfw(
     infinity_scale=20.0,
     use_actual_bounds=False,
     normalize_protection=True,
+    svd_source="covariance",
+    gradient_accumulation_steps=1,
+    gradient_checkpointing=True,
     # SD parameters
     image_size=512,
     ddim_steps=50,
@@ -748,10 +778,28 @@ def intact_unlearn_nsfw(
         infinity_scale=infinity_scale,
         use_actual_bounds=use_actual_bounds,
         normalize_protection=normalize_protection,
+        svd_source=svd_source,
     )
     
     # Get reference to diffusion_model for InTAct operations
     diffusion_model = model.model.diffusion_model
+
+    if gradient_checkpointing:
+        if hasattr(diffusion_model, "enable_gradient_checkpointing"):
+            diffusion_model.enable_gradient_checkpointing()
+            log.info("Enabled native diffusion_model.enable_gradient_checkpointing()")
+        elif hasattr(model, "enable_gradient_checkpointing"):
+            model.enable_gradient_checkpointing()
+            log.info("Enabled native model.enable_gradient_checkpointing()")
+        elif hasattr(diffusion_model, "gradient_checkpointing_enable"):
+            diffusion_model.gradient_checkpointing_enable()
+            log.info("Enabled native diffusion_model.gradient_checkpointing_enable()")
+        elif hasattr(model, "gradient_checkpointing_enable"):
+            model.gradient_checkpointing_enable()
+            log.info("Enabled native model.gradient_checkpointing_enable()")
+        else:
+            # CompVis SD uses `use_checkpoint` from the UNet config; no manual per-module toggles.
+            log.info("Gradient checkpointing requested: relying on SD config `use_checkpoint` (no runtime manual toggles).")
     
     # Mark non-target parameters (doesn't freeze to avoid breaking checkpointing)
     protection.freeze_non_target_params(diffusion_model)
@@ -767,12 +815,13 @@ def intact_unlearn_nsfw(
     targets_str = compact_target_tag(targets)
     name = f"compvis-intact-nsfw-targets_{targets_str}-lambda_{lambda_interval}-lr_{lr}"
     
+    grad_acc_steps = max(1, int(gradient_accumulation_steps))
+
     # Training loop
     for epoch in range(epochs):
+        optimizer.zero_grad()
         with tqdm(total=len(forget_dl), desc=f"Epoch {epoch}") as pbar:
             for i, _ in enumerate(forget_dl):
-                optimizer.zero_grad()
-                
                 forget_images = next(iter(forget_dl)).to(device)
                 remain_images = next(iter(remain_dl)).to(device)
                 
@@ -787,9 +836,12 @@ def intact_unlearn_nsfw(
                 
                 # Total loss
                 total_loss = base_loss + intact_loss
-                total_loss.backward()
-                
-                optimizer.step()
+                (total_loss / grad_acc_steps).backward()
+
+                should_step = ((i + 1) % grad_acc_steps == 0) or ((i + 1) == len(forget_dl))
+                if should_step:
+                    optimizer.step()
+                    optimizer.zero_grad()
                 
                 losses.append(total_loss.item() / batch_size)
                 pbar.set_postfix({
@@ -827,6 +879,9 @@ def intact_unlearn_esd(
     infinity_scale=20.0,
     use_actual_bounds=False,
     normalize_protection=True,
+    svd_source="covariance",
+    gradient_accumulation_steps=1,
+    gradient_checkpointing=True,
     # SD parameters
     seperator=None,
     image_size=512,
@@ -891,9 +946,27 @@ def intact_unlearn_esd(
         infinity_scale=infinity_scale,
         use_actual_bounds=use_actual_bounds,
         normalize_protection=normalize_protection,
+        svd_source=svd_source,
     )
     
     diffusion_model = model.model.diffusion_model
+
+    if gradient_checkpointing:
+        if hasattr(diffusion_model, "enable_gradient_checkpointing"):
+            diffusion_model.enable_gradient_checkpointing()
+            log.info("Enabled native diffusion_model.enable_gradient_checkpointing()")
+        elif hasattr(model, "enable_gradient_checkpointing"):
+            model.enable_gradient_checkpointing()
+            log.info("Enabled native model.enable_gradient_checkpointing()")
+        elif hasattr(diffusion_model, "gradient_checkpointing_enable"):
+            diffusion_model.gradient_checkpointing_enable()
+            log.info("Enabled native diffusion_model.gradient_checkpointing_enable()")
+        elif hasattr(model, "gradient_checkpointing_enable"):
+            model.gradient_checkpointing_enable()
+            log.info("Enabled native model.gradient_checkpointing_enable()")
+        else:
+            # CompVis SD uses `use_checkpoint` from the UNet config; no manual per-module toggles.
+            log.info("Gradient checkpointing requested: relying on SD config `use_checkpoint` (no runtime manual toggles).")
     
     # Setup protection
     protection.setup_protection(
@@ -926,14 +999,14 @@ def intact_unlearn_esd(
     )
     
     # Training loop
+    grad_acc_steps = max(1, int(gradient_accumulation_steps))
+    opt.zero_grad()
     pbar = tqdm(range(iterations))
     for i in pbar:
         word = random.sample(words, 1)[0]
         emb_0 = model.get_learned_conditioning([""])
         emb_p = model.get_learned_conditioning([word])
         emb_n = model.get_learned_conditioning([f"{word}"])
-        
-        opt.zero_grad()
         
         t_enc = torch.randint(ddim_steps, (1,), device=devices[0])
         og_num = round((int(t_enc) / ddim_steps) * 1000)
@@ -954,9 +1027,12 @@ def intact_unlearn_esd(
         
         # Total loss
         total_loss = base_loss + intact_loss
-        total_loss.backward()
-        
-        opt.step()
+        (total_loss / grad_acc_steps).backward()
+
+        should_step = ((i + 1) % grad_acc_steps == 0) or ((i + 1) == iterations)
+        if should_step:
+            opt.step()
+            opt.zero_grad()
         
         losses.append(total_loss.item())
         pbar.set_postfix({
@@ -1085,6 +1161,12 @@ if __name__ == "__main__":
     parser.add_argument("--use_actual_bounds", action="store_true",
                         help="Use actual min/max from remain+forget instead of scaled bounds")
     parser.add_argument("--normalize_protection", action="store_true", default=None)
+    parser.add_argument("--svd_source", type=str, default=None, choices=["covariance", "full_activations"],
+                        help="SVD source for InTAct PCA: covariance (streaming) or full_activations")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=None,
+                        help="Number of optimization accumulation steps before optimizer step")
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=None,
+                        help="Enable gradient checkpointing flags on SD diffusion model modules where available")
     
     args = parser.parse_args()
     
@@ -1121,6 +1203,9 @@ if __name__ == "__main__":
     infinity_scale = get_param(args.infinity_scale, 'infinity_scale', 20.0)
     use_actual_bounds = args.use_actual_bounds if args.use_actual_bounds else get_param(None, 'use_actual_bounds', False)
     normalize_protection = get_param(args.normalize_protection, 'normalize_protection', True)
+    svd_source = get_param(args.svd_source, 'svd_source', 'covariance')
+    gradient_accumulation_steps = get_param(args.gradient_accumulation_steps, 'gradient_accumulation_steps', 1)
+    gradient_checkpointing = get_param(args.gradient_checkpointing, 'gradient_checkpointing', True)
     
     # Forget config
     class_to_forget = args.class_to_forget
@@ -1152,6 +1237,9 @@ if __name__ == "__main__":
         "infinity_scale": infinity_scale,
         "use_actual_bounds": use_actual_bounds,
         "normalize_protection": normalize_protection,
+        "svd_source": svd_source,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "gradient_checkpointing": gradient_checkpointing,
     }
     
     # Run appropriate method
@@ -1172,7 +1260,7 @@ if __name__ == "__main__":
             **intact_params,
         )
     
-    elif args.base_method == "nsfw":
+    elif base_method == "nsfw":
         intact_unlearn_nsfw(
             alpha=alpha,
             batch_size=batch_size,
@@ -1187,7 +1275,7 @@ if __name__ == "__main__":
             **intact_params,
         )
     
-    elif args.base_method == "esd":
+    elif base_method == "esd":
         if prompt is None:
             raise ValueError("--prompt is required for ESD base method")
         

@@ -49,6 +49,8 @@ unlearn:
   learning_rate: 1.0e-5
   max_train_steps: 200
   checkpointing_steps: 500
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: true
   max_sequence_length: 256
 
   # EA-specific (only used when base_method=ea)
@@ -110,6 +112,7 @@ intact:
   infinity_scale: 20.0
   use_actual_bounds: true
   normalize_protection: true
+  svd_source: "covariance"             # covariance | full_activations
   n_samples: 50                        # synthetic (latent, embedding) pairs for InTAct setup
 
 evaluate:

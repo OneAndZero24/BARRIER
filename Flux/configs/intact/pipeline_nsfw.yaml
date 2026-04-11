@@ -63,6 +63,8 @@ unlearn:
   learning_rate: 5.0e-6
   max_train_steps: 1000
   checkpointing_steps: 500
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: true
   max_sequence_length: 256
 
   # Dataset parameters (used for InTAct boundary computation only)
@@ -94,6 +96,7 @@ intact:
   infinity_scale: 20.0
   use_actual_bounds: true
   normalize_protection: true
+  svd_source: "covariance"             # covariance | full_activations
   n_samples: 50
   dataset_fraction: 0.5  # Use 50% of NSFW dataset for bounds calculation to reduce OOM
 

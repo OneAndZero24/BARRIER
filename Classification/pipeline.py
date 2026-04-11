@@ -206,6 +206,7 @@ def run_intact_unlearn(cfg, model, data_loaders, criterion, device):
         infinity_scale=ic.get("infinity_scale", 20.0),
         use_actual_bounds=ic.get("use_actual_bounds", False),
         normalize_protection=ic.get("normalize_protection", True),
+        svd_source=ic.get("svd_source", "covariance"),
     )
 
     forget_loader = data_loaders["forget"]

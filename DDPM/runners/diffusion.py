@@ -664,7 +664,8 @@ class Diffusion(object):
             reduced_dim=getattr(config.training, 'reduced_dim', 32),
             infinity_scale=getattr(config.training, 'infinity_scale', 20.0),
             use_actual_bounds=getattr(config.training, 'use_actual_bounds', False),
-            normalize_protection=getattr(config.training, 'normalize_protection', True)
+            normalize_protection=getattr(config.training, 'normalize_protection', True),
+            svd_source=getattr(config.training, 'svd_source', 'covariance')
         )
         
         logging.info("Setting up InTAct protection...")
