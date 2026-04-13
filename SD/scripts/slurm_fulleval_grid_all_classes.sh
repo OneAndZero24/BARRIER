@@ -126,7 +126,9 @@ cfg["unlearn"]["class_to_forget"] = cls
 cfg["unlearn"]["alpha"]           = alpha_val
 cfg["unlearn"]["lr"]              = lr
 cfg["unlearn"]["epochs"]          = epochs
-cfg["unlearn"]["save_compvis"]    = False
+# Diffusers export still reloads the saved compvis checkpoint, so keep it on
+# until conversion finishes. The temp directory is removed at the end anyway.
+cfg["unlearn"]["save_compvis"]    = True
 cfg["unlearn"]["save_diffusers"]  = True
 cfg["unlearn"]["save_history_logs"] = False
 cfg["intact"]["lambda_interval"]  = lambda_val
