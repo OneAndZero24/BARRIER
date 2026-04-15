@@ -30,14 +30,23 @@ export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 export WANDB_ENTITY="oneandzero24"    # adjust to your account/org
 PROJECT_NAME="intact-flux"
 
-# caches to shared storage
-SCRATCH_ROOT="${SCRATCH:-/net/scratch/hscra/plgrid/plgmiksa}"
-export HF_HOME="$SCRATCH_ROOT/.cache/huggingface"
-export TORCH_HOME="$SCRATCH_ROOT/.cache/torch"
-export XDG_CACHE_HOME="$SCRATCH_ROOT/.cache"
-export WANDB_DIR="$SCRATCH_ROOT/.cache/wandb"
-export WANDB_CACHE_DIR="$SCRATCH_ROOT/.cache/wandb"
-export CLIP_CACHE_DIR="$SCRATCH_ROOT/.cache/clip"
+# caches (prefer new SCRATCH setup, then legacy, then home fallback)
+if [ -n "${SCRATCH:-}" ]; then
+    CACHE_BASE="$SCRATCH/.cache"
+elif [ -w "/shared/results/common/miksa/intact/SD" ] || [ -w "/shared/results/common/miksa/intact/SD/.cache" ]; then
+    CACHE_BASE="/shared/results/common/miksa/intact/SD/.cache"
+else
+    CACHE_BASE="$HOME/.cache/intact"
+fi
+export CACHE_ROOT="$CACHE_BASE"
+
+# Keep all tool caches consistent with selected CACHE_ROOT.
+export HF_HOME="$CACHE_ROOT/huggingface"
+export TORCH_HOME="$CACHE_ROOT/torch"
+export XDG_CACHE_HOME="$CACHE_ROOT"
+export WANDB_DIR="$CACHE_ROOT/wandb"
+export WANDB_CACHE_DIR="$CACHE_ROOT/wandb"
+export CLIP_CACHE_DIR="$CACHE_ROOT/clip"
 
 echo "Starting Flux NSFW sweep on $(hostname)"
 echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-none}"
@@ -47,7 +56,7 @@ echo "=== launching wandb sweep ==="
 SWEEP_NAME="sweep_nsfw"
 YAML_PATH="configs/intact/${SWEEP_NAME}.yaml"
 ARRAY_KEY="${SLURM_ARRAY_JOB_ID:-manual}"
-SWEEP_STATE_DIR="$SCRATCH_ROOT/.cache/wandb/${SWEEP_NAME}_${ARRAY_KEY}"
+SWEEP_STATE_DIR="$CACHE_ROOT/wandb/${SWEEP_NAME}_${ARRAY_KEY}"
 SWEEP_ID_FILE="$SWEEP_STATE_DIR/sweep.id"
 SWEEP_LOCK_DIR="$SWEEP_STATE_DIR/create.lock"
 SWEEP_WAIT_SECONDS="${SWEEP_WAIT_SECONDS:-1800}"

@@ -16,10 +16,36 @@ Override the default root by setting ``CACHE_ROOT`` in the environment
 
 import os
 
-_CACHE_ROOT = os.environ.get(
-    "CACHE_ROOT",
-    "/shared/results/common/miksa/intact/SD/.cache",
-)
+def _resolve_cache_root() -> str:
+    """Resolve the first writable cache root across new and legacy setups."""
+    candidates = []
+
+    if os.environ.get("CACHE_ROOT"):
+        candidates.append(os.environ["CACHE_ROOT"])
+    if os.environ.get("SCRATCH"):
+        candidates.append(os.path.join(os.environ["SCRATCH"], ".cache"))
+    if os.environ.get("XDG_CACHE_HOME"):
+        candidates.append(os.environ["XDG_CACHE_HOME"])
+
+    # Backward compatibility for older cluster setups.
+    candidates.append("/shared/results/common/miksa/intact/SD/.cache")
+    candidates.append(os.path.join(os.path.expanduser("~"), ".cache", "intact"))
+
+    seen = set()
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        try:
+            os.makedirs(path, exist_ok=True)
+            return path
+        except OSError:
+            continue
+
+    raise RuntimeError("Failed to find a writable cache root")
+
+
+_CACHE_ROOT = _resolve_cache_root()
 
 # HuggingFace (hub, datasets, tokenizers, diffusers)
 os.environ.setdefault("HF_HOME", os.path.join(_CACHE_ROOT, "huggingface"))
