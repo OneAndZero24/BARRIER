@@ -96,8 +96,6 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
     def set_train_timesteps(self, num_timesteps, device, linear=False):
         if linear:
             timesteps = torch.linspace(1000, 0, num_timesteps, device=device)
-            self.timesteps = timesteps
-            return timesteps
         else:
             # distribute them closer to center. Inference distributes them as a bias toward first
             # Generate values from 0 to 1
@@ -109,6 +107,21 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
             # Sort the timesteps in descending order
             timesteps, _ = torch.sort(timesteps, descending=True)
 
-            self.timesteps = timesteps.to(device=device)
+        self.timesteps = timesteps.to(device=device, dtype=torch.float32)
+        self.num_inference_steps = int(num_timesteps)
 
-            return timesteps
+        # Keep sigmas synchronized with the active training schedule and append
+        # a terminal sigma so step_index+1 is always valid on the last step.
+        sigmas = self.timesteps / float(self.config.num_train_timesteps)
+        if self.config.invert_sigmas:
+            sigmas = 1.0 - sigmas
+            sigmas = torch.cat([sigmas, torch.ones(1, device=sigmas.device, dtype=sigmas.dtype)])
+        else:
+            sigmas = torch.cat([sigmas, torch.zeros(1, device=sigmas.device, dtype=sigmas.dtype)])
+        self.sigmas = sigmas
+
+        # Reset stepping state between sampling runs.
+        self._step_index = None
+        self._begin_index = None
+
+        return self.timesteps
