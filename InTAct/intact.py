@@ -123,7 +123,10 @@ class UnlearnIntervalProtection:
             acts = acts_info['activations']
             layer_type = acts_info.get('layer_type', 'Linear')
             
-            acts_gpu = acts.to(device)
+            # PCA/SVD is not implemented for bf16 on CUDA, so upcast only the
+            # statistics working tensor while leaving the collected activations
+            # and model weights unchanged.
+            acts_gpu = acts.to(device=device, dtype=torch.float32)
             
             # Centered SVD
             mu = acts_gpu.mean(dim=0)
