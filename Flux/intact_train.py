@@ -416,6 +416,11 @@ def compute_ea_loss(transformer, noise_scheduler, compute_text_embeddings,
     emb_0, pooled_0, tid_0 = compute_text_embeddings(neg_prompt)
     emb_p, pooled_p, tid_p = compute_text_embeddings(prompt)
 
+    transformer_dtype = weight_dtype
+    first_param = next(transformer.parameters(), None)
+    if first_param is not None:
+        transformer_dtype = first_param.dtype
+
     # Random timestep
     t_enc = torch.randint(ddim_steps, (1,), device=device)
     og_num = round((int(t_enc) / ddim_steps) * 1000)
@@ -459,7 +464,7 @@ def compute_ea_loss(transformer, noise_scheduler, compute_text_embeddings,
     if len(remove_indices) > 0:
         # Create a noisy input for attention extraction
         fake_input = torch.randn(1, num_channels, image_size // 8, image_size // 8,
-                                  device=device, dtype=weight_dtype)
+                                  device=device, dtype=transformer_dtype)
         noise = torch.randn_like(fake_input)
         noisy = noise_scheduler.add_noise(fake_input, noise, t_enc_ddpm)
 
@@ -469,19 +474,22 @@ def compute_ea_loss(transformer, noise_scheduler, compute_text_embeddings,
         )
         latent_ids = FluxPipeline._prepare_latent_image_ids(
             1, (image_size // 8) // 2, (image_size // 8) // 2,
-            device, weight_dtype,
+            device, transformer_dtype,
         )
 
-        guidance = torch.tensor([3.5], device=device, dtype=weight_dtype)
+        guidance = torch.tensor([3.5], device=device, dtype=transformer_dtype)
+
+        if tid_p.ndim == 3:
+            tid_p = tid_p[0]
 
         model_pred, attn_maps = transformer(
-            hidden_states=packed.to(dtype=weight_dtype),
+            hidden_states=packed.to(dtype=transformer_dtype),
             timestep=t_enc_ddpm / 1000,
             guidance=guidance,
-            pooled_projections=pooled_p.to(dtype=weight_dtype, device=device),
-            encoder_hidden_states=emb_p.to(dtype=weight_dtype, device=device),
-            txt_ids=tid_p.to(dtype=weight_dtype, device=device),
-            img_ids=latent_ids.to(dtype=weight_dtype, device=device),
+            pooled_projections=pooled_p.to(dtype=transformer_dtype, device=device),
+            encoder_hidden_states=emb_p.to(dtype=transformer_dtype, device=device),
+            txt_ids=tid_p.to(dtype=transformer_dtype, device=device),
+            img_ids=latent_ids.to(dtype=transformer_dtype, device=device),
             return_dict=False,
         )[0:2]
 
@@ -715,9 +723,22 @@ def intact_unlearn(args):
         raise ValueError(f"No trainable parameters found for targets {intact_targets}. "
                          f"Check target patterns against transformer module names.")
 
-    # Make trainable params float32 for mixed precision stability
-    for p in trainable_params:
-        p.data = p.data.float()
+    # Keep a consistent floating dtype across the transformer.
+    # Casting only target layers to another dtype creates mixed-dtype blocks and
+    # can break matmul in attention projections.
+    model_dtypes = {p.dtype for p in transformer.parameters() if p.is_floating_point()}
+    if len(model_dtypes) > 1:
+        base_dtype = next((p.dtype for p in transformer.parameters() if p.is_floating_point()), weight_dtype)
+        log.warning(
+            f"Transformer has mixed dtypes {sorted(str(d) for d in model_dtypes)}; "
+            f"aligning all floating params to {base_dtype} for consistency."
+        )
+        transformer.to(dtype=base_dtype)
+        weight_dtype = base_dtype
+        trainable_params = [p for p in transformer.parameters() if p.requires_grad]
+    elif len(model_dtypes) == 1:
+        # Follow the real model dtype for downstream tensor casting.
+        weight_dtype = next(iter(model_dtypes))
 
     # ---- Setup forget/remaining data for InTAct ----
     forget_data = None

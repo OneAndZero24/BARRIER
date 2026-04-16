@@ -48,12 +48,14 @@ def latent_sample(transformer, scheduler, batch_size, num_channels_latents, heig
     width = int(width) // 8    # self.vae_scale_factor
     shape = (batch_size, num_channels_latents, height, width)
     
+    transformer_dtype = next(transformer.parameters()).dtype
+
     # (A) generate random tensor
     if latents is None:
-        latents = randn_tensor(shape, generator=None, dtype=torch.bfloat16)
+        latents = randn_tensor(shape, generator=None, dtype=transformer_dtype)
     latents = flux_pack_latents(latents, batch_size, num_channels_latents, height, width)
     # print(latents.shape)
-    latent_image_ids = _prepare_latent_image_ids(batch_size, height // 2, width // 2, transformer.device, torch.bfloat16)
+    latent_image_ids = _prepare_latent_image_ids(batch_size, height // 2, width // 2, transformer.device, transformer_dtype)
     
     # (B) retrieve prompt embed
 
@@ -61,17 +63,17 @@ def latent_sample(transformer, scheduler, batch_size, num_channels_latents, heig
     scheduler.set_train_timesteps(timesteps, device=transformer.device)
     timesteps = scheduler.timesteps
     
-    latents = latents.to(transformer.device).bfloat16()
-    pooled_prompt_embeds = pooled_prompt_embeds.bfloat16()
-    prompt_embeds = prompt_embeds.bfloat16()
-    text_ids = text_ids.bfloat16()
+    latents = latents.to(transformer.device, dtype=transformer_dtype)
+    pooled_prompt_embeds = pooled_prompt_embeds.to(transformer.device, dtype=transformer_dtype)
+    prompt_embeds = prompt_embeds.to(transformer.device, dtype=transformer_dtype)
+    text_ids = text_ids.to(transformer.device, dtype=transformer_dtype)
     
     attn_map_lst = []
     # Denoising loop
     for i, t in enumerate(timesteps):
 
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-        timestep = t.expand(latents.shape[0]).to(torch.bfloat16)
+        timestep = t.expand(latents.shape[0]).to(dtype=transformer_dtype)
         
         # print(latents.shape, timestep)
         # self.transformer.config.guidance_embeds False => guidance = None
@@ -109,14 +111,16 @@ def predict_noise(transformer, latent_code, prompt_embeds, pooled_prompt_embeds,
     
     # print("PE 20241127",text_ids.shape, latent_image_ids.shape)
     
+    transformer_dtype = next(transformer.parameters()).dtype
+
     model_pred, _ = transformer(
-                    hidden_states=latent_code.to(device),
-                    timestep= (timesteps / 1000).to(device),
-                    guidance=guidance,
-                    pooled_projections=pooled_prompt_embeds.to(device),
-                    encoder_hidden_states=prompt_embeds.to(device),
-                    txt_ids=text_ids.to(device),
-                    img_ids=latent_image_ids.to(device),
+                    hidden_states=latent_code.to(device=device, dtype=transformer_dtype),
+                    timestep=(timesteps / 1000).to(device=device, dtype=transformer_dtype),
+                    guidance=guidance.to(device=device, dtype=transformer_dtype),
+                    pooled_projections=pooled_prompt_embeds.to(device=device, dtype=transformer_dtype),
+                    encoder_hidden_states=prompt_embeds.to(device=device, dtype=transformer_dtype),
+                    txt_ids=text_ids.to(device=device, dtype=transformer_dtype),
+                    img_ids=latent_image_ids.to(device=device, dtype=transformer_dtype),
                     return_dict=False,
                 )
     
