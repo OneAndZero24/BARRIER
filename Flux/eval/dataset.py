@@ -123,7 +123,8 @@ class NSFW(Dataset):
         image = example.get("image", example)
         if self.transform:
             image = self.transform(image)
-        return image
+        # Return dict format compatible with flux_forward_fn
+        return {"pixel_values": image}
 
 
 class NOT_NSFW(Dataset):
@@ -142,7 +143,8 @@ class NOT_NSFW(Dataset):
         image = example.get("image", example)
         if self.transform:
             image = self.transform(image)
-        return image
+        # Return dict format compatible with flux_forward_fn
+        return {"pixel_values": image}
 
 
 def setup_forget_data(class_to_forget, batch_size, image_size,
