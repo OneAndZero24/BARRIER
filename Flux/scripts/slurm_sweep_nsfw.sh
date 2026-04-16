@@ -26,6 +26,20 @@ source "$HOME/venv/bin/activate"
 cd "$HOME/InTAct-Unl/Flux"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
+# Load Hugging Face credentials from the saved token file if present.
+HF_TOKEN_FILE="${HF_TOKEN_FILE:-/net/home/plgrid/plgmiksa/.cache/huggingface/token}"
+if [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ] && [ -r "$HF_TOKEN_FILE" ]; then
+    HUGGINGFACE_HUB_TOKEN="$(tr -d '\r\n' < "$HF_TOKEN_FILE")"
+    export HUGGINGFACE_HUB_TOKEN
+fi
+if [ -z "${HF_TOKEN:-}" ] && [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
+    export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
+fi
+if [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ] && [ -z "${HF_TOKEN:-}" ]; then
+    echo "ERROR: no Hugging Face token found; expected $HF_TOKEN_FILE or HF_TOKEN/HUGGINGFACE_HUB_TOKEN"
+    exit 1
+fi
+
 # wandb configuration (must have permission to create sweeps here)
 export WANDB_ENTITY="oneandzero24"    # adjust to your account/org
 PROJECT_NAME="intact-flux"
