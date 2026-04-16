@@ -79,7 +79,10 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
 
         # timestep needs to be in [0, 1], we store them in [0, 1000]
         # noisy_sample = (1 - timestep) * latent + timestep * noise
-        t_01 = (timesteps / 1000).to(original_samples.device)
+        t_01 = (timesteps / 1000).to(device=original_samples.device, dtype=original_samples.dtype)
+        # Make timesteps broadcast across all non-batch dimensions, e.g. [B,1,1,1] for image latents.
+        while t_01.ndim < original_samples.ndim:
+            t_01 = t_01.unsqueeze(-1)
         noisy_model_input = (1 - t_01) * original_samples + t_01 * noise
 
         # n_dim = original_samples.ndim
