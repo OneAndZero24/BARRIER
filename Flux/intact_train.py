@@ -202,20 +202,27 @@ def flux_forward_fn(model, batch, device,
         weight_dtype: dtype for mixed precision
         prompts: fallback prompts if batch doesn't contain them
     """
+    # Always follow the actual model parameter dtype to avoid dtype mismatches
+    # when the configured weight dtype and loaded module dtype diverge.
+    model_dtype = weight_dtype
+    first_param = next(model.parameters(), None)
+    if first_param is not None:
+        model_dtype = first_param.dtype
+
     if isinstance(batch, (tuple, list)):
         # Synthetic data: (latents, prompt_embeds, pooled_embeds, text_ids)
         z, prompt_embeds, pooled_embeds, text_ids = batch
-        z = z.to(device, dtype=weight_dtype)
-        prompt_embeds = prompt_embeds.to(device, dtype=weight_dtype)
-        pooled_embeds = pooled_embeds.to(device, dtype=weight_dtype)
-        text_ids = text_ids.to(device, dtype=weight_dtype)
+        z = z.to(device, dtype=model_dtype)
+        prompt_embeds = prompt_embeds.to(device, dtype=model_dtype)
+        pooled_embeds = pooled_embeds.to(device, dtype=model_dtype)
+        text_ids = text_ids.to(device, dtype=model_dtype)
         model_input = z
     elif isinstance(batch, dict) and "pixel_values" in batch:
         pixel_values = batch["pixel_values"].to(dtype=vae.dtype, device=device)
         with torch.no_grad():
             model_input = vae.encode(pixel_values).latent_dist.sample()
         model_input = (model_input - vae.config.shift_factor) * vae.config.scaling_factor
-        model_input = model_input.to(dtype=weight_dtype)
+        model_input = model_input.to(dtype=model_dtype)
 
         batch_prompts = batch.get("prompts", prompts)
         if batch_prompts is None:
@@ -230,7 +237,7 @@ def flux_forward_fn(model, batch, device,
     # Prepare latent IDs
     latent_image_ids = FluxPipeline._prepare_latent_image_ids(
         n, model_input.shape[2] // 2, model_input.shape[3] // 2,
-        device, weight_dtype,
+        device, model_dtype,
     )
 
     # Add noise
@@ -244,17 +251,21 @@ def flux_forward_fn(model, batch, device,
         model_input.shape[2], model_input.shape[3],
     )
 
-    guidance = torch.tensor([3.5], device=device, dtype=weight_dtype).expand(n)
+    # Newer diffusers expects txt_ids as [seq, 3] (2D), not [batch, seq, 3].
+    if text_ids.ndim == 3:
+        text_ids = text_ids[0]
+
+    guidance = torch.tensor([3.5], device=device, dtype=model_dtype).expand(n)
 
     # Forward through transformer (triggers hooks)
     model(
-        hidden_states=packed.to(dtype=weight_dtype, device=device),
+        hidden_states=packed.to(dtype=model_dtype, device=device),
         timestep=t.float() / 1000,
         guidance=guidance,
-        pooled_projections=pooled_embeds.to(dtype=weight_dtype, device=device),
-        encoder_hidden_states=prompt_embeds.to(dtype=weight_dtype, device=device),
-        txt_ids=text_ids.to(dtype=weight_dtype, device=device),
-        img_ids=latent_image_ids.to(dtype=weight_dtype, device=device),
+        pooled_projections=pooled_embeds.to(dtype=model_dtype, device=device),
+        encoder_hidden_states=prompt_embeds.to(dtype=model_dtype, device=device),
+        txt_ids=text_ids.to(dtype=model_dtype, device=device),
+        img_ids=latent_image_ids.to(dtype=model_dtype, device=device),
         return_dict=False,
     )
 
