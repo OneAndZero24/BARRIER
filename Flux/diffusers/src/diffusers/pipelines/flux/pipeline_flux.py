@@ -838,8 +838,6 @@ class FluxPipeline(
                 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                # 2025.01.18
-                print("timestep", i)
                 #   model_pred = self._unpack_latents(
                 #     noise_pred, height, width, self.vae_scale_factor)
     
@@ -866,8 +864,6 @@ class FluxPipeline(
 
                 if XLA_AVAILABLE:
                     xm.mark_step()
-                    
-        import pdb; pdb.set_trace()
 
         if output_type == "latent":
             image = latents
