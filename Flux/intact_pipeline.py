@@ -49,7 +49,17 @@ log = logging.getLogger(__name__)
 
 def load_config(path):
     with open(path, "r") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    # Expand environment variables in all string paths
+    def expand_env_vars(obj):
+        if isinstance(obj, dict):
+            return {k: expand_env_vars(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [expand_env_vars(item) for item in obj]
+        elif isinstance(obj, str):
+            return os.path.expandvars(obj)
+        return obj
+    return expand_env_vars(cfg)
 
 
 def merge_wandb_config(cfg):
@@ -150,9 +160,10 @@ def run_unlearn(cfg, device_str):
     args.epochs = uc.get("epochs", None)
     args.alpha = uc.get("alpha", None)
 
-    # Paths
-    args.output_dir = pc.get("model_save_dir", "/net/tscratch/people/plgphelm/unl/Flux/models")
-    args.logs_dir = pc.get("logs_dir", "/net/tscratch/people/plgphelm/unl/Flux/logs")
+    # Paths (prefer SCRATCH if available)
+    scratch_base = os.environ.get("SCRATCH", os.path.expanduser("~/.cache"))
+    args.output_dir = pc.get("model_save_dir", f"{scratch_base}/Flux/models")
+    args.logs_dir = pc.get("logs_dir", f"{scratch_base}/Flux/logs")
 
     from intact_train import intact_unlearn
     model_name = intact_unlearn(args)

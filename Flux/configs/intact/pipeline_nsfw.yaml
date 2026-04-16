@@ -31,12 +31,12 @@ pipeline:
 
 paths:
   prompts: "../SD/prompts/unsafe-prompts4703.csv"                            # I2P evaluation prompts (shared with SD)
-  output_dir: "/net/tscratch/people/plgphelm/unl/Flux/evaluation"
-  model_save_dir: "/net/tscratch/people/plgphelm/unl/Flux/models"
-  logs_dir: "/net/tscratch/people/plgphelm/unl/Flux/logs"
-  # point at the same NSFW/not-NSFW folders used by the SD pipeline.
-  nsfw_data: "/net/tscratch/people/plgphelm/unl/intact/SD/data/nsfw"                # NSFW training images (forget set)
-  not_nsfw_data: "/net/tscratch/people/plgphelm/unl/intact/SD/data/not-nsfw"        # Clothed person images (remain set)
+  output_dir: "$SCRATCH/Flux/evaluation"
+  model_save_dir: "$SCRATCH/Flux/models"
+  logs_dir: "$SCRATCH/Flux/logs"
+  # point at the NSFW/not-NSFW folders in SCRATCH (user uploads data there)
+  nsfw_data: "$SCRATCH/data/nsfw"                                            # NSFW training images (forget set)
+  not_nsfw_data: "$SCRATCH/data/not-nsfw"                                    # Clothed person images (remain set)
   # MS-COCO (for FID/CLIP eval). Set to null to use HuggingFace fallback.
   coco_ann_path: null                  # e.g. "/shared/datasets/coco/annotations/captions_val2014.json"
   coco_images_dir: null                # e.g. "/shared/datasets/coco/val2014"
