@@ -286,7 +286,7 @@ def compute_esd_loss(transformer, noise_scheduler, compute_text_embeddings,
     L_ESD = ||e_n(z,c_forget) - [e_0(z,c_neg) - γ(e_p(z,c_forget) - e_0(z,c_neg))]||²
     """
     vae_scale_factor = 2 ** len(vae.config.block_out_channels)
-    num_channels = transformer.config.in_channels
+    num_channels = transformer.config.in_channels // 4
 
     # Encode prompts
     emb_0, pooled_0, tid_0 = compute_text_embeddings(neg_prompt)
@@ -349,7 +349,7 @@ def compute_rl_loss(transformer, noise_scheduler, compute_text_embeddings,
     L_RL = ||f_θ(z_t, t, c_forget) - f_θ_frozen(z_t, t, c_neg)||²
     """
     vae_scale_factor = 2 ** len(vae.config.block_out_channels)
-    num_channels = transformer.config.in_channels
+    num_channels = transformer.config.in_channels // 4
 
     emb_p, pooled_p, tid_p = compute_text_embeddings(prompt)
     emb_neg, pooled_neg, tid_neg = compute_text_embeddings(neg_prompt)
@@ -411,7 +411,7 @@ def compute_ea_loss(transformer, noise_scheduler, compute_text_embeddings,
     from utils.find_token import get_word_index
 
     vae_scale_factor = 2 ** len(vae.config.block_out_channels)
-    num_channels = transformer.config.in_channels
+    num_channels = transformer.config.in_channels // 4
 
     emb_0, pooled_0, tid_0 = compute_text_embeddings(neg_prompt)
     emb_p, pooled_p, tid_p = compute_text_embeddings(prompt)
@@ -589,7 +589,7 @@ def generate_synthetic_forget_data(transformer, noise_scheduler, compute_text_em
     Used when no real image dataset is available (ESD-style).
     """
     vae_scale_factor = 2 ** 3  # Flux VAE has 3 block_out_channels levels
-    num_channels = transformer.config.in_channels
+    num_channels = transformer.config.in_channels // 4
     data = []
 
     log.info(f"Generating {n_samples} synthetic forget samples for InTAct setup...")
