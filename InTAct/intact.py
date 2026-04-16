@@ -281,27 +281,29 @@ class UnlearnIntervalProtection:
             if target_layer is None: 
                 log.warning(f"Target layer {layer_name} not found, skipping protection loss computation.")
                 continue
+
+            target_dtype = target_layer.weight.dtype if target_layer.weight is not None else torch.float32
             
-            mu = info["mu"].to(device)
-            Uf = info["U_forget"].to(device)
-            Ur = info["U_residual"].to(device)
-            Sr = info["S_residual"].to(device)
-            z_min, z_max = info["z_min"].to(device), info["z_max"].to(device)
-            inf_low = info["inf_low"].to(device)
-            inf_high = info["inf_high"].to(device)
+            mu = info["mu"].to(device=device, dtype=target_dtype)
+            Uf = info["U_forget"].to(device=device, dtype=target_dtype)
+            Ur = info["U_residual"].to(device=device, dtype=target_dtype)
+            Sr = info["S_residual"].to(device=device, dtype=target_dtype)
+            z_min, z_max = info["z_min"].to(device=device, dtype=target_dtype), info["z_max"].to(device=device, dtype=target_dtype)
+            inf_low = info["inf_low"].to(device=device, dtype=target_dtype)
+            inf_high = info["inf_high"].to(device=device, dtype=target_dtype)
 
             w_name = self.param_to_name[target_layer.weight]
             b_name = self.param_to_name[target_layer.bias] if target_layer.bias is not None else None
             
             # Move snapshots to GPU only when needed for computation
-            delta_W_raw = target_layer.weight - self.params_snapshot[w_name].to(device)
-            delta_b = (target_layer.bias - self.params_snapshot[b_name].to(device)) if b_name else None
+            delta_W_raw = target_layer.weight - self.params_snapshot[w_name].to(device=device, dtype=target_dtype)
+            delta_b = (target_layer.bias - self.params_snapshot[b_name].to(device=device, dtype=target_dtype)) if b_name else None
             
             if isinstance(target_layer, nn.Conv2d):
                 mu_spatial = mu.view(1, -1, 1, 1)
                 
                 num_layers += 1
-                layer_loss = torch.tensor(0.0, device=device)
+                layer_loss = torch.tensor(0.0, device=device, dtype=target_dtype)
                 
                 mean_response = torch.nn.functional.conv2d(
                     mu_spatial, delta_W_raw, 
@@ -355,9 +357,9 @@ class UnlearnIntervalProtection:
             elif isinstance(target_layer, nn.Linear):
                 delta_W = delta_W_raw
                 num_layers += 1
-                layer_loss = torch.tensor(0.0, device=device)
+                layer_loss = torch.tensor(0.0, device=device, dtype=target_dtype)
 
-                db = delta_b if delta_b is not None else torch.tensor(0.0, device=device)
+                db = delta_b if delta_b is not None else torch.tensor(0.0, device=device, dtype=target_dtype)
                 
                 global_shift = torch.matmul(delta_W, mu) + db
                 layer_loss = layer_loss + global_shift.pow(2).mean()

@@ -67,6 +67,8 @@ def latent_sample(transformer, scheduler, batch_size, num_channels_latents, heig
     pooled_prompt_embeds = pooled_prompt_embeds.to(transformer.device, dtype=transformer_dtype)
     prompt_embeds = prompt_embeds.to(transformer.device, dtype=transformer_dtype)
     text_ids = text_ids.to(transformer.device, dtype=transformer_dtype)
+    if text_ids.ndim == 3:
+        text_ids = text_ids[0]
     
     attn_map_lst = []
     # Denoising loop
@@ -112,6 +114,8 @@ def predict_noise(transformer, latent_code, prompt_embeds, pooled_prompt_embeds,
     # print("PE 20241127",text_ids.shape, latent_image_ids.shape)
     
     transformer_dtype = next(transformer.parameters()).dtype
+    if text_ids.ndim == 3:
+        text_ids = text_ids[0]
 
     model_pred, _ = transformer(
                     hidden_states=latent_code.to(device=device, dtype=transformer_dtype),
