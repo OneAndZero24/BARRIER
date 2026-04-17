@@ -9,12 +9,17 @@
 #   cd Flux
 #   sbatch scripts/slurm_sweep_nsfw.sh
 #   sbatch scripts/slurm_sweep_nsfw.sh <existing_sweep_id>
+#
+# Resume behavior:
+#   - By default, plain re-sbatch reuses the last sweep ID for this sweep name.
+#   - Set FORCE_NEW_SWEEP=1 to force creation of a new sweep.
 # ============================================================================
 
 #SBATCH --job-name=flux-nsfw-sweep
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
+#SBATCH --time=48:00:00
 #SBATCH --partition=plgrid-gpu-gh200
 #SBATCH --array=0-4
 
@@ -70,11 +75,20 @@ echo "=== launching wandb sweep ==="
 SWEEP_NAME="sweep_nsfw"
 YAML_PATH="configs/intact/${SWEEP_NAME}.yaml"
 ARRAY_KEY="${SLURM_ARRAY_JOB_ID:-manual}"
-SWEEP_STATE_DIR="$CACHE_ROOT/wandb/${SWEEP_NAME}_${ARRAY_KEY}"
+
+# Shared state allows automatic resume on the next sbatch submission.
+SWEEP_NAMESPACE="${SWEEP_NAMESPACE:-shared}"
+SWEEP_STATE_DIR="$CACHE_ROOT/wandb/${SWEEP_NAME}_${SWEEP_NAMESPACE}"
 SWEEP_ID_FILE="$SWEEP_STATE_DIR/sweep.id"
 SWEEP_LOCK_DIR="$SWEEP_STATE_DIR/create.lock"
+
+# Legacy per-array location (kept for backward-compatible migration).
+LEGACY_SWEEP_STATE_DIR="$CACHE_ROOT/wandb/${SWEEP_NAME}_${ARRAY_KEY}"
+LEGACY_SWEEP_ID_FILE="$LEGACY_SWEEP_STATE_DIR/sweep.id"
+
 SWEEP_WAIT_SECONDS="${SWEEP_WAIT_SECONDS:-1800}"
 SWEEP_POLL_SECONDS="${SWEEP_POLL_SECONDS:-5}"
+FORCE_NEW_SWEEP="${FORCE_NEW_SWEEP:-0}"
 
 mkdir -p "$SWEEP_STATE_DIR"
 
@@ -102,12 +116,47 @@ create_sweep() {
     echo "Saved sweep ID to $SWEEP_ID_FILE"
 }
 
+SWEEP_ID=""
+
 if [ -n "${1:-}" ]; then
     SWEEP_ID="$1"
     echo "Using provided sweep ID: $SWEEP_ID"
+    echo "$SWEEP_ID" > "$SWEEP_ID_FILE"
+    echo "Saved provided sweep ID to $SWEEP_ID_FILE"
+elif [ "$FORCE_NEW_SWEEP" = "1" ]; then
+    echo "FORCE_NEW_SWEEP=1: creating a fresh sweep"
+    if mkdir "$SWEEP_LOCK_DIR" 2>/dev/null; then
+        cleanup_lock() {
+            rmdir "$SWEEP_LOCK_DIR" 2>/dev/null || true
+        }
+        trap cleanup_lock EXIT
+        create_sweep
+        trap - EXIT
+        cleanup_lock
+    else
+        echo "Another task is creating a sweep. Waiting for $SWEEP_ID_FILE"
+        MAX_POLLS=$((SWEEP_WAIT_SECONDS / SWEEP_POLL_SECONDS))
+        if [ "$MAX_POLLS" -lt 1 ]; then
+            MAX_POLLS=1
+        fi
+        for _ in $(seq 1 "$MAX_POLLS"); do
+            if [ -s "$SWEEP_ID_FILE" ]; then
+                break
+            fi
+            sleep "$SWEEP_POLL_SECONDS"
+        done
+        if [ -s "$SWEEP_ID_FILE" ]; then
+            SWEEP_ID="$(cat "$SWEEP_ID_FILE")"
+        fi
+    fi
 elif [ -s "$SWEEP_ID_FILE" ]; then
     SWEEP_ID="$(cat "$SWEEP_ID_FILE")"
-    echo "Reusing existing sweep ID for this array job: $SWEEP_ID"
+    echo "Reusing existing sweep ID (shared state): $SWEEP_ID"
+elif [ -s "$LEGACY_SWEEP_ID_FILE" ]; then
+    SWEEP_ID="$(cat "$LEGACY_SWEEP_ID_FILE")"
+    echo "Reusing legacy per-array sweep ID: $SWEEP_ID"
+    echo "$SWEEP_ID" > "$SWEEP_ID_FILE"
+    echo "Migrated legacy sweep ID to shared state: $SWEEP_ID_FILE"
 else
     # Lock-based leader election: first task that creates the lock directory creates the sweep.
     if mkdir "$SWEEP_LOCK_DIR" 2>/dev/null; then
