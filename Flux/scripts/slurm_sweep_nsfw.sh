@@ -131,6 +131,9 @@ elif [ "$FORCE_NEW_SWEEP" = "1" ]; then
         }
         trap cleanup_lock EXIT
         create_sweep
+        if [ -s "$SWEEP_ID_FILE" ]; then
+            SWEEP_ID="$(cat "$SWEEP_ID_FILE")"
+        fi
         trap - EXIT
         cleanup_lock
     else
@@ -148,6 +151,10 @@ elif [ "$FORCE_NEW_SWEEP" = "1" ]; then
         if [ -s "$SWEEP_ID_FILE" ]; then
             SWEEP_ID="$(cat "$SWEEP_ID_FILE")"
         fi
+    fi
+    if [ -z "${SWEEP_ID:-}" ]; then
+        echo "ERROR: FORCE_NEW_SWEEP requested but sweep ID is empty; expected file: $SWEEP_ID_FILE"
+        exit 1
     fi
 elif [ -s "$SWEEP_ID_FILE" ]; then
     SWEEP_ID="$(cat "$SWEEP_ID_FILE")"
