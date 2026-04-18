@@ -25,6 +25,7 @@ import os
 import random
 import sys
 import time
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -607,41 +608,122 @@ def generate_synthetic_forget_data(transformer, noise_scheduler, compute_text_em
 # Saving
 # ============================================================================
 
+def _fallback_save_dir(output_dir):
+    candidates = []
+
+    cache_root = os.environ.get("CACHE_ROOT")
+    if cache_root:
+        candidates.append(cache_root)
+
+    scratch_root = os.environ.get("SCRATCH")
+    if scratch_root:
+        candidates.append(os.path.join(scratch_root, ".cache"))
+
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache:
+        candidates.append(xdg_cache)
+
+    wandb_dir = os.environ.get("WANDB_DIR")
+    if wandb_dir:
+        candidates.append(os.path.dirname(wandb_dir))
+
+    candidates.extend([
+        os.path.join(Path.home(), ".cache", "intact"),
+        os.path.join(tempfile.gettempdir(), "intact"),
+    ])
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            return candidate
+        except OSError:
+            continue
+
+    raise RuntimeError("Failed to find a writable directory for model saving")
+
+
+def _save_safetensors(state_dict, save_path):
+    save_dir = os.path.dirname(save_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(dir=save_dir, prefix=".tmp-", suffix=".safetensors")
+    os.close(fd)
+    try:
+        save_file(state_dict, tmp_path)
+        os.replace(tmp_path, save_path)
+        return save_path
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
 def save_model_weights(transformer, output_dir, name, weight_dtype):
     """Save fine-tuned transformer weights."""
-    os.makedirs(output_dir, exist_ok=True)
     save_path = os.path.join(output_dir, f"{name}.safetensors")
 
     transformer = transformer.to(weight_dtype)
     state_dict = transformer.state_dict()
-    save_file(state_dict, save_path)
-    log.info(f"Saved model weights to {save_path}")
-    return save_path
+
+    try:
+        saved_path = _save_safetensors(state_dict, save_path)
+        log.info(f"Saved model weights to {saved_path}")
+        return saved_path
+    except Exception as exc:
+        fallback_dir = _fallback_save_dir(output_dir)
+        fallback_path = os.path.join(fallback_dir, f"{name}.safetensors")
+        log.warning(
+            f"Primary save to {save_path} failed ({exc}); retrying in fallback directory {fallback_dir}"
+        )
+        try:
+            saved_path = _save_safetensors(state_dict, fallback_path)
+            log.info(f"Saved model weights to fallback path {saved_path}")
+            return saved_path
+        except Exception:
+            log.exception(f"Fallback model save also failed for {fallback_path}")
+            return None
 
 
 def save_history(losses, output_dir, name):
     """Save loss history and plot."""
-    os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, f"{name}_loss.txt"), "w") as f:
-        for l in losses:
-            f.write(f"{l}\n")
+    def _write_history(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
 
-    if len(losses) > 3:
-        # Moving average
-        arr = np.array(losses)
-        n = min(10, len(arr))
-        ret = np.cumsum(arr, dtype=float)
-        ret[n:] = ret[n:] - ret[:-n]
-        ma = ret[n - 1:] / n
+        with open(os.path.join(save_dir, f"{name}_loss.txt"), "w") as f:
+            for l in losses:
+                f.write(f"{l}\n")
 
-        plt.figure(figsize=(10, 6))
-        plt.plot(ma, label="loss (moving avg)")
-        plt.xlabel("Step")
-        plt.ylabel("Loss")
-        plt.title(f"Training Loss — {name}")
-        plt.legend()
-        plt.savefig(os.path.join(output_dir, f"{name}_loss.png"))
-        plt.close()
+        if len(losses) > 3:
+            # Moving average
+            arr = np.array(losses)
+            n = min(10, len(arr))
+            ret = np.cumsum(arr, dtype=float)
+            ret[n:] = ret[n:] - ret[:-n]
+            ma = ret[n - 1:] / n
+
+            plt.figure(figsize=(10, 6))
+            plt.plot(ma, label="loss (moving avg)")
+            plt.xlabel("Step")
+            plt.ylabel("Loss")
+            plt.title(f"Training Loss — {name}")
+            plt.legend()
+            plt.savefig(os.path.join(save_dir, f"{name}_loss.png"))
+            plt.close()
+
+    try:
+        _write_history(output_dir)
+    except Exception as exc:
+        fallback_dir = _fallback_save_dir(output_dir)
+        log.warning(
+            f"Primary history save to {output_dir} failed ({exc}); retrying in fallback directory {fallback_dir}"
+        )
+        try:
+            _write_history(fallback_dir)
+        except Exception:
+            log.exception(f"Fallback history save also failed for {fallback_dir}")
 
 
 # ============================================================================
