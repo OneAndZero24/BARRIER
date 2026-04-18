@@ -29,11 +29,11 @@ command:
 
 parameters:
   unlearn.learning_rate:
-    values: [1.0e-5, 5.0e-5, 5.0e-6, 1.0e-4]
+    values: [5.0e-6, 1.0e-5, 5.0e-5, 1.0e-4]
   unlearn.max_train_steps:
-    values: [100, 200, 500]
+    values: [200, 500, 1000]
   intact.lambda_interval:
-    values: [0.5, 1.0, 5.0, 10.0, 100.0]
+    values: [0.1, 0.25, 0.5, 1.0, 5.0]
   unlearn.base_method:
     values: ["rl"]  # RL loss for NSFW
   # you might also sweep different target sets if desired
