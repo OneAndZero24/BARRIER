@@ -354,18 +354,41 @@ def _load_coco_captions(
     n: int = 10000,
     seed: int = 42,
     coco_ann_path: Optional[str] = None,
+    coco_prompts_csv_path: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
     """
     Load ``n`` random (image_path_or_id, caption) pairs from MS-COCO val.
 
     Tries (in order):
-        1. Local annotation JSON ``coco_ann_path``  (COCO val captions JSON).
-        2. HuggingFace ``nlphuji/mscoco_2014_5k_test_image_text_retrieval``
-           or ``HuggingFaceM4/COCO`` datasets.
+        1. Local prompts CSV ``coco_prompts_csv_path`` with a ``prompt`` column.
+        2. Local annotation JSON ``coco_ann_path``  (COCO val captions JSON).
+        3. HuggingFace ``nlphuji/mscoco_2014_5k_test_image_text_retrieval``.
 
     Returns list of (image_path_or_url, caption) tuples.
     """
     rng = np.random.RandomState(seed)
+
+    # --- Strategy 0: local prompts CSV (preferred for cluster reproducibility) ---
+    if coco_prompts_csv_path and os.path.exists(coco_prompts_csv_path):
+        import pandas as pd
+
+        try:
+            df = pd.read_csv(coco_prompts_csv_path)
+            if "prompt" not in df.columns:
+                log.warning(f"COCO prompts CSV missing 'prompt' column: {coco_prompts_csv_path}")
+            else:
+                prompts = [str(p) for p in df["prompt"].dropna().tolist() if str(p).strip()]
+                if prompts:
+                    if len(prompts) > n:
+                        idxs = rng.choice(len(prompts), n, replace=False)
+                        prompts = [prompts[i] for i in idxs]
+                    pairs = [(str(i), caption) for i, caption in enumerate(prompts)]
+                    log.info(
+                        f"Loaded {len(pairs)} COCO prompts from local CSV: {coco_prompts_csv_path}"
+                    )
+                    return pairs
+        except Exception as e:
+            log.warning(f"Could not load COCO prompts CSV {coco_prompts_csv_path}: {e}")
 
     # --- Strategy 1: local COCO captions JSON ---
     if coco_ann_path and os.path.exists(coco_ann_path):
@@ -419,6 +442,7 @@ def generate_coco_prompts_csv(
     n: int = 10000,
     seed: int = 42,
     coco_ann_path: Optional[str] = None,
+    coco_prompts_csv_path: Optional[str] = None,
 ) -> str:
     """
     Write a prompts CSV (case_number, prompt, evaluation_seed) with
@@ -427,7 +451,12 @@ def generate_coco_prompts_csv(
     Returns the written path.
     """
     import csv
-    pairs = _load_coco_captions(n=n, seed=seed, coco_ann_path=coco_ann_path)
+    pairs = _load_coco_captions(
+        n=n,
+        seed=seed,
+        coco_ann_path=coco_ann_path,
+        coco_prompts_csv_path=coco_prompts_csv_path,
+    )
     if not pairs:
         raise RuntimeError("Failed to load any MS-COCO captions")
 

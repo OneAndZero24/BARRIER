@@ -24,15 +24,19 @@ from diffusers import FluxPipeline
 from safetensors.torch import load_file
 
 
-def _load_flux_pipeline(base_model_path, model_name, model_dir, device):
+def _load_flux_pipeline(base_model_path, model_name, model_dir, device,
+                        strict_model_weights=True, model_weights_path=None):
     """Load FluxPipeline with optional fine-tuned weights (shared helper)."""
     print(f"Loading Flux pipeline from {base_model_path}")
     pipe = FluxPipeline.from_pretrained(base_model_path, torch_dtype=torch.bfloat16)
 
     if model_name:
-        weights_path = os.path.join(model_dir, f"{model_name}.safetensors")
-        if not os.path.exists(weights_path):
-            weights_path = os.path.join(model_dir, model_name, f"{model_name}.safetensors")
+        if model_weights_path:
+            weights_path = model_weights_path
+        else:
+            weights_path = os.path.join(model_dir, f"{model_name}.safetensors")
+            if not os.path.exists(weights_path):
+                weights_path = os.path.join(model_dir, model_name, f"{model_name}.safetensors")
 
         if os.path.exists(weights_path):
             print(f"Loading fine-tuned weights from {weights_path}")
@@ -40,7 +44,10 @@ def _load_flux_pipeline(base_model_path, model_name, model_dir, device):
             pipe.transformer.load_state_dict(state_dict)
             print("Successfully loaded fine-tuned transformer weights")
         else:
-            print(f"WARNING: Fine-tuned weights not found at {weights_path}")
+            msg = f"Fine-tuned weights not found for model '{model_name}' in '{model_dir}'"
+            if strict_model_weights:
+                raise FileNotFoundError(msg)
+            print(f"WARNING: {msg}")
             print("Using base model weights")
 
     pipe = pipe.to(device)
@@ -62,6 +69,8 @@ def generate_images(
     max_prompts=None,
     batch_size=1,
     pipe=None,
+    strict_model_weights=True,
+    model_weights_path=None,
 ):
     """
     Generate evaluation images using FluxPipeline.
@@ -84,7 +93,14 @@ def generate_images(
         pipe: Pre-loaded FluxPipeline (avoids reloading for multiple calls).
     """
     if pipe is None:
-        pipe = _load_flux_pipeline(base_model_path, model_name, model_dir, device)
+        pipe = _load_flux_pipeline(
+            base_model_path,
+            model_name,
+            model_dir,
+            device,
+            strict_model_weights=strict_model_weights,
+            model_weights_path=model_weights_path,
+        )
 
     # Read prompts
     df = pd.read_csv(prompts_path)

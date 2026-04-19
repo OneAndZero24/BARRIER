@@ -106,10 +106,10 @@ def predict_noise(transformer, latent_code, prompt_embeds, pooled_prompt_embeds,
         ESD (apply_model)
     """
     
-    if CPU_only:
-        device = torch.device("cuda:0")
-    else:
-        device = torch.device("cuda:1")
+    # Always use the transformer's current device.
+    # Hardcoding cuda:0/cuda:1 can silently route computation to the wrong GPU
+    # or fail on single-GPU jobs.
+    device = transformer.device
     
     # print("PE 20241127",text_ids.shape, latent_image_ids.shape)
     

@@ -166,16 +166,16 @@ def run_unlearn(cfg, device_str):
     args.logs_dir = pc.get("logs_dir", f"{scratch_base}/Flux/logs")
 
     from intact_train import intact_unlearn
-    model_name = intact_unlearn(args)
+    model_name, model_weights_path = intact_unlearn(args)
 
-    return model_name
+    return model_name, model_weights_path
 
 
 # =============================================================================
 # Step 2: Generate Images
 # =============================================================================
 
-def generate_evaluation_images(cfg, model_name, device_str):
+def generate_evaluation_images(cfg, model_name, device_str, model_weights_path=None):
     """Generate evaluation images using the fine-tuned model."""
     ec = cfg.get("evaluate", {})
     pc = cfg.get("paths", {})
@@ -209,6 +209,7 @@ def generate_evaluation_images(cfg, model_name, device_str):
         num_samples=num_samples,
         base_model_path=base_model,
         model_dir=model_dir,
+        model_weights_path=model_weights_path,
         max_prompts=max_prompts,
         batch_size=ec.get("generation_batch_size", 1),
     )
@@ -216,7 +217,7 @@ def generate_evaluation_images(cfg, model_name, device_str):
     return images_dir
 
 
-def generate_probe_images(cfg, model_name, device_str):
+def generate_probe_images(cfg, model_name, device_str, model_weights_path=None):
     """
     Generate probe images from BOTH the unlearned and original models for comparison.
 
@@ -268,7 +269,7 @@ def generate_probe_images(cfg, model_name, device_str):
     unlearned_save = os.path.join(probe_base, "unlearned")
     os.makedirs(unlearned_save, exist_ok=True)
     gen_images(model_name=model_name, save_path=unlearned_save,
-               model_dir=model_dir, **common_kwargs)
+               model_dir=model_dir, model_weights_path=model_weights_path, **common_kwargs)
     unlearned_dir = os.path.join(unlearned_save, model_name)
 
     # Original model
@@ -286,7 +287,7 @@ def generate_probe_images(cfg, model_name, device_str):
 # Step 1.5: Early Nude vs Clothed Upload (for run triage)
 # =============================================================================
 
-def upload_early_nsfw_samples(cfg, model_name, device_str):
+def upload_early_nsfw_samples(cfg, model_name, device_str, model_weights_path=None):
     """
     Generate a small set of nude-vs-clothed images immediately after unlearning
     and upload them to wandb so the user can kill bad runs early.
@@ -339,7 +340,7 @@ def upload_early_nsfw_samples(cfg, model_name, device_str):
     unlearned_save = os.path.join(early_base, "unlearned")
     os.makedirs(unlearned_save, exist_ok=True)
     gen_images(model_name=model_name, save_path=unlearned_save,
-               model_dir=model_dir, **common_kwargs)
+               model_dir=model_dir, model_weights_path=model_weights_path, **common_kwargs)
 
     # --- Original model ---
     log.info("Generating early NSFW check images with ORIGINAL model...")
@@ -402,7 +403,7 @@ IMAGENETTE_CLASSES = [
 ]
 
 
-def run_evaluation(cfg, model_name, images_dir, device_str):
+def run_evaluation(cfg, model_name, images_dir, device_str, model_weights_path=None):
     """Run all configured evaluations (I2P-aligned for NSFW)."""
     ec = cfg.get("evaluate", {})
     uc = cfg.get("unlearn", {})
@@ -456,6 +457,24 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
         coco_ann_path = pc.get("coco_ann_path")
         coco_images_dir = pc.get("coco_images_dir")
         output_dir = pc.get("output_dir", "evaluation")
+        configured_coco_prompts_csv = (
+            coco_cfg.get("pregenerated_prompts_csv")
+            or pc.get("coco_prompts_csv")
+        )
+
+        if not configured_coco_prompts_csv:
+            # Repo-local fallback: SD prompt CSV shared across pipelines.
+            candidate = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "SD",
+                    "prompts",
+                    "coco_30k.csv",
+                )
+            )
+            if os.path.exists(candidate):
+                configured_coco_prompts_csv = candidate
 
         # Check if pre-generated COCO images exist
         coco_pregenerated = coco_cfg.get("pregenerated_images_path")
@@ -468,6 +487,7 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
             generate_coco_prompts_csv(
                 coco_prompts_csv, n=coco_n,
                 coco_ann_path=coco_ann_path,
+                coco_prompts_csv_path=configured_coco_prompts_csv,
             )
             log.info("Generating images from MS-COCO captions …")
             from eval.generate_images import generate_images
@@ -488,6 +508,7 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
                 num_samples=coco_cfg.get("num_samples_per_prompt", 1),
                 base_model_path=base_model,
                 model_dir=model_dir,
+                model_weights_path=model_weights_path,
                 batch_size=coco_batch_size,
             )
 
@@ -600,7 +621,8 @@ def run_evaluation(cfg, model_name, images_dir, device_str):
 # Step 4: Logging
 # =============================================================================
 
-def log_to_wandb(cfg, metrics, images_dir, probe_dir=None, original_probe_dir=None):
+def log_to_wandb(cfg, metrics, images_dir, probe_dir=None, original_probe_dir=None,
+                 model_name_override=None, model_weights_path=None):
     """Log metrics and sample images to wandb."""
     import wandb
 
@@ -684,8 +706,8 @@ def log_to_wandb(cfg, metrics, images_dir, probe_dir=None, original_probe_dir=No
     # Model artifact
     pc = cfg.get("paths", {})
     model_dir = pc.get("model_save_dir", "models")
-    model_name = get_model_name(cfg)
-    weights_path = os.path.join(model_dir, f"{model_name}.safetensors")
+    model_name = model_name_override or get_model_name(cfg)
+    weights_path = model_weights_path or os.path.join(model_dir, f"{model_name}.safetensors")
     if os.path.exists(weights_path):
         art = wandb.Artifact(
             name=f"flux-{setting}-{wandb.run.id}",
@@ -759,11 +781,13 @@ def main():
     # =========================================================================
     if not eval_only and not pregenerated_path:
         log.info(f"=== Step 1: InTAct Unlearning ({setting}) ===")
-        model_name = run_unlearn(cfg, device_str)
+        model_name, model_weights_path = run_unlearn(cfg, device_str)
         log.info(f"Model name: {model_name}")
+        log.info(f"Model weights: {model_weights_path}")
         torch.cuda.empty_cache()
     else:
         model_name = get_model_name(cfg)
+        model_weights_path = None
         if eval_only:
             log.info(f"Skipping unlearning (eval-only). Model name: {model_name}")
         else:
@@ -778,7 +802,7 @@ def main():
             and not pregenerated_path):
         log.info("=== Step 1.5: Early NSFW Sanity Check ===")
         try:
-            upload_early_nsfw_samples(cfg, model_name, device_str)
+            upload_early_nsfw_samples(cfg, model_name, device_str, model_weights_path=model_weights_path)
         except Exception as e:
             log.warning(f"Early NSFW check failed (non-fatal): {e}")
 
@@ -790,7 +814,12 @@ def main():
         images_dir = pregenerated_path
     else:
         log.info("=== Step 2: Generating evaluation images ===")
-        images_dir = generate_evaluation_images(cfg, model_name, device_str)
+        images_dir = generate_evaluation_images(
+            cfg,
+            model_name,
+            device_str,
+            model_weights_path=model_weights_path,
+        )
         log.info(f"Images saved to {images_dir}")
 
     # =========================================================================
@@ -801,7 +830,12 @@ def main():
     ec = cfg.get("evaluate", {})
     if ec.get("probe", {}).get("enabled", True) and not pregenerated_path:
         log.info("=== Step 2b: Generating probe images ===")
-        probe_dir, original_probe_dir = generate_probe_images(cfg, model_name, device_str)
+        probe_dir, original_probe_dir = generate_probe_images(
+            cfg,
+            model_name,
+            device_str,
+            model_weights_path=model_weights_path,
+        )
 
     # Free GPU memory
     torch.cuda.empty_cache()
@@ -810,7 +844,13 @@ def main():
     # Step 3: Evaluate
     # =========================================================================
     log.info("=== Step 3: Evaluation ===")
-    metrics = run_evaluation(cfg, model_name, images_dir, device_str)
+    metrics = run_evaluation(
+        cfg,
+        model_name,
+        images_dir,
+        device_str,
+        model_weights_path=model_weights_path,
+    )
     log.info(f"Metrics: {metrics}")
 
     # =========================================================================
@@ -819,7 +859,10 @@ def main():
     if use_wandb:
         log.info("=== Step 4: Logging to wandb ===")
         log_to_wandb(cfg, metrics, images_dir,
-                     probe_dir=probe_dir, original_probe_dir=original_probe_dir)
+                     probe_dir=probe_dir,
+                     original_probe_dir=original_probe_dir,
+                     model_name_override=model_name,
+                     model_weights_path=model_weights_path)
         import wandb
         wandb.finish()
 
