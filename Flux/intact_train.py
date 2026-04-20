@@ -948,8 +948,8 @@ def intact_unlearn(args):
     forget_data = None
     remain_data = None
 
-    # if NSFW dataset paths are provided, use real images for activation bounds
-    if hasattr(args, "nsfw_data_path") and args.nsfw_data_path and \
+    # if NSFW dataset paths are provided AND using nsfw base_method, use real images for activation bounds
+    if base_method == "nsfw" and hasattr(args, "nsfw_data_path") and args.nsfw_data_path and \
        hasattr(args, "not_nsfw_data_path") and args.not_nsfw_data_path:
         from eval.dataset import setup_forget_nsfw_data
         batch_sz = args.batch_size or 8
@@ -963,7 +963,7 @@ def intact_unlearn(args):
         if args.intact_use_actual_bounds:
             remain_data = remain_dl
     else:
-        # no dataset, fall back to synthetic prompts as before
+        # no dataset, or not nsfw method: fall back to synthetic prompts as before
         forget_data = generate_synthetic_forget_data(
             transformer, noise_scheduler_copy, compute_text_embeddings,
             prompt, device, weight_dtype, n_samples=args.intact_n_samples,

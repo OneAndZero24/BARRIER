@@ -49,7 +49,7 @@ unlearn:
   mixed_precision: "bf16"
 
   # Base method: esd | rl | ea | nsfw
-  base_method: "nsfw"                     # SD-analogous NSFW objective (epoch-based)
+  base_method: "rl"                       # RL (random label / negative prompt) - no NSFW data loading
 
   # For prompt-based loss (RL/ESD/EA) we still specify concept/negative prompts
   instance_prompt: "a photo of a nude person"
@@ -80,13 +80,11 @@ unlearn:
   retain_eval_prompts: []
 
 intact:
-  # Use fewer late blocks + FF-only layers to reduce memory and increase effect.
-  target_blocks: [14, 15, 16, 17, 18]
+  # Fewer late blocks + lower-width FF inputs to reduce InTAct activation memory.
+  target_blocks: [17, 18]
   target_layers:
     - "ff.net.0.proj"
-    - "ff.net.2"
     - "ff_context.net.0.proj"
-    - "ff_context.net.2"
   lambda_interval: 0.5
   lower_percentile: 0.05
   upper_percentile: 0.95

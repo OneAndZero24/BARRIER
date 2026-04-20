@@ -38,7 +38,7 @@ unlearn:
   variant: null
   mixed_precision: "bf16"
 
-  base_method: "nsfw"
+  base_method: "rl"
 
   instance_prompt: "a photo of a nude person"
   neg_prompt: "a photo of a person wearing clothes"
