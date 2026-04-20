@@ -80,12 +80,9 @@ unlearn:
   retain_eval_prompts: []
 
 intact:
-  target_blocks: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+  # Use fewer late blocks + FF-only layers to reduce memory and increase effect.
+  target_blocks: [14, 15, 16, 17, 18]
   target_layers:
-    - "attn.add_q_proj"
-    - "attn.add_k_proj"
-    - "attn.add_v_proj"
-    - "attn.to_add_out"
     - "ff.net.0.proj"
     - "ff.net.2"
     - "ff_context.net.0.proj"
