@@ -29,6 +29,7 @@
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
+export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
 cd $HOME/InTAct-Unl/SD
 export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
