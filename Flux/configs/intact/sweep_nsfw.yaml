@@ -37,5 +37,5 @@ parameters:
   intact.lambda_interval:
     values: [0.25, 0.5]
   unlearn.base_method:
-    values: ["rl"]
+    values: ["nsfw"]
   # you might also sweep different target sets if desired

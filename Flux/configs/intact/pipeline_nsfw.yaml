@@ -49,7 +49,7 @@ unlearn:
   mixed_precision: "bf16"
 
   # Base method: esd | rl | ea | nsfw
-  base_method: "rl"                       # RL (random label / negative prompt) - no NSFW data loading
+  base_method: "nsfw"                       # NSFW (negative prompt) - no RL data loading
 
   # For prompt-based loss (RL/ESD/EA) we still specify concept/negative prompts
   instance_prompt: "a photo of a nude person"
