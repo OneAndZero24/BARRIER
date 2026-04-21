@@ -127,6 +127,13 @@ class UnlearnIntervalProtection:
             # statistics working tensor while leaving the collected activations
             # and model weights unchanged.
             acts_gpu = acts.to(device=device, dtype=torch.float32)
+
+            if not torch.isfinite(acts_gpu).all():
+                nonfinite_count = (~torch.isfinite(acts_gpu)).sum().item()
+                log.warning(
+                    f"Layer {layer_name}: replacing {nonfinite_count} non-finite activation values before PCA/SVD"
+                )
+                acts_gpu = torch.nan_to_num(acts_gpu, nan=0.0, posinf=0.0, neginf=0.0)
             
             # Centered SVD
             mu = acts_gpu.mean(dim=0)
