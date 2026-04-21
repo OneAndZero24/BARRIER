@@ -46,7 +46,7 @@ unlearn:
   pretrained_model_name_or_path: "black-forest-labs/FLUX.1-dev"
   revision: null
   variant: null
-  mixed_precision: "bf16"
+  mixed_precision: "no"  # full precision / fp32
 
   # Base method: esd | rl | ea | nsfw
   base_method: "nsfw"                       # NSFW (negative prompt) - no RL data loading
