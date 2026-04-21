@@ -19,9 +19,11 @@ Usage:
 """
 
 import argparse
+import hashlib
 import logging
 import os
 import random
+import re
 import sys
 from functools import partial
 from pathlib import Path
@@ -53,6 +55,45 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 log = logging.getLogger(__name__)
+
+
+def compact_target_tag(targets):
+    """Build a short, stable tag for selected target layers."""
+    if not targets:
+        return "tgt_default"
+
+    pattern = re.compile(r"^output_blocks\.(\d+)\.1\.transformer_blocks\.0\.(.+)$")
+    parsed = [pattern.match(target) for target in targets]
+    if all(match is not None for match in parsed):
+        blocks = []
+        layers = []
+        for match in parsed:
+            block_id = match.group(1)
+            layer_name = match.group(2)
+            if block_id not in blocks:
+                blocks.append(block_id)
+            if layer_name not in layers:
+                layers.append(layer_name)
+
+        aliases = []
+        for layer in layers:
+            if layer == "attn2.to_q":
+                aliases.append("q")
+            elif layer == "attn2.to_k":
+                aliases.append("k")
+            elif layer == "attn2.to_v":
+                aliases.append("v")
+            elif layer == "attn2.to_out.0":
+                aliases.append("out0")
+            else:
+                aliases.append(layer.split(".")[-1].replace("to_", ""))
+
+        tag = f"blk{'-'.join(blocks)}_{'-'.join(aliases)}"
+        if len(tag) <= 48:
+            return tag
+
+    digest = hashlib.sha1("|".join(targets).encode("utf-8")).hexdigest()[:10]
+    return f"tgth_{digest}_n{len(targets)}"
 
 # ============================================================================
 # Config Loading
@@ -496,7 +537,7 @@ def intact_unlearn_class(
     model.train()
     
     losses = []
-    targets_str = "_".join(targets)
+    targets_str = compact_target_tag(targets)
     name = f"compvis-intact-{base_method}-class_{class_to_forget}-targets_{targets_str}-lambda_{lambda_interval}-epochs_{epochs}-lr_{lr}"
     
     # Training loop
@@ -655,7 +696,7 @@ def intact_unlearn_nsfw(
     model.train()
     
     losses = []
-    targets_str = "_".join(targets)
+    targets_str = compact_target_tag(targets)
     name = f"compvis-intact-nsfw-targets_{targets_str}-lambda_{lambda_interval}-lr_{lr}"
     
     # Training loop
@@ -808,7 +849,7 @@ def intact_unlearn_esd(
     opt = torch.optim.Adam(trainable_params, lr=lr)
     criteria = torch.nn.MSELoss()
     
-    targets_str = "_".join(targets)
+    targets_str = compact_target_tag(targets)
     name = f"compvis-intact-esd-prompt_{word_print}-targets_{targets_str}-lambda_{lambda_interval}-lr_{lr}"
     
     quick_sample_till_t = lambda x, s, code, t: sample_model(

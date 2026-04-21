@@ -49,6 +49,7 @@ import torch
 import torchvision.transforms as transforms
 import yaml
 from PIL import Image
+import re
 
 from typing import Optional
 import hashlib
@@ -106,31 +107,43 @@ def resolve_intact_targets(ic):
 
 def compact_intact_target_tag(ic):
     """Build a short tag describing the target selection."""
-    target_blocks = ic.get("target_blocks", ic.get("intact_target_blocks"))
-    target_layers = ic.get("target_layers", ic.get("intact_target_layers"))
+    targets = resolve_intact_targets(ic)
+    if not targets:
+        return "tgt_default"
 
-    if target_blocks is not None and target_layers is not None:
-        blocks_str = "-".join(str(block) for block in target_blocks)
+    pattern = re.compile(r"^output_blocks\.(\d+)\.1\.transformer_blocks\.0\.(.+)$")
+    parsed = [pattern.match(target) for target in targets]
+    if all(match is not None for match in parsed):
+        blocks = []
+        layers = []
+        for match in parsed:
+            block_id = match.group(1)
+            layer_name = match.group(2)
+            if block_id not in blocks:
+                blocks.append(block_id)
+            if layer_name not in layers:
+                layers.append(layer_name)
+
         layer_aliases = []
-        for layer in target_layers:
-            if layer.endswith("to_q"):
+        for layer in layers:
+            if layer == "attn2.to_q":
                 layer_aliases.append("q")
-            elif layer.endswith("to_k"):
+            elif layer == "attn2.to_k":
                 layer_aliases.append("k")
-            elif layer.endswith("to_v"):
+            elif layer == "attn2.to_v":
                 layer_aliases.append("v")
-            elif layer.endswith("to_out.0"):
+            elif layer == "attn2.to_out.0":
                 layer_aliases.append("out0")
             else:
                 layer_aliases.append(layer.split(".")[-1].replace("to_", ""))
-        layer_short = "-".join(layer_aliases)
-        return f"blk{blocks_str}_{layer_short}"
 
-    targets = resolve_intact_targets(ic)
-    short = "-".join(target.replace(".", "-") for target in targets[:4])
-    if len(targets) > 4:
-        short += "-more"
-    return f"tgt_{short}"
+        tag = f"blk{'-'.join(blocks)}_{'-'.join(layer_aliases)}"
+        if len(tag) <= 48:
+            return tag
+
+    canonical = "|".join(targets)
+    digest = hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:10]
+    return f"tgth_{digest}_n{len(targets)}"
 
 
 def sanitize_wandb_tags(tags, ic=None):
