@@ -206,6 +206,7 @@ def run_unlearn_class(cfg, device_str):
             infinity_scale=ic.get("infinity_scale", 20.0),
             use_actual_bounds=ic.get("use_actual_bounds", False),
             normalize_protection=ic.get("normalize_protection", True),
+            bounds_dataset_fraction=ic.get("dataset_fraction", 1.0),
             image_size=uc.get("image_size", 512),
             model_save_dir=model_save_dir,
             logs_dir=logs_dir,

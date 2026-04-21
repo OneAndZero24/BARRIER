@@ -22,7 +22,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --partition=dgxh100
-#SBATCH --array=0-95
+#SBATCH --array=0-7
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -32,22 +32,23 @@ cd $HOME/InTAct-Unl/SD
 export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
 # ---- Grid over ONLY (alpha, lambda, lr) ----
-# 120 combos x 1 class = 120 active jobs.
+# 8 combos x 1 class = 8 active jobs.
 # Use a compact selected-block target set, expanded in Python.
 GRID_ALPHAS=(
-    0.20 0.30 0.40 0.50
+    0.60 0.90
 )
 GRID_LAMBDAS=(
-    2.0 3.0 4.5 6.0 8.0 10.0
+    12.0 18.0
 )
 GRID_LRS=(
-    3.0e-6 3.5e-6 4.0e-6 5.0e-6
+    8.0e-6 1.1e-5
 )
-TARGET_BLOCKS="6|8"
-TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v|attn2.to_out.0"
-TARGET_TAG="blk6-8_qkvo"
+TARGET_BLOCKS="4|6|8"
+TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v"
+TARGET_TAG="blk4-6-8_qkv"
 FIXED_EPOCH=3
-FIXED_REDUCED_DIM=96
+FIXED_REDUCED_DIM=64
+BOUNDS_DATASET_FRACTION=0.5
 
 NUM_ALPHAS=${#GRID_ALPHAS[@]}
 NUM_LAMBDAS=${#GRID_LAMBDAS[@]}
@@ -88,7 +89,7 @@ REDUCED_DIM=${FIXED_REDUCED_DIM}
 
 CLASS_NAME=${CLASS_NAMES[$CLASS_SLOT]}
 PARAM_TAG="a${ALPHA}-lam${LAMBDA}-ep${EPOCH}-lr${LR}"
-SWEEP_KIND="chain_saw-alpha-lambda-lr-grid-v1"
+SWEEP_KIND="chain_saw-tiny-agg-grid-v2"
 
 echo "============================================"
 echo "Grid search (${SWEEP_KIND}) – combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS_ID} (${CLASS_NAME})"
@@ -102,7 +103,7 @@ RUN_ID="${SLURM_ARRAY_JOB_ID}_${TASK_ID}"
 TMP_MODEL_DIR="/tmp/sd_grid_models/${RUN_ID}"
 TMP_LOGS_DIR="/tmp/sd_grid_logs/${RUN_ID}"
 
-python - "$CLASS_ID" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$TARGET_BLOCKS" "$TARGET_LAYERS" "$REDUCED_DIM" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" "$RUN_ID" "$TMP_MODEL_DIR" "$TMP_LOGS_DIR" "$TARGET_TAG" <<'PYEOF'
+python - "$CLASS_ID" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$TARGET_BLOCKS" "$TARGET_LAYERS" "$REDUCED_DIM" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" "$RUN_ID" "$TMP_MODEL_DIR" "$TMP_LOGS_DIR" "$TARGET_TAG" "$BOUNDS_DATASET_FRACTION" <<'PYEOF'
 import yaml, sys
 
 cls = int(sys.argv[1])
@@ -121,6 +122,7 @@ run_id = sys.argv[13]
 tmp_model_dir = sys.argv[14]
 tmp_logs_dir = sys.argv[15]
 target_tag = sys.argv[16]
+bounds_dataset_fraction = float(sys.argv[17])
 
 with open("configs/pipeline_class_fulleval.yaml") as f:
     cfg = yaml.safe_load(f)
@@ -143,6 +145,7 @@ cfg["intact"]["targets"] = [
 ]
 cfg["intact"]["reduced_dim"] = reduced_dim
 cfg["intact"]["use_actual_bounds"] = True
+cfg["intact"]["dataset_fraction"] = bounds_dataset_fraction
 
 # Keep model artifacts off shared storage for this grid.
 cfg["paths"]["model_save_dir"] = tmp_model_dir
@@ -159,7 +162,7 @@ cfg["wandb"]["group"] = f"grid-{sweep_kind}-{param_tag}"
 cfg["wandb"]["tags"] = [
     "sd", "class-wise", "intact", "fulleval", "grid-search", sweep_kind,
     f"alpha_{alpha_val}", f"lambda_{lambda_val}", f"epochs_{epochs}", f"lr_{lr}",
-    f"targets_{target_tag}", f"rdim_{reduced_dim}",
+    f"targets_{target_tag}", f"rdim_{reduced_dim}", f"boundsfrac_{bounds_dataset_fraction}",
     cls_name,
 ]
 

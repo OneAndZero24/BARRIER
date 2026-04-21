@@ -55,6 +55,7 @@ intact:
   infinity_scale: 18.0
   use_actual_bounds: true
   normalize_protection: true
+  dataset_fraction: 1.0              # Fraction of forget/remain data used only for bounds setup
 
 evaluate:
   num_samples_per_prompt: 10

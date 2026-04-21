@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from omegaconf import OmegaConf
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 # Add parent directories to path
@@ -94,6 +95,59 @@ def compact_target_tag(targets):
 
     digest = hashlib.sha1("|".join(targets).encode("utf-8")).hexdigest()[:10]
     return f"tgth_{digest}_n{len(targets)}"
+
+
+def make_fractional_dataloader(dataloader, fraction, seed=42):
+    """Return a DataLoader over a deterministic per-class subset of the original dataset."""
+    if fraction is None or fraction >= 1.0:
+        return dataloader
+
+    fraction = max(0.0, float(fraction))
+    dataset = dataloader.dataset
+    total = len(dataset)
+    if total == 0:
+        return dataloader
+
+    n_samples = max(1, int(total * fraction))
+    if n_samples >= total:
+        return dataloader
+
+    labels = []
+    for item in dataset:
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            labels.append(int(item[1]))
+        else:
+            labels = None
+            break
+
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
+    if labels is None:
+        indices = torch.randperm(total, generator=generator)[:n_samples].tolist()
+        subset = Subset(dataset, indices)
+    else:
+        class_to_indices = {}
+        for index, label in enumerate(labels):
+            class_to_indices.setdefault(label, []).append(index)
+
+        selected_indices = []
+        for label in sorted(class_to_indices):
+            class_indices = torch.tensor(class_to_indices[label])
+            class_perm = class_indices[torch.randperm(len(class_indices), generator=generator)]
+            class_count = max(1, int(len(class_indices) * fraction))
+            selected_indices.extend(class_perm[:class_count].tolist())
+
+        subset = Subset(dataset, sorted(selected_indices))
+
+    return DataLoader(
+        subset,
+        batch_size=dataloader.batch_size,
+        shuffle=False,
+        num_workers=dataloader.num_workers,
+        pin_memory=dataloader.pin_memory,
+        drop_last=dataloader.drop_last,
+    )
 
 # ============================================================================
 # Config Loading
@@ -468,6 +522,7 @@ def intact_unlearn_class(
     infinity_scale=20.0,
     use_actual_bounds=False,
     normalize_protection=True,
+    bounds_dataset_fraction=1.0,
     # SD parameters
     image_size=512,
     ddim_steps=50,
@@ -509,10 +564,23 @@ def intact_unlearn_class(
     # Setup data
     remain_dl, descriptions = setup_remain_data(class_to_forget, batch_size, image_size)
     forget_dl, _ = setup_forget_data(class_to_forget, batch_size, image_size)
+
+    # Optionally subsample only for activation-bound estimation to reduce memory/time.
+    forget_bounds_dl = make_fractional_dataloader(forget_dl, bounds_dataset_fraction)
+    remain_bounds_dl = make_fractional_dataloader(remain_dl, bounds_dataset_fraction)
+    if bounds_dataset_fraction is not None and float(bounds_dataset_fraction) < 1.0:
+        log.info(
+            "Bounds dataset fraction %.3f -> forget %d/%d, remain %d/%d samples",
+            float(bounds_dataset_fraction),
+            len(forget_bounds_dl.dataset),
+            len(forget_dl.dataset),
+            len(remain_bounds_dl.dataset),
+            len(remain_dl.dataset),
+        )
     
     # Setup InTAct protection (operates directly on diffusion_model)
     protection = setup_intact_protection(
-        model, forget_dl, remain_dl, descriptions, device,
+        model, forget_bounds_dl, remain_bounds_dl, descriptions, device,
         targets=targets,
         lambda_interval=lambda_interval,
         lower_percentile=lower_percentile,
