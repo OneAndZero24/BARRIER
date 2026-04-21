@@ -35,10 +35,10 @@ export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 # 8 combos x 1 class = 8 active jobs.
 # Use a compact selected-block target set, expanded in Python.
 GRID_ALPHAS=(
-    0.10 0.20
+    0.0 0.10 0.20
 )
 GRID_LAMBDAS=(
-    10.0 12.0
+    10.0 10.0 12.0
 )
 GRID_LRS=(
     5e-5 1e-4
