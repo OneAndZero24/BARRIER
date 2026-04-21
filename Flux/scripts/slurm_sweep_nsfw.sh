@@ -66,6 +66,7 @@ export XDG_CACHE_HOME="$CACHE_ROOT"
 export WANDB_DIR="$CACHE_ROOT/wandb"
 export WANDB_CACHE_DIR="$CACHE_ROOT/wandb"
 export CLIP_CACHE_DIR="$CACHE_ROOT/clip"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 echo "Starting Flux NSFW sweep on $(hostname)"
 echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-none}"

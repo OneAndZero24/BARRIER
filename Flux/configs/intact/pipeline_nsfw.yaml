@@ -66,9 +66,11 @@ unlearn:
   max_sequence_length: 256
 
   # Dataset parameters (used for InTAct boundary computation only)
-  batch_size: 8
+  batch_size: 2
   epochs: 5
   alpha: 0.0                          # not used by RL loss but kept for parity
+  gradient_checkpointing: true
+  gradient_accumulation_steps: 4
 
   # EA-specific (unused here)
   lamb_esd: 1.0

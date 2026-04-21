@@ -927,6 +927,10 @@ def intact_unlearn(args):
         raise ValueError(f"No trainable parameters found for targets {intact_targets}. "
                          f"Check target patterns against transformer module names.")
 
+    if getattr(args, "gradient_checkpointing", True):
+        transformer.enable_gradient_checkpointing()
+        log.info("Enabled transformer gradient checkpointing")
+
     # Keep a consistent floating dtype across the transformer.
     # Casting only target layers to another dtype creates mixed-dtype blocks and
     # can break matmul in attention projections.
@@ -1039,16 +1043,22 @@ def intact_unlearn(args):
 
         epochs = int(getattr(args, "epochs", 1) or 1)
         total_train_steps = epochs * len(forget_train_dl)
+        grad_accum_steps = int(getattr(args, "gradient_accumulation_steps", 1) or 1)
+        grad_accum_steps = max(1, grad_accum_steps)
+        effective_batch_size = batch_sz * grad_accum_steps
         log.info(f"  Starting NSFW training for {epochs} epoch(s), {total_train_steps} step(s)...")
+        log.info(
+            f"  NSFW grad accumulation: {grad_accum_steps} "
+            f"(effective batch size: {effective_batch_size})"
+        )
 
         step_idx = 0
         pbar = tqdm(total=total_train_steps, desc="Training")
+        optimizer.zero_grad(set_to_none=True)
         for _epoch in range(epochs):
             remain_iter = itertools.cycle(remain_train_dl)
             for forget_batch in forget_train_dl:
                 remain_batch = next(remain_iter)
-
-                optimizer.zero_grad()
 
                 alpha_val = getattr(args, "alpha", 0.0)
                 if alpha_val is None:
@@ -1069,8 +1079,12 @@ def intact_unlearn(args):
                 intact_loss = protection.compute_protection_loss(transformer, device)
                 total_loss = base_loss + intact_loss
 
-                total_loss.backward()
-                optimizer.step()
+                (total_loss / grad_accum_steps).backward()
+
+                should_step = (step_idx + 1) % grad_accum_steps == 0 or (step_idx + 1) == total_train_steps
+                if should_step:
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
 
                 losses_history.append(total_loss.item())
                 pbar.set_postfix(
@@ -1254,6 +1268,8 @@ if __name__ == "__main__":
         "intact_n_samples": 50,
         "intact_dataset_fraction": 0.5,
         "remain_prompts": None,
+        "gradient_checkpointing": True,
+        "gradient_accumulation_steps": 1,
     }
     for k, v in defaults.items():
         if not hasattr(args, k):

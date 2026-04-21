@@ -131,6 +131,8 @@ def run_unlearn(cfg, device_str):
     args.learning_rate = uc.get("learning_rate", 1e-5)
     args.max_train_steps = uc.get("max_train_steps", 200)
     args.checkpointing_steps = uc.get("checkpointing_steps", 500)
+    args.gradient_checkpointing = uc.get("gradient_checkpointing", True)
+    args.gradient_accumulation_steps = uc.get("gradient_accumulation_steps", 1)
     args.device = device_str.replace("cuda:", "")
 
     # EA-specific
