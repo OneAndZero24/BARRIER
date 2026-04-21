@@ -953,11 +953,14 @@ def intact_unlearn(args):
        hasattr(args, "not_nsfw_data_path") and args.not_nsfw_data_path:
         from eval.dataset import setup_forget_nsfw_data
         batch_sz = args.batch_size or 8
+        dataset_fraction = getattr(args, "intact_dataset_fraction", 0.5)
+        log.info(f"Using {dataset_fraction*100:.1f}% of NSFW dataset for InTAct bounds calculation")
         forget_dl, remain_dl = setup_forget_nsfw_data(
             batch_sz,
             args.resolution,
             nsfw_data_path=args.nsfw_data_path,
             not_nsfw_data_path=args.not_nsfw_data_path,
+            max_samples_fraction=dataset_fraction,
         )
         forget_data = forget_dl
         if args.intact_use_actual_bounds:
@@ -1249,6 +1252,7 @@ if __name__ == "__main__":
         "intact_use_actual_bounds": True,
         "intact_normalize_protection": True,
         "intact_n_samples": 50,
+        "intact_dataset_fraction": 0.5,
         "remain_prompts": None,
     }
     for k, v in defaults.items():

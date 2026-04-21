@@ -93,6 +93,7 @@ intact:
   use_actual_bounds: true
   normalize_protection: true
   n_samples: 50
+  dataset_fraction: 0.5  # Use 50% of NSFW dataset for bounds calculation to reduce OOM
 
 evaluate:
   num_samples_per_prompt: 1

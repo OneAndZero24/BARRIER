@@ -150,6 +150,7 @@ def run_unlearn(cfg, device_str):
     args.intact_use_actual_bounds = ic.get("use_actual_bounds", True)
     args.intact_normalize_protection = ic.get("normalize_protection", True)
     args.intact_n_samples = ic.get("n_samples", 50)
+    args.intact_dataset_fraction = ic.get("dataset_fraction", 0.5)
     args.remain_prompts = uc.get("remain_prompts", None)
 
     # Optional NSFW dataset (paths used for InTAct boundaries)

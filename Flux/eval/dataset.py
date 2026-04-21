@@ -177,15 +177,29 @@ def setup_remain_data(class_to_forget, batch_size, image_size,
 
 def setup_forget_nsfw_data(batch_size, image_size, interpolation="bicubic",
                           nsfw_data_path="data/nsfw",
-                          not_nsfw_data_path="data/not-nsfw"):
-    """Convenience loader for NSFW / not-NSFW training sets."""
+                          not_nsfw_data_path="data/not-nsfw",
+                          max_samples_fraction=1.0):
+    """
+    Convenience loader for NSFW / not-NSFW training sets.
+    
+    Args:
+        max_samples_fraction: Fraction of dataset to use (0.0-1.0). Use 0.5 for half dataset.
+    """
+    from torch.utils.data import Subset
+    
     interp = INTERPOLATIONS[interpolation]
     transform = get_transform(interp, image_size)
 
     forget_set = NSFW(data_path=nsfw_data_path, transform=transform)
+    if max_samples_fraction < 1.0:
+        max_samples = max(1, int(len(forget_set) * max_samples_fraction))
+        forget_set = Subset(forget_set, list(range(max_samples)))
     forget_dl = DataLoader(forget_set, batch_size=batch_size)
 
     remain_set = NOT_NSFW(data_path=not_nsfw_data_path, transform=transform)
+    if max_samples_fraction < 1.0:
+        max_samples = max(1, int(len(remain_set) * max_samples_fraction))
+        remain_set = Subset(remain_set, list(range(max_samples)))
     remain_dl = DataLoader(remain_set, batch_size=batch_size)
 
     return forget_dl, remain_dl
