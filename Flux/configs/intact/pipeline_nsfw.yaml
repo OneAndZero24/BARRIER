@@ -81,7 +81,7 @@ unlearn:
 
 intact:
   # Fewer late blocks + lower-width FF inputs to reduce InTAct activation memory.
-  target_blocks: [17, 18]
+  target_blocks: [18]
   target_layers:
     - "ff.net.0.proj"
     - "ff_context.net.0.proj"
