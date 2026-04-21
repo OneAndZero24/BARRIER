@@ -44,7 +44,7 @@ GRID_LRS=(
     8.0e-6 1.1e-5
 )
 TARGET_BLOCKS="4|6|8"
-TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v"
+TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v|attn2.to_out.0"
 TARGET_TAG="blk4-6-8_qkv"
 FIXED_EPOCH=3
 FIXED_REDUCED_DIM=64
