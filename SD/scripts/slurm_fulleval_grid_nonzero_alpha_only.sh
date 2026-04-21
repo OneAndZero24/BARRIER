@@ -22,7 +22,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --partition=dgxh100
-#SBATCH --array=0-119
+#SBATCH --array=0-95
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -35,7 +35,7 @@ export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 # 120 combos x 1 class = 120 active jobs.
 # Use a compact selected-block target set, expanded in Python.
 GRID_ALPHAS=(
-    0.20 0.30 0.40 0.50 0.60
+    0.20 0.30 0.40 0.50
 )
 GRID_LAMBDAS=(
     2.0 3.0 4.5 6.0 8.0 10.0
