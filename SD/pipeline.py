@@ -51,6 +51,7 @@ import yaml
 from PIL import Image
 
 from typing import Optional
+import hashlib
 
 # Ensure project root and SD dirs are on path
 sys.path.insert(0, str(Path(__file__).parent.parent))  # InTAct
@@ -85,6 +86,75 @@ def merge_wandb_config(cfg):
     return cfg
 
 
+def resolve_intact_targets(ic):
+    """Return the explicit SD target list, expanding compact block/layer config when present."""
+    target_blocks = ic.get("target_blocks", ic.get("intact_target_blocks"))
+    target_layers = ic.get("target_layers", ic.get("intact_target_layers"))
+
+    if target_blocks is not None and target_layers is not None:
+        return [
+            f"output_blocks.{block}.1.transformer_blocks.0.{layer}"
+            for block in target_blocks
+            for layer in target_layers
+        ]
+
+    targets = ic.get("targets", ["to_q", "to_k", "to_v"])
+    if isinstance(targets, str):
+        targets = [target.strip() for target in targets.split(",") if target.strip()]
+    return targets
+
+
+def compact_intact_target_tag(ic):
+    """Build a short tag describing the target selection."""
+    target_blocks = ic.get("target_blocks", ic.get("intact_target_blocks"))
+    target_layers = ic.get("target_layers", ic.get("intact_target_layers"))
+
+    if target_blocks is not None and target_layers is not None:
+        blocks_str = "-".join(str(block) for block in target_blocks)
+        layer_aliases = []
+        for layer in target_layers:
+            if layer.endswith("to_q"):
+                layer_aliases.append("q")
+            elif layer.endswith("to_k"):
+                layer_aliases.append("k")
+            elif layer.endswith("to_v"):
+                layer_aliases.append("v")
+            elif layer.endswith("to_out.0"):
+                layer_aliases.append("out0")
+            else:
+                layer_aliases.append(layer.split(".")[-1].replace("to_", ""))
+        layer_short = "-".join(layer_aliases)
+        return f"blk{blocks_str}_{layer_short}"
+
+    targets = resolve_intact_targets(ic)
+    short = "-".join(target.replace(".", "-") for target in targets[:4])
+    if len(targets) > 4:
+        short += "-more"
+    return f"tgt_{short}"
+
+
+def sanitize_wandb_tags(tags, ic=None):
+    """Keep W&B tags within the 64-character limit while preserving meaning."""
+    sanitized = []
+    for tag in tags or []:
+        if not isinstance(tag, str):
+            sanitized.append(tag)
+            continue
+        if len(tag) <= 64:
+            sanitized.append(tag)
+            continue
+
+        if ic is not None and tag.startswith("targets_"):
+            sanitized.append(f"targets_{compact_intact_target_tag(ic)}")
+            continue
+
+        digest = hashlib.sha1(tag.encode("utf-8")).hexdigest()[:8]
+        prefix = tag[:55].rstrip("-_.")
+        sanitized.append(f"{prefix}-{digest}")
+
+    return sanitized
+
+
 # =============================================================================
 # Step 1: Unlearning
 # =============================================================================
@@ -115,7 +185,7 @@ def run_unlearn_class(cfg, device_str):
             ckpt_path=cfg["paths"]["sd_ckpt"],
             diffusers_config_path=cfg["paths"]["diffusers_config"],
             device=device_str,
-            targets=ic.get("targets", ["to_q", "to_k", "to_v"]),
+            targets=resolve_intact_targets(ic),
             lambda_interval=ic.get("lambda_interval", 1.0),
             lower_percentile=ic.get("lower_percentile", 0.05),
             upper_percentile=ic.get("upper_percentile", 0.95),
@@ -191,7 +261,7 @@ def run_unlearn_nsfw(cfg, device_str):
             ckpt_path=cfg["paths"]["sd_ckpt"],
             diffusers_config_path=cfg["paths"]["diffusers_config"],
             device=device_str,
-            targets=ic.get("targets", ["to_q", "to_k", "to_v"]),
+            targets=resolve_intact_targets(ic),
             lambda_interval=ic.get("lambda_interval", 1.0),
             lower_percentile=ic.get("lower_percentile", 0.05),
             upper_percentile=ic.get("upper_percentile", 0.95),
@@ -233,7 +303,7 @@ def get_model_name(cfg):
 
     if uc["method"] == "intact":
         base = ic.get("base_method", "ga")
-        targets_str = "_".join(ic.get("targets", ["to_q", "to_k", "to_v"]))
+        targets_str = compact_intact_target_tag(ic)
         lam = ic.get("lambda_interval", 1.0)
         lr = uc.get("lr", 1e-5)
         epochs = uc.get("epochs", 5)
@@ -1185,11 +1255,12 @@ def main():
     # --- wandb ---
     use_wandb = not cli.no_wandb and cfg.get("wandb", {}).get("project")
     if use_wandb:
+        wandb_tags = sanitize_wandb_tags(cfg["wandb"].get("tags", []), cfg.get("intact", {}))
         wandb.init(
             project=cfg["wandb"]["project"],
             entity=cfg["wandb"].get("entity"),
             group=cfg["wandb"].get("group"),
-            tags=cfg["wandb"].get("tags", []),
+            tags=wandb_tags,
             config=cfg,
         )
         cfg = merge_wandb_config(cfg)

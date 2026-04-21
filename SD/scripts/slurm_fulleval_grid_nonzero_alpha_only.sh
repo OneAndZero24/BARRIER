@@ -32,7 +32,7 @@ export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
 # ---- Curated NON-ZERO-alpha compositions ----
 # 6 combos x 10 classes = 60 active jobs.
-# Targets are passed as '|' delimited strings and expanded in Python.
+# Use a compact selected-block target set, expanded in Python.
 TUNED_ALPHAS=(
     0.12 0.18 0.22 0.25 0.18 0.30
 )
@@ -45,14 +45,9 @@ TUNED_EPOCHS=(
 TUNED_LRS=(
     5e-6 4e-6 4e-6 3.5e-6 3.5e-6 3e-6
 )
-TUNED_TARGETS=(
-    "attn2.to_q|attn2.to_k|attn2.to_v"
-    "attn2.to_q|attn2.to_k|attn2.to_v|attn2.to_out.0"
-    "output_blocks.6.1.transformer_blocks.0.attn2.to_q|output_blocks.6.1.transformer_blocks.0.attn2.to_k|output_blocks.6.1.transformer_blocks.0.attn2.to_v|output_blocks.8.1.transformer_blocks.0.attn2.to_q|output_blocks.8.1.transformer_blocks.0.attn2.to_k|output_blocks.8.1.transformer_blocks.0.attn2.to_v"
-    "output_blocks.6.1.transformer_blocks.0.attn2.to_q|output_blocks.6.1.transformer_blocks.0.attn2.to_k|output_blocks.6.1.transformer_blocks.0.attn2.to_v|output_blocks.8.1.transformer_blocks.0.attn2.to_q|output_blocks.8.1.transformer_blocks.0.attn2.to_k|output_blocks.8.1.transformer_blocks.0.attn2.to_v|middle_block.1.transformer_blocks.0.attn2.to_q|middle_block.1.transformer_blocks.0.attn2.to_k|middle_block.1.transformer_blocks.0.attn2.to_v"
-    "attn2.to_q|attn2.to_k|attn2.to_v|output_blocks.6.1.transformer_blocks.0.attn2.to_q|output_blocks.6.1.transformer_blocks.0.attn2.to_k|output_blocks.6.1.transformer_blocks.0.attn2.to_v|output_blocks.8.1.transformer_blocks.0.attn2.to_q|output_blocks.8.1.transformer_blocks.0.attn2.to_k|output_blocks.8.1.transformer_blocks.0.attn2.to_v"
-    "attn2.to_q|attn2.to_k|attn2.to_v|attn2.to_out.0|middle_block.1.transformer_blocks.0.attn2.to_q|middle_block.1.transformer_blocks.0.attn2.to_k|middle_block.1.transformer_blocks.0.attn2.to_v"
-)
+TARGET_BLOCKS="6|8"
+TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v|attn2.to_out.0"
+TARGET_TAG="blk6-8_qkvo"
 TUNED_REDUCED_DIM=(
     64 64 96 96 80 96
 )
@@ -98,7 +93,6 @@ ALPHA=${TUNED_ALPHAS[$COMBO_IDX]}
 LAMBDA=${TUNED_LAMBDAS[$COMBO_IDX]}
 EPOCH=${TUNED_EPOCHS[$COMBO_IDX]}
 LR=${TUNED_LRS[$COMBO_IDX]}
-TARGETS_STR=${TUNED_TARGETS[$COMBO_IDX]}
 REDUCED_DIM=${TUNED_REDUCED_DIM[$COMBO_IDX]}
 LOWER_PCT=${TUNED_LOWER_PCT[$COMBO_IDX]}
 UPPER_PCT=${TUNED_UPPER_PCT[$COMBO_IDX]}
@@ -120,7 +114,7 @@ RUN_ID="${SLURM_ARRAY_JOB_ID}_${TASK_ID}"
 TMP_MODEL_DIR="/tmp/sd_grid_models/${RUN_ID}"
 TMP_LOGS_DIR="/tmp/sd_grid_logs/${RUN_ID}"
 
-python - "$CLASS_ID" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$TARGETS_STR" "$REDUCED_DIM" "$LOWER_PCT" "$UPPER_PCT" "$INF_SCALE" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" "$RUN_ID" "$TMP_MODEL_DIR" "$TMP_LOGS_DIR" <<'PYEOF'
+python - "$CLASS_ID" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$TARGET_BLOCKS" "$TARGET_LAYERS" "$REDUCED_DIM" "$LOWER_PCT" "$UPPER_PCT" "$INF_SCALE" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" "$RUN_ID" "$TMP_MODEL_DIR" "$TMP_LOGS_DIR" "$TARGET_TAG" <<'PYEOF'
 import yaml, sys
 
 cls = int(sys.argv[1])
@@ -128,18 +122,20 @@ alpha_val = float(sys.argv[2])
 lambda_val = float(sys.argv[3])
 epochs = int(sys.argv[4])
 lr = float(sys.argv[5])
-targets = [s for s in sys.argv[6].split("|") if s]
-reduced_dim = int(sys.argv[7])
-lower_pct = float(sys.argv[8])
-upper_pct = float(sys.argv[9])
-infinity_scale = float(sys.argv[10])
-param_tag = sys.argv[11]
-cls_name = sys.argv[12]
-sweep_kind = sys.argv[13]
-out = sys.argv[14]
-run_id = sys.argv[15]
-tmp_model_dir = sys.argv[16]
-tmp_logs_dir = sys.argv[17]
+target_blocks = [int(s) for s in sys.argv[6].split("|") if s]
+target_layers = [s for s in sys.argv[7].split("|") if s]
+reduced_dim = int(sys.argv[8])
+lower_pct = float(sys.argv[9])
+upper_pct = float(sys.argv[10])
+infinity_scale = float(sys.argv[11])
+param_tag = sys.argv[12]
+cls_name = sys.argv[13]
+sweep_kind = sys.argv[14]
+out = sys.argv[15]
+run_id = sys.argv[16]
+tmp_model_dir = sys.argv[17]
+tmp_logs_dir = sys.argv[18]
+target_tag = sys.argv[19]
 
 with open("configs/pipeline_class_fulleval.yaml") as f:
     cfg = yaml.safe_load(f)
@@ -153,7 +149,13 @@ cfg["unlearn"]["save_compvis"] = True
 cfg["unlearn"]["save_diffusers"] = True
 cfg["unlearn"]["save_history_logs"] = False
 cfg["intact"]["lambda_interval"] = lambda_val
-cfg["intact"]["targets"] = targets
+cfg["intact"]["target_blocks"] = target_blocks
+cfg["intact"]["target_layers"] = target_layers
+cfg["intact"]["targets"] = [
+    f"output_blocks.{block}.1.transformer_blocks.0.{layer}"
+    for block in target_blocks
+    for layer in target_layers
+]
 cfg["intact"]["reduced_dim"] = reduced_dim
 cfg["intact"]["lower_percentile"] = lower_pct
 cfg["intact"]["upper_percentile"] = upper_pct
@@ -174,7 +176,7 @@ cfg["wandb"]["group"] = f"grid-{sweep_kind}-{param_tag}"
 cfg["wandb"]["tags"] = [
     "sd", "class-wise", "intact", "fulleval", "grid-search", sweep_kind,
     f"alpha_{alpha_val}", f"lambda_{lambda_val}", f"epochs_{epochs}", f"lr_{lr}",
-    f"targets_{'-'.join(targets)}", f"rdim_{reduced_dim}",
+    f"targets_{target_tag}", f"rdim_{reduced_dim}",
     f"pct_{lower_pct}_{upper_pct}", f"inf_{infinity_scale}",
     cls_name,
 ]
