@@ -927,7 +927,14 @@ def intact_unlearn(args):
         raise ValueError(f"No trainable parameters found for targets {intact_targets}. "
                          f"Check target patterns against transformer module names.")
 
-    if getattr(args, "gradient_checkpointing", True):
+    use_gradient_checkpointing = bool(getattr(args, "gradient_checkpointing", False))
+    if base_method == "nsfw" and use_gradient_checkpointing:
+        # Local Flux transformer block returns extra values; checkpoint path expects 2-tuple.
+        # Keep NSFW training on pure grad accumulation to avoid unpack/runtime mismatch.
+        log.warning("Disabling gradient checkpointing for base_method='nsfw'; using gradient accumulation only.")
+        use_gradient_checkpointing = False
+
+    if use_gradient_checkpointing:
         transformer.enable_gradient_checkpointing()
         log.info("Enabled transformer gradient checkpointing")
 
@@ -1268,7 +1275,7 @@ if __name__ == "__main__":
         "intact_n_samples": 50,
         "intact_dataset_fraction": 0.5,
         "remain_prompts": None,
-        "gradient_checkpointing": True,
+        "gradient_checkpointing": False,
         "gradient_accumulation_steps": 1,
     }
     for k, v in defaults.items():

@@ -69,7 +69,7 @@ unlearn:
   batch_size: 2
   epochs: 5
   alpha: 0.0                          # not used by RL loss but kept for parity
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   gradient_accumulation_steps: 4
 
   # EA-specific (unused here)

@@ -34,6 +34,8 @@ parameters:
     values: [1000]
   unlearn.epochs:
     values: [5]
+  unlearn.alpha:
+    values: [0.0]
   intact.lambda_interval:
     values: [0.25, 0.5]
   unlearn.base_method:
