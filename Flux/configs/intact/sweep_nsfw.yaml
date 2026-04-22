@@ -34,6 +34,10 @@ parameters:
     values: [1000]
   unlearn.epochs:
     values: [5]
+  unlearn.batch_size:
+    values: [1]
+  unlearn.gradient_accumulation_steps:
+    values: [8]
   unlearn.alpha:
     values: [0.0]
   intact.lambda_interval:

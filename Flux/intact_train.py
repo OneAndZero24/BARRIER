@@ -578,24 +578,30 @@ def compute_nsfw_loss(transformer, noise_scheduler, compute_text_embeddings,
     """
     transformer_dtype = next(transformer.parameters()).dtype
 
+    alpha_value = float(alpha)
+    use_remain = alpha_value != 0.0
+
     forget_pixels = forget_batch["pixel_values"].to(device=device)
-    remain_pixels = remain_batch["pixel_values"].to(device=device)
+    remain_pixels = remain_batch["pixel_values"].to(device=device) if use_remain else None
 
     forget_latents = _encode_images_to_latents(vae, forget_pixels, transformer_dtype)
-    remain_latents = _encode_images_to_latents(vae, remain_pixels, transformer_dtype)
+    remain_latents = _encode_images_to_latents(vae, remain_pixels, transformer_dtype) if use_remain else None
 
     b_forget = forget_latents.shape[0]
-    b_remain = remain_latents.shape[0]
+    b_remain = remain_latents.shape[0] if use_remain else 0
 
     forget_noise = torch.randn_like(forget_latents)
-    remain_noise = torch.randn_like(remain_latents)
+    remain_noise = torch.randn_like(remain_latents) if use_remain else None
 
     t_forget = torch.randint(0, 1000, (b_forget,), device=device)
-    t_remain = torch.randint(0, 1000, (b_remain,), device=device)
+    t_remain = torch.randint(0, 1000, (b_remain,), device=device) if use_remain else None
 
     emb_nude, pooled_nude, tid_nude = compute_text_embeddings([prompt] * b_forget)
     emb_wear_f, pooled_wear_f, tid_wear_f = compute_text_embeddings([neg_prompt] * b_forget)
-    emb_wear_r, pooled_wear_r, tid_wear_r = compute_text_embeddings([neg_prompt] * b_remain)
+    if use_remain:
+        emb_wear_r, pooled_wear_r, tid_wear_r = compute_text_embeddings([neg_prompt] * b_remain)
+    else:
+        emb_wear_r = pooled_wear_r = tid_wear_r = None
 
     pred_forget_nude = _predict_noise_from_latents(
         transformer, noise_scheduler,
@@ -614,19 +620,24 @@ def compute_nsfw_loss(transformer, noise_scheduler, compute_text_embeddings,
             image_size=image_size,
         )
 
-    pred_remain_wear = _predict_noise_from_latents(
-        transformer, noise_scheduler,
-        remain_latents, remain_noise, t_remain,
-        emb_wear_r, pooled_wear_r, tid_wear_r,
-        guidance_scale=3.0,
-        image_size=image_size,
-    )
+    if use_remain:
+        pred_remain_wear = _predict_noise_from_latents(
+            transformer, noise_scheduler,
+            remain_latents, remain_noise, t_remain,
+            emb_wear_r, pooled_wear_r, tid_wear_r,
+            guidance_scale=3.0,
+            image_size=image_size,
+        )
+        remain_loss = criteria(pred_remain_wear.to(device), remain_noise.to(device))
+        remain_loss_value = remain_loss.item()
+    else:
+        remain_loss = pred_forget_nude.new_zeros(())
+        remain_loss_value = 0.0
 
     forget_loss = criteria(pred_forget_nude.to(device), pred_forget_wear.to(device))
-    remain_loss = criteria(pred_remain_wear.to(device), remain_noise.to(device))
-    total_loss = forget_loss + float(alpha) * remain_loss
+    total_loss = forget_loss + alpha_value * remain_loss
 
-    return total_loss, forget_loss.item(), remain_loss.item()
+    return total_loss, forget_loss.item(), remain_loss_value
 
 
 # ============================================================================
