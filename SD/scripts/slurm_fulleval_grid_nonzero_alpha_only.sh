@@ -1,14 +1,15 @@
 #!/bin/bash
 # ============================================================================
 # SLURM Array Job – Full eval grid search for one Imagenette class
-# chain_saw only + compact selected output blocks
+# chain_saw only + QKV on all output blocks
 # ============================================================================
 #   Each array task runs one (hyperparam combo, class) pair.
 #
 #   Design goals:
-#   - Sweep only (alpha, lambda, lr).
-#   - Use larger alphas for stronger forgetting pressure search.
-#   - Keep epochs/reduced_dim fixed across all jobs.
+#   - Sweep alpha, lambda, lr, reduced_dim.
+#   - Keep alpha to two small values.
+#   - Use all output blocks with QKV targets only.
+#   - Keep epochs fixed across all jobs.
 #   - Use defaults for percentile/infinity settings from config.
 #
 # Usage:
@@ -22,7 +23,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --partition=dgxh100
-#SBATCH --array=0-7
+#SBATCH --array=0-23
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -31,29 +32,33 @@ export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
 cd $HOME/InTAct-Unl/SD
 export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
 
-# ---- Grid over ONLY (alpha, lambda, lr) ----
-# 8 combos x 1 class = 8 active jobs.
-# Use a compact selected-block target set, expanded in Python.
+# ---- Grid over alpha, lambda, lr, reduced_dim ----
+# 24 combos x 1 class = 24 active jobs.
+# Objective: maximize UA while keeping FID below 10.
+# Prior runs suggest this is most likely in low-lambda / low-lr regimes.
 GRID_ALPHAS=(
-    0.0 0.10 0.20
+    0.0 0.7
 )
 GRID_LAMBDAS=(
-    10.0 10.0 12.0
+    8.0 10.0 12.0
 )
 GRID_LRS=(
-    5e-5 1e-4
+    5e-6 1e-5
 )
-TARGET_BLOCKS="4|6|8"
-TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v|attn2.to_out.0"
-TARGET_TAG="blk4-6-8_qkv"
+GRID_REDUCED_DIMS=(
+    32 64 96
+)
+TARGET_BLOCKS="0|1|2|3|4|5|6|7|8|9|10|11"
+TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v"
+TARGET_TAG="blk0-11_qkv"
 FIXED_EPOCH=3
-FIXED_REDUCED_DIM=64
 BOUNDS_DATASET_FRACTION=0.5
 
 NUM_ALPHAS=${#GRID_ALPHAS[@]}
 NUM_LAMBDAS=${#GRID_LAMBDAS[@]}
 NUM_LRS=${#GRID_LRS[@]}
-NUM_TUNED_COMBOS=$(( NUM_ALPHAS * NUM_LAMBDAS * NUM_LRS ))
+NUM_REDUCED_DIMS=${#GRID_REDUCED_DIMS[@]}
+NUM_TUNED_COMBOS=$(( NUM_ALPHAS * NUM_LAMBDAS * NUM_LRS * NUM_REDUCED_DIMS ))
 
 # Single-class search first: chain_saw (Imagenette class id 3).
 CLASS_IDS=(3)
@@ -75,21 +80,23 @@ COMBO_IDX=$(( TASK_ID / NUM_CLASSES ))
 CLASS_SLOT=$(( TASK_ID % NUM_CLASSES ))
 CLASS_ID=${CLASS_IDS[$CLASS_SLOT]}
 
-# Decode COMBO_IDX into Cartesian product indices for (alpha, lambda, lr)
-LR_IDX=$(( COMBO_IDX % NUM_LRS ))
-TMP_IDX=$(( COMBO_IDX / NUM_LRS ))
+# Decode COMBO_IDX into Cartesian product indices for (alpha, lambda, lr, reduced_dim)
+RDM_IDX=$(( COMBO_IDX % NUM_REDUCED_DIMS ))
+TMP_IDX=$(( COMBO_IDX / NUM_REDUCED_DIMS ))
+LR_IDX=$(( TMP_IDX % NUM_LRS ))
+TMP_IDX=$(( TMP_IDX / NUM_LRS ))
 LAMBDA_IDX=$(( TMP_IDX % NUM_LAMBDAS ))
 ALPHA_IDX=$(( TMP_IDX / NUM_LAMBDAS ))
 
 ALPHA=${GRID_ALPHAS[$ALPHA_IDX]}
 LAMBDA=${GRID_LAMBDAS[$LAMBDA_IDX]}
 LR=${GRID_LRS[$LR_IDX]}
+REDUCED_DIM=${GRID_REDUCED_DIMS[$RDM_IDX]}
 EPOCH=${FIXED_EPOCH}
-REDUCED_DIM=${FIXED_REDUCED_DIM}
 
 CLASS_NAME=${CLASS_NAMES[$CLASS_SLOT]}
-PARAM_TAG="a${ALPHA}-lam${LAMBDA}-ep${EPOCH}-lr${LR}"
-SWEEP_KIND="chain_saw-tiny-agg-grid-v2"
+PARAM_TAG="a${ALPHA}-lam${LAMBDA}-rdim${REDUCED_DIM}-ep${EPOCH}-lr${LR}"
+SWEEP_KIND="chain_saw-allblocks-qkv-uafid-grid-v4"
 
 echo "============================================"
 echo "Grid search (${SWEEP_KIND}) – combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS_ID} (${CLASS_NAME})"
