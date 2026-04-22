@@ -46,7 +46,7 @@ GRID_LRS=(
     5e-6 1e-5
 )
 GRID_REDUCED_DIMS=(
-    32 64 96
+    96
 )
 TARGET_BLOCKS="0|1|2|3|4|5|6|7|8|9|10|11"
 TARGET_LAYERS="attn2.to_q|attn2.to_k|attn2.to_v"

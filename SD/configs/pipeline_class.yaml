@@ -67,5 +67,5 @@ evaluate:
 
   fid:
     enabled: true
-    max_real: 100                  # null = use all; set e.g. 500 for fast pipeline eval
-    max_fake: 100                 # null = use all; set e.g. 500 for fast pipeline eval
+    max_real: null                  # null = use all; set e.g. 500 for fast pipeline eval
+    max_fake: null                 # null = use all; set e.g. 500 for fast pipeline eval
