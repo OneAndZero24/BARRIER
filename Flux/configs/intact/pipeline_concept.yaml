@@ -19,9 +19,9 @@ pipeline:
 
 paths:
   prompts: "../SD/prompts/unsafe-prompts4703.csv"                            # I2P 4703 evaluation prompts (shared with SD)
-  output_dir: "/net/tscratch/people/plgphelm/unl/Flux/evaluation"                # where generated images / probes are saved
-  model_save_dir: "/net/tscratch/people/plgphelm/unl/Flux/models"                # where safetensors checkpoints go
-  logs_dir: "/net/tscratch/people/plgphelm/unl/Flux/logs"                        # where training logs/losses are saved
+  output_dir: "$SCRATCH/evals"                                             # where generated images / probes are saved
+  model_save_dir: "$SCRATCH/models"                                        # where safetensors checkpoints go
+  logs_dir: "$SCRATCH/logs"                                                # where training logs/losses are saved
   reference_data: null                                                       # (optional) real reference images for FID
   # optional NSFW dataset paths (if you want to use a real dataset instead of
   # synthetic prompts for InTAct activation bounds):

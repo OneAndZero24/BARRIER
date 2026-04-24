@@ -108,19 +108,50 @@ class Fake_Imagenette(Dataset):
 
 
 class NSFW(Dataset):
-    """Simple wrapper around a HuggingFace image dataset for NSFW images."""
+    """Wrapper for NSFW image dataset (local filesystem or HuggingFace)."""
 
     def __init__(self, data_path="data/nsfw", transform=None):
-        from datasets import load_dataset
-        self.dataset = load_dataset(data_path)["train"]
+        import os
+        self.data_path = data_path
         self.transform = transform
+        self.dataset = None
+        self.is_local = False
+        self.local_files = []
+
+        # Check if it's a local directory with PNG files
+        if os.path.isdir(data_path):
+            png_files = sorted([
+                f for f in os.listdir(data_path)
+                if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+            ])
+            if png_files:
+                self.is_local = True
+                self.local_files = [os.path.join(data_path, f) for f in png_files]
+        
+        # Fall back to HuggingFace dataset
+        if not self.is_local:
+            try:
+                from datasets import load_dataset
+                self.dataset = load_dataset(data_path)["train"]
+            except Exception as e:
+                raise ValueError(
+                    f"NSFW data not found at {data_path} (local or HF). "
+                    f"Generate with: python eval/generate_images.py --prompts_path prompts/nsfw_reference.csv --save_path {data_path}"
+                )
 
     def __len__(self):
+        if self.is_local:
+            return len(self.local_files)
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        example = self.dataset[idx]
-        image = example.get("image", example)
+        if self.is_local:
+            from PIL import Image
+            image = Image.open(self.local_files[idx]).convert("RGB")
+        else:
+            example = self.dataset[idx]
+            image = example.get("image", example)
+        
         if self.transform:
             image = self.transform(image)
         # Return dict format compatible with flux_forward_fn
@@ -128,19 +159,50 @@ class NSFW(Dataset):
 
 
 class NOT_NSFW(Dataset):
-    """Wrapper for the complementary not-NSFW dataset."""
+    """Wrapper for the complementary not-NSFW dataset (local or HuggingFace)."""
 
     def __init__(self, data_path="data/not-nsfw", transform=None):
-        from datasets import load_dataset
-        self.dataset = load_dataset(data_path)["train"]
+        import os
+        self.data_path = data_path
         self.transform = transform
+        self.dataset = None
+        self.is_local = False
+        self.local_files = []
+
+        # Check if it's a local directory with PNG files
+        if os.path.isdir(data_path):
+            png_files = sorted([
+                f for f in os.listdir(data_path)
+                if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+            ])
+            if png_files:
+                self.is_local = True
+                self.local_files = [os.path.join(data_path, f) for f in png_files]
+        
+        # Fall back to HuggingFace dataset
+        if not self.is_local:
+            try:
+                from datasets import load_dataset
+                self.dataset = load_dataset(data_path)["train"]
+            except Exception as e:
+                raise ValueError(
+                    f"NOT-NSFW data not found at {data_path} (local or HF). "
+                    f"Generate with: python eval/generate_images.py --prompts_path prompts/not_nsfw_reference.csv --save_path {data_path}"
+                )
 
     def __len__(self):
+        if self.is_local:
+            return len(self.local_files)
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        example = self.dataset[idx]
-        image = example.get("image", example)
+        if self.is_local:
+            from PIL import Image
+            image = Image.open(self.local_files[idx]).convert("RGB")
+        else:
+            example = self.dataset[idx]
+            image = example.get("image", example)
+        
         if self.transform:
             image = self.transform(image)
         # Return dict format compatible with flux_forward_fn

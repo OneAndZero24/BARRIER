@@ -24,6 +24,7 @@ import setup_cache  # noqa: E402  — must precede torch / HF imports
 
 import argparse
 import csv
+import hashlib
 import logging
 import os
 import pathlib
@@ -75,28 +76,35 @@ def merge_wandb_config(cfg):
 
 
 def get_model_name(cfg):
-    """Derive deterministic model name from config parameters."""
+    """Derive deterministic short model name while avoiding collisions across runs."""
     uc = cfg.get("unlearn", {})
     ic = cfg.get("intact", {})
-    method = uc.get("method", "intact")
     base = uc.get("base_method", "esd")
     concept = uc.get("key_word", uc.get("concept", "concept"))
     blocks = ic.get("target_blocks", [12, 14, 16, 18])
     layers = ic.get("target_layers", ["attn.add_q_proj", "attn.add_k_proj", "attn.add_v_proj"])
-    blocks_str = "-".join(str(b) for b in blocks)
-    layers_str = "_".join([l.split(".")[-1] for l in layers])
-    targets_str = f"blk{blocks_str}_{layers_str}"
     lam = ic.get("lambda_interval", 1.0)
-    steps = uc.get("max_train_steps", 200)
     lr = uc.get("learning_rate", 1e-5)
+    steps = uc.get("max_train_steps", 200)
+    epochs = uc.get("epochs", 1)
+
+    # Short, deterministic signature for target blocks/layers to avoid long paths.
+    targets_key = f"{','.join(map(str, blocks))}|{','.join(layers)}"
+    targets_sig = hashlib.sha1(targets_key.encode("utf-8")).hexdigest()[:6]
+
+    lam_str = f"{float(lam):g}"
+    lr_str = f"{float(lr):.1e}".replace("+", "")
 
     setting = cfg.get("pipeline", {}).get("setting", "flux_concept")
     if setting == "flux_class":
         cls = uc.get("class_to_forget", 0)
-        return f"flux-intact-{base}-class_{cls}-targets_{targets_str}-lambda_{lam}-steps_{steps}-lr_{lr}"
+        return f"{base}-c{cls}-l{lam_str}-lr{lr_str}-s{steps}-t{targets_sig}"
     else:
-        concept_clean = concept.replace(" ", "_")
-        return f"flux-intact-{base}-{concept_clean}-targets_{targets_str}-lambda_{lam}-steps_{steps}-lr_{lr}"
+        concept_clean = concept.replace(" ", "_")[:24]
+        # NSFW training is epoch-driven; other modes are step-driven.
+        if base == "nsfw":
+            return f"{base}-{concept_clean}-l{lam_str}-lr{lr_str}-e{epochs}-t{targets_sig}"
+        return f"{base}-{concept_clean}-l{lam_str}-lr{lr_str}-s{steps}-t{targets_sig}"
 
 
 # =============================================================================
