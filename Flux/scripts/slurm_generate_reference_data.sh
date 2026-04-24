@@ -47,6 +47,27 @@ fi
 if [ -z "${HF_TOKEN:-}" ] && [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
     export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
 fi
+if [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ] && [ -z "${HF_TOKEN:-}" ]; then
+    echo "ERROR: no Hugging Face token found; expected $HF_TOKEN_FILE or HF_TOKEN/HUGGINGFACE_HUB_TOKEN"
+    exit 1
+fi
+
+# caches (same policy as NSFW sweep script)
+if [ -n "${SCRATCH:-}" ]; then
+    CACHE_BASE="$SCRATCH/.cache"
+elif [ -w "/shared/results/common/miksa/intact/SD" ] || [ -w "/shared/results/common/miksa/intact/SD/.cache" ]; then
+    CACHE_BASE="/shared/results/common/miksa/intact/SD/.cache"
+else
+    CACHE_BASE="$HOME/.cache/intact"
+fi
+export CACHE_ROOT="$CACHE_BASE"
+export HF_HOME="$CACHE_ROOT/huggingface"
+export TORCH_HOME="$CACHE_ROOT/torch"
+export XDG_CACHE_HOME="$CACHE_ROOT"
+export WANDB_DIR="$CACHE_ROOT/wandb"
+export WANDB_CACHE_DIR="$CACHE_ROOT/wandb"
+export CLIP_CACHE_DIR="$CACHE_ROOT/clip"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 echo "Starting Flux reference data generation..."
 
