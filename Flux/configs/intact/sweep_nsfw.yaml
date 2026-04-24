@@ -29,7 +29,7 @@ command:
 
 parameters:
   unlearn.learning_rate:
-    values: [2.0e-6, 5.0e-6]
+    values: [5.0e-6, 5.0e-5, 5.0e-4]
   unlearn.max_train_steps:
     values: [1000]
   unlearn.epochs:
@@ -41,7 +41,7 @@ parameters:
   unlearn.alpha:
     values: [0.0]
   intact.lambda_interval:
-    values: [0.25, 0.5]
+    values: [0.5, 1.0]
   unlearn.base_method:
     values: ["nsfw"]
   # you might also sweep different target sets if desired
