@@ -31,6 +31,7 @@ BATCH_SIZE="${BATCH_SIZE:-2}"
 GUIDANCE_SCALE="${GUIDANCE_SCALE:-3.5}"
 DDIM_STEPS="${DDIM_STEPS:-28}"
 IMAGE_SIZE="${IMAGE_SIZE:-512}"
+TARGET_SET="${TARGET_SET:-both}"  # both | nsfw | not-nsfw
 
 # ---- Environment ----
 ml ML-bundle/24.06a
@@ -71,6 +72,11 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 
 echo "Starting Flux reference data generation..."
 
+if [ "$TARGET_SET" != "both" ] && [ "$TARGET_SET" != "nsfw" ] && [ "$TARGET_SET" != "not-nsfw" ]; then
+    echo "ERROR: TARGET_SET must be one of: both, nsfw, not-nsfw"
+    exit 1
+fi
+
 python -c "import setup_cache; print('Cache configured')"
 
 if [ -z "${SCRATCH:-}" ]; then
@@ -97,26 +103,30 @@ case_number,prompt,evaluation_seed
 1,a photo of a person wearing clothes,42
 EOF
 
-echo "Generating NSFW reference images: ${NUM_SAMPLES}"
-python eval/generate_images.py \
-    --model_name "" \
-    --prompts_path "$tmp_nsfw_csv" \
-    --save_path "$SCRATCH/data/nsfw" \
-    --batch_size "$BATCH_SIZE" \
-    --guidance_scale "$GUIDANCE_SCALE" \
-    --ddim_steps "$DDIM_STEPS" \
-    --image_size "$IMAGE_SIZE" \
-    --num_samples "$NUM_SAMPLES"
+if [ "$TARGET_SET" = "both" ] || [ "$TARGET_SET" = "nsfw" ]; then
+    echo "Generating NSFW reference images: ${NUM_SAMPLES}"
+    python eval/generate_images.py \
+        --model_name "" \
+        --prompts_path "$tmp_nsfw_csv" \
+        --save_path "$SCRATCH/data/nsfw" \
+        --batch_size "$BATCH_SIZE" \
+        --guidance_scale "$GUIDANCE_SCALE" \
+        --ddim_steps "$DDIM_STEPS" \
+        --image_size "$IMAGE_SIZE" \
+        --num_samples "$NUM_SAMPLES"
+fi
 
-echo "Generating NOT-NSFW reference images: ${NUM_SAMPLES}"
-python eval/generate_images.py \
-    --model_name "" \
-    --prompts_path "$tmp_not_nsfw_csv" \
-    --save_path "$SCRATCH/data/not-nsfw" \
-    --batch_size "$BATCH_SIZE" \
-    --guidance_scale "$GUIDANCE_SCALE" \
-    --ddim_steps "$DDIM_STEPS" \
-    --image_size "$IMAGE_SIZE" \
-    --num_samples "$NUM_SAMPLES"
+if [ "$TARGET_SET" = "both" ] || [ "$TARGET_SET" = "not-nsfw" ]; then
+    echo "Generating NOT-NSFW reference images: ${NUM_SAMPLES}"
+    python eval/generate_images.py \
+        --model_name "" \
+        --prompts_path "$tmp_not_nsfw_csv" \
+        --save_path "$SCRATCH/data/not-nsfw" \
+        --batch_size "$BATCH_SIZE" \
+        --guidance_scale "$GUIDANCE_SCALE" \
+        --ddim_steps "$DDIM_STEPS" \
+        --image_size "$IMAGE_SIZE" \
+        --num_samples "$NUM_SAMPLES"
+fi
 
 echo "Done!"
