@@ -165,6 +165,7 @@ class FluxTransformerBlock(nn.Module):
         temb: torch.FloatTensor,
         image_rotary_emb=None,
         joint_attention_kwargs=None,
+        return_attn_maps: bool = False,
         # remove_index=[-1]
     ):
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
@@ -174,12 +175,7 @@ class FluxTransformerBlock(nn.Module):
         )
         joint_attention_kwargs = joint_attention_kwargs or {}
         # Attention.
-        # vis compatible 2024.10.29
-        # attn_output, context_attn_output, attn_maps
-        vis_attn = True
-        
-        # import pdb; pdb.set_trace()
-        if vis_attn:
+        if return_attn_maps:
             attn_output, context_attn_output, attn_maps = self.attn(
                 hidden_states=norm_hidden_states,
                 encoder_hidden_states=norm_encoder_hidden_states,
@@ -226,7 +222,7 @@ class FluxTransformerBlock(nn.Module):
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
 
-        if vis_attn:
+        if return_attn_maps:
             return encoder_hidden_states, hidden_states, attn_maps
         else:
             return encoder_hidden_states, hidden_states
@@ -500,22 +496,23 @@ class FluxTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrig
 
         ids = torch.cat((txt_ids, img_ids), dim=0)
         image_rotary_emb = self.pos_embed(ids)
+        attn_maps = None
 
         for index_block, block in enumerate(self.transformer_blocks):
             if self.training and self.gradient_checkpointing:
 
-                def create_custom_forward(module, return_dict=None):
+                def create_custom_forward(module, return_dict=None, return_attn_maps=False):
                     def custom_forward(*inputs):
                         if return_dict is not None:
-                            return module(*inputs, return_dict=return_dict)
+                            return module(*inputs, return_dict=return_dict, return_attn_maps=return_attn_maps)
                         else:
-                            return module(*inputs)
+                            return module(*inputs, return_attn_maps=return_attn_maps)
 
                     return custom_forward
 
                 ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
+                encoder_hidden_states, hidden_states, attn_maps = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(block, return_attn_maps=True),
                     hidden_states,
                     encoder_hidden_states,
                     temb,
@@ -527,26 +524,15 @@ class FluxTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrig
                 # inference (index_block=0,1,10,17,18)
                 # encoder_hidden_states, hidden_states, attn_maps = block(
                 
-                vis_attn = True
-                
-                if vis_attn:
-                    encoder_hidden_states, hidden_states, attn_maps = block(
-                        hidden_states=hidden_states,
-                        encoder_hidden_states=encoder_hidden_states,
-                        temb=temb,
-                        image_rotary_emb=image_rotary_emb,
-                        joint_attention_kwargs=joint_attention_kwargs,
-                        # remove_index=remove_index,
-                    )
-                else:
-                    encoder_hidden_states, hidden_states = block(
-                        hidden_states=hidden_states,
-                        encoder_hidden_states=encoder_hidden_states,
-                        temb=temb,
-                        image_rotary_emb=image_rotary_emb,
-                        joint_attention_kwargs=joint_attention_kwargs,
-                        # remove_index=remove_index
-                    )
+                encoder_hidden_states, hidden_states, attn_maps = block(
+                    hidden_states=hidden_states,
+                    encoder_hidden_states=encoder_hidden_states,
+                    temb=temb,
+                    image_rotary_emb=image_rotary_emb,
+                    joint_attention_kwargs=joint_attention_kwargs,
+                    return_attn_maps=True,
+                    # remove_index=remove_index,
+                )
                 
                 # TODO
 #                 indexed_word = "child_soccer"
