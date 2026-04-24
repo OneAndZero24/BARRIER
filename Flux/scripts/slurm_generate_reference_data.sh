@@ -22,7 +22,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=100GB
 #SBATCH --time=01:00:00
-#SBATCH --partition=plgrid-gpu-a40
+#SBATCH --partition=plgrid-gpu-gh200
 
 set -euo pipefail
 
