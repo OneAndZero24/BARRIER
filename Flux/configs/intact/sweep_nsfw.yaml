@@ -41,7 +41,7 @@ parameters:
   unlearn.alpha:
     values: [0.0]
   intact.target_blocks:
-    values: [[12, 18]]
+    values: [[17, 18]]
   intact.target_layers:
     values: [["ff.net.0.proj", "ff_context.net.0.proj"]]
   intact.lambda_interval:
