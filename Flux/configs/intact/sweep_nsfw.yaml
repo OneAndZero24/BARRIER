@@ -45,7 +45,7 @@ parameters:
   intact.target_layers:
     values: [["ff.net.0.proj", "ff_context.net.0.proj"], ["attn.add_v_proj", "attn.to_v", "attn.to_out.0"]]
   intact.lambda_interval:
-    values: [0.5, 1.0]
+    values: [5.0, 0.5, 1.0]
   unlearn.base_method:
     values: ["nsfw"]
   # you might also sweep different target sets if desired
