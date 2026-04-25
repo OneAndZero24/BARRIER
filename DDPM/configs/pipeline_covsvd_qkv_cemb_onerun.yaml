@@ -1,0 +1,89 @@
+# ============================================================================
+# DDPM Pipeline – One-Run Covariance-SVD InTAct Unlearning (CIFAR-10)
+# ============================================================================
+# Usage:
+#   cd DDPM
+#   python pipeline.py --config configs/pipeline_covsvd_qkv_cemb_onerun.yaml
+#
+# Notes:
+# - RL objective maps the forget label to (label_to_forget + 1) % 10 in code.
+#   Example on CIFAR-10: 0 (airplane) -> 1 (automobile).
+# ============================================================================
+
+wandb:
+  project: "intact-ddpm"
+  entity: "oneandzero24"
+  group: "cifar10-covsvd-onerun"
+  tags: ["ddpm", "cifar10", "intact", "covariance-svd", "qkv", "cemb", "one-run"]
+
+# ---- paths (adjust to your environment) ----
+paths:
+  pretrained_ckpt_folder: /shared/results/common/miksa/intact/DDPM/results/cifar10/2026_01_13_220000
+  output_dir: "/shared/results/common/miksa/intact/DDPM/results/pipeline"
+  checkpoint_dir: "/shared/results/common/miksa/intact/DDPM/results/pipeline/checkpoints"
+  ref_dataset_dir: /shared/results/common/miksa/intact/DDPM/results/cifar10_without_label_0
+  classifier_ckpt: "/shared/results/common/miksa/intact/DDPM/models/cifar10_resnet34.pth"
+
+# ---- model config (architecture + diffusion schedule) ----
+model_config: "configs/cifar10_intact.yml"
+
+# ---- data ----
+data:
+  dataset: "CIFAR10"
+  n_classes: 10
+
+# ---- pipeline ----
+pipeline:
+  seed: 1234
+
+# ---- sampling ----
+cond_scale: 2.0
+sample_type: "generalized"
+skip_type: "uniform"
+timesteps: 1000
+eta: 1.0
+
+# ---- unlearning ----
+unlearn:
+  mode: "intact"
+  label_to_forget: 0
+  method: "rl"                 # Random-label overwrite objective
+  lr: 1.0e-4                    # Adam learning rate
+  n_iters: 3000                 # Iterations (T)
+  batch_size: 128
+  alpha: 0.0
+  negative_guidance: 7.5
+
+# ---- InTAct parameters ----
+intact:
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32               # top-k singular dimensions
+  svd_source: "covariance"     # covariance-based SVD
+  infinity_scale: 20.0
+  normalize_protection: true
+  use_actual_bounds: true
+  targets:
+    - "attn.0.q"
+    - "attn.0.k"
+    - "attn.0.v"
+    - "attn_1.q"
+    - "attn_1.k"
+    - "attn_1.v"
+    - "attn.1.q"
+    - "attn.1.k"
+    - "attn.1.v"
+    - "cemb.dense.0"
+    - "cemb.dense.1"
+
+# ---- evaluation (kept light for a single test run) ----
+evaluate:
+  n_samples_per_class: 100
+  n_sample_images_per_class: 8
+  fid:
+    enabled: true
+    n_samples_per_class: 100
+  classifier:
+    enabled: true
+    n_samples_per_class: 100
