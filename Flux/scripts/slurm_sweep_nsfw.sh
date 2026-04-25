@@ -79,7 +79,11 @@ ARRAY_KEY="${SLURM_ARRAY_JOB_ID:-manual}"
 
 # Shared state allows automatic resume on the next sbatch submission.
 SWEEP_NAMESPACE="${SWEEP_NAMESPACE:-shared}"
-SWEEP_STATE_DIR="$CACHE_ROOT/wandb/${SWEEP_NAME}_${SWEEP_NAMESPACE}"
+# IMPORTANT: keep sweep coordination state on a shared filesystem.
+# CACHE_ROOT can point to task-local scratch on some clusters, which causes
+# each array task to create its own sweep instead of reusing one sweep ID.
+SWEEP_STATE_BASE="${SWEEP_STATE_BASE:-$HOME/.cache/intact/wandb-sweeps}"
+SWEEP_STATE_DIR="$SWEEP_STATE_BASE/${PROJECT_NAME}/${SWEEP_NAME}_${SWEEP_NAMESPACE}"
 SWEEP_ID_FILE="$SWEEP_STATE_DIR/sweep.id"
 SWEEP_LOCK_DIR="$SWEEP_STATE_DIR/create.lock"
 
@@ -92,6 +96,7 @@ SWEEP_POLL_SECONDS="${SWEEP_POLL_SECONDS:-5}"
 FORCE_NEW_SWEEP="${FORCE_NEW_SWEEP:-0}"
 
 mkdir -p "$SWEEP_STATE_DIR"
+echo "Sweep coordination directory: $SWEEP_STATE_DIR"
 
 create_sweep() {
     local out
