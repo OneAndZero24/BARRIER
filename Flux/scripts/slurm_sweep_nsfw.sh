@@ -11,8 +11,11 @@
 #   sbatch scripts/slurm_sweep_nsfw.sh <existing_sweep_id>
 #
 # Resume behavior:
-#   - By default, plain re-sbatch reuses the last sweep ID for this sweep name.
-#   - Set FORCE_NEW_SWEEP=1 to force creation of a new sweep.
+#   - By default, each sbatch submission uses its own sweep namespace,
+#     so array tasks attach only to the current submission's sweep.
+#   - To resume an older/shared sweep, either pass an explicit sweep ID,
+#     or set SWEEP_NAMESPACE=shared.
+#   - Set FORCE_NEW_SWEEP=1 to force creation of a fresh sweep in namespace.
 # ============================================================================
 
 #SBATCH --job-name=flux-nsfw-sweep
@@ -77,8 +80,9 @@ SWEEP_NAME="sweep_nsfw"
 YAML_PATH="configs/intact/${SWEEP_NAME}.yaml"
 ARRAY_KEY="${SLURM_ARRAY_JOB_ID:-manual}"
 
-# Shared state allows automatic resume on the next sbatch submission.
-SWEEP_NAMESPACE="${SWEEP_NAMESPACE:-shared}"
+# Default namespace is submission-scoped to avoid mixing with old sweeps.
+DEFAULT_SWEEP_NAMESPACE="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}"
+SWEEP_NAMESPACE="${SWEEP_NAMESPACE:-$DEFAULT_SWEEP_NAMESPACE}"
 # IMPORTANT: keep sweep coordination state on a shared filesystem.
 # CACHE_ROOT can point to task-local scratch on some clusters, which causes
 # each array task to create its own sweep instead of reusing one sweep ID.
@@ -97,6 +101,7 @@ FORCE_NEW_SWEEP="${FORCE_NEW_SWEEP:-0}"
 
 mkdir -p "$SWEEP_STATE_DIR"
 echo "Sweep coordination directory: $SWEEP_STATE_DIR"
+echo "Sweep namespace: $SWEEP_NAMESPACE"
 
 create_sweep() {
     local out
