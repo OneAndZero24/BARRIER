@@ -1,0 +1,35 @@
+# =============================================================================
+# wandb Sweep – SD Class Forgetting
+# =============================================================================
+# Usage:
+#   cd SD
+#   wandb sweep configs/sweep_class.yaml
+#   wandb agent <sweep-id>
+# =============================================================================
+
+program: pipeline.py
+method: grid
+name: sd-class-sweep-stable-blocks
+entity: oneandzero24
+project: intact-sd
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - "--config"
+  - "configs/pipeline_class.yaml"
+
+parameters:
+  unlearn.lr:
+    values: [3.5e-6, 5.0e-6]
+  unlearn.epochs:
+    values: [3, 4]
+  unlearn.alpha:
+    values: [0.12, 0.20]
+  intact.lambda_interval:
+    values: [3.0, 4.5, 6.0]
+  intact.targets:
+    values:
+      - ["attn2.to_q", "attn2.to_k", "attn2.to_v", "attn2.to_out.0"]
+      - ["output_blocks.6.1.transformer_blocks.0.attn2.to_q", "output_blocks.6.1.transformer_blocks.0.attn2.to_k", "output_blocks.6.1.transformer_blocks.0.attn2.to_v", "output_blocks.8.1.transformer_blocks.0.attn2.to_q", "output_blocks.8.1.transformer_blocks.0.attn2.to_k", "output_blocks.8.1.transformer_blocks.0.attn2.to_v"]

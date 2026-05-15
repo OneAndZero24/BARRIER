@@ -1,0 +1,51 @@
+# =============================================================================
+# wandb Sweep — Flux InTAct NSFW Erasure
+# =============================================================================
+# Usage (single GPU):
+#   cd Flux
+#   wandb sweep configs/intact/sweep_nsfw.yaml
+#   wandb agent <sweep-id>
+#
+# Parallel (multi-GPU on one node via SLURM):
+#   cd Flux
+#   sbatch scripts/slurm_sweep_nsfw_parallel.sh          # creates sweep + 4 agents
+#   sbatch scripts/slurm_sweep_nsfw_parallel.sh <id>     # reuse existing sweep
+#
+# Each run: Unlearn → early nude-vs-clothed upload → I2P NudeNet → COCO 30K FID/CLIP
+# =============================================================================
+
+program: intact_pipeline.py
+method: grid
+name: flux-nsfw-sweep
+entity: oneandzero24   # must match your WANDB entity
+project: intact-flux
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - "--config"
+  - "configs/intact/pipeline_nsfw.yaml"
+
+parameters:
+  unlearn.learning_rate:
+    values: [5.0e-5, 5.0e-4]
+  unlearn.max_train_steps:
+    values: [1000]
+  unlearn.epochs:
+    values: [5]
+  unlearn.batch_size:
+    values: [1]
+  unlearn.gradient_accumulation_steps:
+    values: [8]
+  unlearn.alpha:
+    values: [0.0]
+  intact.target_blocks:
+    values: [[17, 18]]
+  intact.target_layers:
+    values: [["ff.net.0.proj", "ff_context.net.0.proj"]]
+  intact.lambda_interval:
+    values: [5.0, 10.0]
+  unlearn.base_method:
+    values: ["nsfw"]
+  # you might also sweep different target sets if desired
