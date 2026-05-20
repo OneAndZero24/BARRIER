@@ -1,60 +1,86 @@
-#!/bin/bash
+echo "Grid search (${SWEEP_KIND}) – combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS} (${CLASS_NAME})"
+echo "  Total active tasks: ${TOTAL_JOBS} (retry=${RETRY_JOBS}, tuned=${TUNED_JOBS})"
+echo "  Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
+echo "============================================"
+#!/bin/bash -l
 # ============================================================================
-# SLURM Array Job – Full eval grid search across ALL Imagenette classes
+# SLURM Array Job – SD class forgetting big grid across ALL Imagenette classes
 # ============================================================================
-#   Fully parallelised: each job = one (hyperparam combo, class) pair.
+#   Alpha is fixed at 0.0 and we sweep several hyperparameter settings across
+#   all 10 Imagenette classes.
 #
-#   This script runs two NON-ZERO-alpha stages in one array:
-#   1) RETRY of previously failed/crashed jobs.
-#   2) REFINED sweep across all 10 Imagenette classes with tighter ranges
-#      around the currently best UA/FID trade-off region.
+#   This is helios-ready and follows the Flux-style SLURM/runtime convention:
+#   - plgrid-gpu-gh200 partition
+#   - ML-bundle/24.06a module
+#   - SCRATCH-aware cache root with home fallback
 #
-#   Indexing:
-#     - TASK_ID < RETRY_JOBS         -> retry non-zero-alpha failures
-#     - otherwise                    -> refined non-zero-alpha sweep
+#   Resume behavior:
+#   - Re-run the same array job after timeout/crash.
+#   - Output paths are stable per (class, hyperparameter combo), so completed
+#     images remain on disk and the generator skips them on the next run.
 #
 # Usage:
 #   cd SD
 #   sbatch scripts/slurm_fulleval_grid_all_classes.sh
 # ============================================================================
 
-#SBATCH --job-name=sd-grid-all
-#SBATCH --qos=big
+#SBATCH --job-name=sd-grid-all-a0
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
-#SBATCH --partition=dgxh100
-#SBATCH --array=0-63
+#SBATCH --time=48:00:00
+#SBATCH --partition=plgrid-gpu-gh200
+#SBATCH --array=0-159
+
+set -euo pipefail
 
 # ---- Environment ----
+ml ML-bundle/24.06a
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
-export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
-cd $HOME/InTAct-Unl/SD
-export PYTHONPATH="$HOME/InTAct-Unl:$PYTHONPATH"
+cd "$HOME/InTAct-Unl/SD"
+export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
-# ---- Retry set: failed/crashed NON-ZERO-alpha jobs from prior run ----
-RETRY_CLASSES=( 0    2    5    9 )
-RETRY_ALPHAS=( 0.10 0.05 0.05 0.05 )
-RETRY_LAMBDAS=(5    10   10   10 )
-RETRY_EPOCHS=( 3    2    2    2 )
-RETRY_LRS=(    5e-6 1e-5 1e-5 1e-5 )
+if [ -n "${SCRATCH:-}" ]; then
+    CACHE_BASE="$SCRATCH/.cache"
+    RESULTS_ROOT="$SCRATCH/intact/SD"
+else
+    CACHE_BASE="$HOME/.cache/intact"
+    RESULTS_ROOT="$HOME/results/intact/SD"
+fi
 
-NUM_RETRY_JOBS=${#RETRY_CLASSES[@]}  # 4
+export CACHE_ROOT="$CACHE_BASE"
+export HF_HOME="$CACHE_ROOT/huggingface"
+export TORCH_HOME="$CACHE_ROOT/torch"
+export XDG_DATA_HOME="$CACHE_ROOT"
+export XDG_CACHE_HOME="$CACHE_ROOT"
+export WANDB_DIR="$CACHE_ROOT/wandb"
+export WANDB_CACHE_DIR="$CACHE_ROOT/wandb"
+export TMPDIR="$CACHE_ROOT/tmp"
+export CLIP_CACHE_DIR="$CACHE_ROOT/clip"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-# ---- Refined NON-ZERO-alpha grid across all classes ----
-# Keep grid compact, but cover low + medium + high alpha to avoid bias.
-TUNED_ALPHAS=( 0.05 0.05 0.10 0.10 0.20 0.30 )
-TUNED_LAMBDAS=(5    10   5    10   7    3   )
-TUNED_EPOCHS=( 2    2    3    3    4    5   )
-TUNED_LRS=(    5e-6 1e-5 5e-6 1e-5 1e-5 5e-6)
+mkdir -p "$CACHE_ROOT" "$WANDB_DIR" "$TMPDIR" "$RESULTS_ROOT"
 
-NUM_TUNED_COMBOS=${#TUNED_ALPHAS[@]}  # 6
-NUM_CLASSES=10
+# ---- Alpha-zero grid across all classes ----
+# 4 lambdas x 2 epochs x 2 learning rates x 2 reduced_dims = 16 combos.
+# With 10 Imagenette classes, the total grid size is 160 jobs.
+GRID_LAMBDAS=(0.5 1 5 10)
+GRID_EPOCHS=(2 3)
+GRID_LRS=(5e-6 1e-5)
+GRID_REDUCED_DIMS=(64 96)
+TARGET_BLOCKS=(0 1 2 3 4 5 6 7 8 9 10 11)
+TARGET_LAYERS=("attn2.to_q" "attn2.to_k" "attn2.to_v")
+CLASS_NAMES=("tench" "english_springer" "cassette_player" "chain_saw" "church" \
+             "french_horn" "garbage_truck" "gas_pump" "golf_ball" "parachute")
 
-RETRY_JOBS=${NUM_RETRY_JOBS}
-TUNED_JOBS=$(( NUM_TUNED_COMBOS * NUM_CLASSES ))
-TOTAL_JOBS=$(( RETRY_JOBS + TUNED_JOBS ))
+NUM_LAMBDAS=${#GRID_LAMBDAS[@]}
+NUM_EPOCHS=${#GRID_EPOCHS[@]}
+NUM_LRS=${#GRID_LRS[@]}
+NUM_REDUCED_DIMS=${#GRID_REDUCED_DIMS[@]}
+NUM_CLASSES=${#CLASS_NAMES[@]}
+NUM_COMBOS=$(( NUM_LAMBDAS * NUM_EPOCHS * NUM_LRS * NUM_REDUCED_DIMS ))
+TOTAL_JOBS=$(( NUM_COMBOS * NUM_CLASSES ))
 
 TASK_ID=${SLURM_ARRAY_TASK_ID}
 
@@ -63,99 +89,106 @@ if (( TASK_ID >= TOTAL_JOBS )); then
     exit 0
 fi
 
-CLASSES=("tench" "english_springer" "cassette_player" "chain_saw" "church"
-         "french_horn" "garbage_truck" "gas_pump" "golf_ball" "parachute")
+COMBO_IDX=$(( TASK_ID / NUM_CLASSES ))
+CLASS=$(( TASK_ID % NUM_CLASSES ))
 
-if (( TASK_ID < RETRY_JOBS )); then
-    SWEEP_KIND="retry-nonzero-failures"
-    LOCAL_ID=${TASK_ID}
-    COMBO_IDX=${LOCAL_ID}
-    CLASS=${RETRY_CLASSES[$LOCAL_ID]}
+TMP_IDX=${COMBO_IDX}
+RDM_IDX=$(( TMP_IDX % NUM_REDUCED_DIMS ))
+TMP_IDX=$(( TMP_IDX / NUM_REDUCED_DIMS ))
+LR_IDX=$(( TMP_IDX % NUM_LRS ))
+TMP_IDX=$(( TMP_IDX / NUM_LRS ))
+EPOCH_IDX=$(( TMP_IDX % NUM_EPOCHS ))
+LAMBDA_IDX=$(( TMP_IDX / NUM_EPOCHS ))
 
-    ALPHA=${RETRY_ALPHAS[$LOCAL_ID]}
-    LAMBDA=${RETRY_LAMBDAS[$LOCAL_ID]}
-    EPOCH=${RETRY_EPOCHS[$LOCAL_ID]}
-    LR=${RETRY_LRS[$LOCAL_ID]}
-else
-    SWEEP_KIND="tuned-nonzero-alpha"
-    LOCAL_ID=$(( TASK_ID - RETRY_JOBS ))
-    COMBO_IDX=$(( LOCAL_ID / NUM_CLASSES ))
-    CLASS=$(( LOCAL_ID % NUM_CLASSES ))
+ALPHA=0.0
+LAMBDA=${GRID_LAMBDAS[$LAMBDA_IDX]}
+EPOCH=${GRID_EPOCHS[$EPOCH_IDX]}
+LR=${GRID_LRS[$LR_IDX]}
+REDUCED_DIM=${GRID_REDUCED_DIMS[$RDM_IDX]}
 
-    ALPHA=${TUNED_ALPHAS[$COMBO_IDX]}
-    LAMBDA=${TUNED_LAMBDAS[$COMBO_IDX]}
-    EPOCH=${TUNED_EPOCHS[$COMBO_IDX]}
-    LR=${TUNED_LRS[$COMBO_IDX]}
-fi
-
-CLASS_NAME=${CLASSES[$CLASS]}
-PARAM_TAG="a${ALPHA}-lam${LAMBDA}-ep${EPOCH}-lr${LR}"
+CLASS_NAME=${CLASS_NAMES[$CLASS]}
+PARAM_TAG="a0-lam${LAMBDA}-ep${EPOCH}-lr${LR}-rdim${REDUCED_DIM}"
+SWEEP_KIND="alpha0-allclasses-biggrid-helios-v1"
 
 echo "============================================"
 echo "Grid search (${SWEEP_KIND}) – combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS} (${CLASS_NAME})"
-echo "  Total active tasks: ${TOTAL_JOBS} (retry=${RETRY_JOBS}, tuned=${TUNED_JOBS})"
+echo "  Total active tasks: ${TOTAL_JOBS} (combos=${NUM_COMBOS}, classes=${NUM_CLASSES})"
 echo "  Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 echo "============================================"
 
 # ---- Build per-job config ----
-TMPCONFIG="/tmp/sd_grid_${SLURM_ARRAY_JOB_ID}_${TASK_ID}.yaml"
 RUN_ID="${SLURM_ARRAY_JOB_ID}_${TASK_ID}"
-TMP_MODEL_DIR="/tmp/sd_grid_models/${RUN_ID}"
-TMP_LOGS_DIR="/tmp/sd_grid_logs/${RUN_ID}"
+TMP_ROOT="${TMPDIR}/sd_grid/${RUN_ID}"
+TMPCONFIG="${TMP_ROOT}/config.yaml"
+MODEL_DIR="${RESULTS_ROOT}/models/${SWEEP_KIND}/${PARAM_TAG}/class_${CLASS}"
+LOGS_DIR="${RESULTS_ROOT}/logs/${SWEEP_KIND}/${PARAM_TAG}/class_${CLASS}"
+mkdir -p "$TMP_ROOT" "$MODEL_DIR" "$LOGS_DIR"
 
-python - "$CLASS" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" "$RUN_ID" "$TMP_MODEL_DIR" "$TMP_LOGS_DIR" <<'PYEOF'
+python - "$CLASS" "$ALPHA" "$LAMBDA" "$EPOCH" "$LR" "$REDUCED_DIM" "$PARAM_TAG" "$CLASS_NAME" "$SWEEP_KIND" "$TMPCONFIG" "$RUN_ID" "$MODEL_DIR" "$LOGS_DIR" "$RESULTS_ROOT" <<'PYEOF'
 import yaml, sys
+from pathlib import Path
 
-cls        = int(sys.argv[1])
-alpha_val  = float(sys.argv[2])
+cls = int(sys.argv[1])
+alpha_val = float(sys.argv[2])
 lambda_val = float(sys.argv[3])
-epochs     = int(sys.argv[4])
-lr         = float(sys.argv[5])
-param_tag  = sys.argv[6]
-cls_name   = sys.argv[7]
-sweep_kind = sys.argv[8]
-out        = sys.argv[9]
-run_id     = sys.argv[10]
-tmp_model_dir = sys.argv[11]
-tmp_logs_dir = sys.argv[12]
+epochs = int(sys.argv[4])
+lr = float(sys.argv[5])
+reduced_dim = int(sys.argv[6])
+param_tag = sys.argv[7]
+cls_name = sys.argv[8]
+sweep_kind = sys.argv[9]
+out = sys.argv[10]
+run_id = sys.argv[11]
+model_dir = sys.argv[12]
+logs_dir = sys.argv[13]
+results_root = sys.argv[14]
 
 with open("configs/pipeline_class_fulleval.yaml") as f:
     cfg = yaml.safe_load(f)
 
-# Hyperparameters
 cfg["unlearn"]["class_to_forget"] = cls
-cfg["unlearn"]["alpha"]           = alpha_val
-cfg["unlearn"]["lr"]              = lr
-cfg["unlearn"]["epochs"]          = epochs
-# Diffusers export still reloads the saved compvis checkpoint, so keep it on
-# until conversion finishes. The temp directory is removed at the end anyway.
-cfg["unlearn"]["save_compvis"]    = True
-cfg["unlearn"]["save_diffusers"]  = True
+cfg["unlearn"]["alpha"] = alpha_val
+cfg["unlearn"]["lr"] = lr
+cfg["unlearn"]["epochs"] = epochs
+cfg["unlearn"]["save_compvis"] = True
+cfg["unlearn"]["save_diffusers"] = True
 cfg["unlearn"]["save_history_logs"] = False
-cfg["intact"]["lambda_interval"]  = lambda_val
 
-# Keep model artifacts off shared storage for this grid.
-cfg["paths"]["model_save_dir"] = tmp_model_dir
-cfg["paths"]["logs_dir"] = tmp_logs_dir
+cfg["intact"]["lambda_interval"] = lambda_val
+cfg["intact"]["target_blocks"] = list(range(12))
+cfg["intact"]["target_layers"] = ["attn2.to_q", "attn2.to_k", "attn2.to_v"]
+cfg["intact"]["targets"] = [
+    f"output_blocks.{block}.1.transformer_blocks.0.{layer}"
+    for block in range(12)
+    for layer in ["attn2.to_q", "attn2.to_k", "attn2.to_v"]
+]
+cfg["intact"]["reduced_dim"] = reduced_dim
+cfg["intact"]["use_actual_bounds"] = True
+cfg["intact"]["dataset_fraction"] = 1.0
 
-# Evaluation budget (same as single-class fulleval)
-cfg["evaluate"]["num_samples_per_prompt"] = 10
-cfg["evaluate"]["n_outer"]                = 10
-cfg["evaluate"]["fid"]["max_real"]        = 900
-cfg["evaluate"]["fid"]["max_fake"]        = None
+cfg["paths"]["model_save_dir"] = model_dir
+cfg["paths"]["logs_dir"] = logs_dir
+cfg["paths"]["output_dir"] = f"{results_root}/grid/{sweep_kind}/{param_tag}/class_{cls}"
 
-# wandb – group by hyperparam combo so cross-class averages are trivial
+model_name = (
+    f"compvis-intact-rl-class_{cls}-targets_blk0-11_qkv"
+    f"-lambda_{lambda_val}-epochs_{epochs}-lr_{lr}"
+)
+checkpoint_path = Path(model_dir) / model_name / f"{model_name.replace('compvis', 'diffusers')}.pt"
+if checkpoint_path.exists():
+    cfg["pipeline"]["eval_only"] = True
+    cfg["pipeline"]["model_name"] = model_name
+
+cfg["evaluate"]["num_samples_per_prompt"] = 50
+cfg["evaluate"]["n_outer"] = 10
+cfg["evaluate"]["fid"]["enabled"] = False
+
 cfg["wandb"]["group"] = f"grid-{sweep_kind}-{param_tag}"
-cfg["wandb"]["tags"]  = [
+cfg["wandb"]["tags"] = [
     "sd", "class-wise", "intact", "fulleval", "grid-search", sweep_kind,
     f"alpha_{alpha_val}", f"lambda_{lambda_val}", f"epochs_{epochs}", f"lr_{lr}",
-    cls_name,
+    f"rdim_{reduced_dim}", cls_name,
 ]
-
-# Unique output dir per (combo, class)
-cfg["paths"]["output_dir"] = (
-    cfg["paths"]["output_dir"] + f"/grid/{sweep_kind}/{param_tag}/class_{cls}/run_{run_id}"
-)
 
 with open(out, "w") as f:
     yaml.dump(cfg, f, default_flow_style=False)
@@ -164,9 +197,9 @@ print(f"Config written to {out}")
 PYEOF
 
 # ---- Run pipeline ----
-python pipeline.py --config "${TMPCONFIG}"
+python pipeline.py --config "$TMPCONFIG"
 
-# Cleanup temporary model/log artifacts to avoid filling local disks over time.
-rm -rf "${TMP_MODEL_DIR}" "${TMP_LOGS_DIR}" "${TMPCONFIG}"
+# Cleanup temporary job artifacts.
+rm -rf "$TMP_ROOT"
 
 echo "${SWEEP_KIND}: combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS} (${CLASS_NAME}) – done."

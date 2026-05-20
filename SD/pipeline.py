@@ -455,14 +455,15 @@ def compute_fid_sd(class_to_forget, images_dir, image_size=512, max_real=None, m
 
 def compute_ua_class(images_dir, class_to_forget, device_str):
     """
-    UA for SD class forgetting.
-
-    Generate images conditioned on the forgotten class prompt and classify
-    them with a pretrained ResNet-50.  UA = fraction that are NOT classified
-    as the forgotten class (higher = better forgetting).
+    Evaluate SD Imagenette class forgetting with a pretrained ResNet-50.
 
     Images are expected to be named ``<case_number>_<sample>.png`` where
-    case_number == class_to_forget for the forget-class images.
+    ``case_number`` is the Imagenette class index.
+
+    Returns a metrics dictionary containing:
+      - UA: fraction of forget-class images NOT classified as the forgotten class
+      - ACC_FORGET: top-1 accuracy on the forgotten class
+      - ACC_REST_AVG: mean top-1 accuracy across the remaining classes
     """
     from torchvision.models import resnet50, ResNet50_Weights
 
@@ -472,7 +473,6 @@ def compute_ua_class(images_dir, class_to_forget, device_str):
     device = torch.device(device_str)
     model = model.to(device)
     preprocess = weights.transforms()
-    categories = weights.meta["categories"]
 
     # Build a mapping from Imagenette class name → ImageNet category index
     # (ResNet-50 predicts ImageNet-1k classes)
@@ -491,33 +491,70 @@ def compute_ua_class(images_dir, class_to_forget, device_str):
     imagenette_to_imagenet = {v: k for k, v in imagenet_to_imagenette.items()}
 
     forget_class_name = IMAGENETTE_CLASSES[int(class_to_forget)]
-    imagenet_idx = imagenette_to_imagenet.get(forget_class_name)
-    if imagenet_idx is None:
+    if imagenette_to_imagenet.get(forget_class_name) is None:
         log.warning(f"Cannot map Imagenette class '{forget_class_name}' to ImageNet idx")
         return None
 
     img_dir = pathlib.Path(images_dir)
-    # Images for the forget class are named <class_to_forget>_*.png
-    forget_imgs = sorted(img_dir.glob(f"{class_to_forget}_*.png"))
-    if not forget_imgs:
-        log.warning(f"No forget-class images found matching {class_to_forget}_*.png in {images_dir}")
+    per_class_metrics = {}
+
+    with torch.no_grad():
+        for cls_idx, cls_name in enumerate(IMAGENETTE_CLASSES):
+            expected_idx = imagenette_to_imagenet.get(cls_name)
+            if expected_idx is None:
+                log.warning(f"Cannot map Imagenette class '{cls_name}' to ImageNet idx")
+                continue
+
+            class_imgs = sorted(img_dir.glob(f"{cls_idx}_*.png"))
+            if not class_imgs:
+                log.warning(f"No images found matching {cls_idx}_*.png in {images_dir}")
+                continue
+
+            class_total = 0
+            class_correct = 0
+            for img_path in class_imgs:
+                img = Image.open(img_path).convert("RGB")
+                inp = preprocess(img).unsqueeze(0).to(device)
+                logits = model(inp)
+                pred_idx = logits.argmax(dim=1).item()
+                class_total += 1
+                if pred_idx == expected_idx:
+                    class_correct += 1
+
+            class_acc = class_correct / max(class_total, 1)
+            per_class_metrics[cls_idx] = {
+                "name": cls_name,
+                "total": class_total,
+                "correct": class_correct,
+                "accuracy": class_acc,
+            }
+            log.info(f"  ACC[{cls_idx} {cls_name}]: {class_correct}/{class_total} = {class_acc:.4f}")
+
+    forget_idx = int(class_to_forget)
+    forget_metrics = per_class_metrics.get(forget_idx)
+    if forget_metrics is None:
+        log.warning(f"No evaluated images found for forgotten class {forget_idx}")
         return None
 
-    n_total = 0
-    n_not_forgotten = 0
-    with torch.no_grad():
-        for img_path in forget_imgs:
-            img = Image.open(img_path).convert("RGB")
-            inp = preprocess(img).unsqueeze(0).to(device)
-            logits = model(inp)
-            pred_idx = logits.argmax(dim=1).item()
-            n_total += 1
-            if pred_idx != imagenet_idx:
-                n_not_forgotten += 1
+    forget_acc = forget_metrics["accuracy"]
+    rest_accs = [m["accuracy"] for idx, m in per_class_metrics.items() if idx != forget_idx]
+    rest_acc_avg = float(np.mean(rest_accs)) if rest_accs else None
+    ua = 1.0 - forget_acc
 
-    ua = n_not_forgotten / max(n_total, 1)
-    log.info(f"  UA: {n_not_forgotten}/{n_total} = {ua:.4f}")
-    return ua
+    log.info(f"  UA: {ua:.4f}")
+    log.info(f"  ACC_FORGET: {forget_acc:.4f}")
+    if rest_acc_avg is not None:
+        log.info(f"  ACC_REST_AVG: {rest_acc_avg:.4f}")
+
+    metrics = {
+        "UA": ua,
+        "ACC_FORGET": forget_acc,
+        "ACC_REST_AVG": rest_acc_avg,
+    }
+    for cls_idx, cls_metrics in per_class_metrics.items():
+        metrics[f"ACC_CLASS/{cls_idx}_{cls_metrics['name']}"] = cls_metrics["accuracy"]
+
+    return metrics
 
 
 def compute_ua_nsfw(images_dir, threshold=0.0):
@@ -1347,10 +1384,9 @@ def main():
 
     # --- UA (NudeNet I2P or classification) ---
     if setting == "sd":
-        ua = compute_ua_class(images_dir, class_to_forget, device_str)
-        if ua is not None:
-            metrics["UA"] = ua
-            log.info(f"  UA = {ua:.4f}")
+        ua_metrics = compute_ua_class(images_dir, class_to_forget, device_str)
+        if ua_metrics is not None:
+            metrics.update({k: v for k, v in ua_metrics.items() if v is not None})
     elif setting == "sd_nsfw":
         if images_dir:
             # I2P-aligned NudeNet evaluation (threshold 0.6, detailed per-class counts)
