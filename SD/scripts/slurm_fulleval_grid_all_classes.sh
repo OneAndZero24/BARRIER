@@ -1,8 +1,4 @@
-echo "Grid search (${SWEEP_KIND}) – combo ${COMBO_IDX} (${PARAM_TAG}), class ${CLASS} (${CLASS_NAME})"
-echo "  Total active tasks: ${TOTAL_JOBS} (retry=${RETRY_JOBS}, tuned=${TUNED_JOBS})"
-echo "  Job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
-echo "============================================"
-#!/bin/bash -l
+#!/bin/bash
 # ============================================================================
 # SLURM Array Job – SD class forgetting big grid across ALL Imagenette classes
 # ============================================================================
