@@ -17,9 +17,9 @@
 #SBATCH --qos=big
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64GB
-#SBATCH --partition=dgxa100
-#SBATCH --array=0-1
+#SBATCH --mem=256GB
+#SBATCH --partition=dgxh100
+#SBATCH --array=0-7
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -29,12 +29,13 @@ cd $HOME/InTAct-Unl/SD
 export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 
 # ============================================================================
-# Hyperparameter combinations to rerun
+# Hyperparameter combinations to rerun (8-combo grid)
 # ============================================================================
-COMBO_NUMBERS=(     19        15       )  # Original sweep combo IDs
-LEARNING_RATES=(    5e-6      5e-6     )
-EPOCHS=(            3         3        )
-LAMBDA_INTERVALS=(  1.0       0.5      )
+# Exploring: LR in {1e-6, 5e-6, 1e-5} x EPOCHS in {3, 5} x LAMBDA in {0.5, 1.0}
+COMBO_NUMBERS=(     1         2         3         4         5         6         7         8       )
+LEARNING_RATES=(    1e-6      1e-6      5e-6      5e-6      1e-5      1e-5      5e-6      1e-5     )
+EPOCHS=(            3         5         3         5         3         5         5         3        )
+LAMBDA_INTERVALS=(  0.5       1.0       0.5       1.0       0.5       1.0       1.0       1.0      )
 # ============================================================================
 
 IDX=${SLURM_ARRAY_TASK_ID}
