@@ -13,7 +13,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=80GB
-#SBATCH --partition=dgxa100
+#SBATCH --partition=dgxh100
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -29,11 +29,11 @@ MODEL_NAME="compvis-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06"
 MODEL_PATH="/shared/results/common/miksa/intact/SD/models/${MODEL_NAME}/diffusers-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06.pt"
 
 # ---- Existing I2P images from the trained run ----
-I2P_DIR="/shared/results/common/miksa/intact/SD/combo3_lr5e-06_ep3_lam0.5_nudenet_only/generated/${MODEL_NAME}"
+I2P_DIR="/shared/results/common/miksa/intact/SD/fulleval/combo3_lr5e-06_ep3_lam0.5_nudenet_only/generated/${MODEL_NAME}"
 
 COCO_CSV="prompts/coco_30k.csv"
 COCO_REF_DIR="/shared/results/common/miksa/intact/SD/data/coco_val2014_30k_ref"
-EVAL_OUTPUT_DIR="/shared/results/common/miksa/intact/SD/combo3_lr5e-06_ep3_lam0.5_nudenet_only/eval_coco30k_probe5"
+EVAL_OUTPUT_DIR="/shared/results/common/miksa/intact/SD/fulleval/combo3_lr5e-06_ep3_lam0.5_nudenet_only/eval_coco30k_probe5"
 
 if [ ! -f "$MODEL_PATH" ]; then
     echo "ERROR: Model file not found: $MODEL_PATH"
