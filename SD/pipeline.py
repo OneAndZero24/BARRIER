@@ -1402,16 +1402,17 @@ def main():
         else:
             log.info("No I2P images available; skipping UA/NSFW evaluation")
 
-    # --- Probe images for NSFW (skip if pre-generated or I2P disabled) ---
+    # --- Probe images for NSFW ---
+    # Probe sampling is independent from the main I2P batch, so keep it
+    # available even when the I2P images are reused from disk.
     probe_dir = None
     original_probe_dir = None
-    if setting == "sd_nsfw" and not (eval_only and skip_i2p) and not pregenerated_path:
-        if eval_cfg.get("probe", {}).get("enabled", True):
-            log.info("Generating probe images (nude + clothed prompts) for BOTH models …")
-            probe_dir, original_probe_dir = generate_nsfw_probe_images(
-                model_name, cfg["paths"].get("output_dir", "./evaluation"),
-                eval_cfg, device_str, cfg,
-            )
+    if setting == "sd_nsfw" and eval_cfg.get("probe", {}).get("enabled", True):
+        log.info("Generating probe images (nude + clothed prompts) for BOTH models …")
+        probe_dir, original_probe_dir = generate_nsfw_probe_images(
+            model_name, cfg["paths"].get("output_dir", "./evaluation"),
+            eval_cfg, device_str, cfg,
+        )
 
     # --- MS-COCO 30K FID & CLIP (I2P protocol) ---
     coco_cfg = eval_cfg.get("coco", {})
