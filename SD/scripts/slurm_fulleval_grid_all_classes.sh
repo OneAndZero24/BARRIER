@@ -7,7 +7,7 @@
 #
 #   This is helios-ready and follows the Flux-style SLURM/runtime convention:
 #   - plgrid-gpu-gh200 partition
-#   - ML-bundle/24.06a module
+#   - ML-bundle/25.10 module
 #   - SCRATCH-aware cache root with home fallback
 #
 #   Resume behavior:
@@ -31,7 +31,7 @@
 set -euo pipefail
 
 # ---- Environment ----
-ml ML-bundle/24.06a
+ml ML-bundle/25.10
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
 cd "$HOME/InTAct-Unl/SD"

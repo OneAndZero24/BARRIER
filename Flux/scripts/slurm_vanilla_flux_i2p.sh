@@ -34,7 +34,7 @@ PROMPTS_CSV="${PROMPTS_CSV:-}"
 BASE_MODEL_PATH="${BASE_MODEL_PATH:-}"
 
 # ---- Environment ----
-ml ML-bundle/24.06a
+ml ML-bundle/25.10
 source "$HOME/venv/bin/activate"
 cd "$HOME/InTAct-Unl/Flux"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"

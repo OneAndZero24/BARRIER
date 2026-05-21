@@ -34,7 +34,7 @@ IMAGE_SIZE="${IMAGE_SIZE:-}"
 NUM_SAMPLES="${NUM_SAMPLES:-}"
 
 # ---- Environment ----
-ml ML-bundle/24.06a
+ml ML-bundle/25.10
 source "$HOME/venv/bin/activate"
 cd "$HOME/InTAct-Unl/Flux"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
