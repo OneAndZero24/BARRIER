@@ -32,8 +32,13 @@ set -euo pipefail
 
 # ---- Environment ----
 ml ML-bundle/25.10
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate ldm
+VENV_ROOT="${VENV_ROOT:-$SCRATCH/sd_venv}"
+if [ ! -f "$VENV_ROOT/bin/activate" ]; then
+    echo "ERROR: virtualenv not found at $VENV_ROOT"
+    echo "Create it with: ml ML-bundle/25.10 && python3.9 -m venv \"$VENV_ROOT\""
+    exit 1
+fi
+source "$VENV_ROOT/bin/activate"
 cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
