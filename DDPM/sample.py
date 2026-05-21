@@ -71,6 +71,18 @@ def parse_args_and_config():
         default=2.0,
         help="classifier-free guidance conditional strength",
     )
+    parser.add_argument(
+        "--visualization_counts",
+        type=str,
+        default="",
+        help="Comma-separated per-class sample counts for visualization mode.",
+    )
+    parser.add_argument(
+        "--visualization_name",
+        type=str,
+        default="",
+        help="Optional output name for visualization mode.",
+    )
     parser.add_argument("--sequence", action="store_true")
     args = parser.parse_args()
 

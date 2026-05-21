@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import setup_cache  # noqa: E402  — must precede torch / HF imports
 
 import argparse
+import json
 import logging
 import pathlib
 from datetime import datetime
@@ -438,9 +439,11 @@ def main():
                 forget_sample_dir, dataset_name, label_to_forget, clf_ckpt, device,
             )
             metrics.update(clf_metrics)
+            metrics["FA"] = clf_metrics.get("classifier/acc_forgotten", 0.0)
             ua = 1.0 - clf_metrics.get("classifier/acc_forgotten", 0.0)
             metrics["UA"] = ua
             log.info(f"  UA = {ua:.4f}")
+            log.info(f"  FA = {metrics['FA']:.4f}")
             for k, v in clf_metrics.items():
                 log.info(f"  {k} = {v:.4f}")
         else:
@@ -497,6 +500,21 @@ def main():
         art.add_file(ckpt_file)
         wandb.log_artifact(art)
         log.info("Model checkpoint logged as wandb artifact")
+
+    metrics_file = os.path.join(unlearn_output, "metrics.json")
+    metrics_with_meta = {}
+    for key, value in metrics.items():
+        if hasattr(value, "item"):
+            metrics_with_meta[key] = value.item()
+        elif isinstance(value, (np.floating, np.integer)):
+            metrics_with_meta[key] = value.item()
+        else:
+            metrics_with_meta[key] = value
+    metrics_with_meta["label_to_forget"] = label_to_forget
+    metrics_with_meta["run_dir"] = unlearn_output
+    with open(metrics_file, "w") as fp:
+        json.dump(metrics_with_meta, fp, indent=2, sort_keys=True)
+    log.info(f"Metrics saved to {metrics_file}")
 
     wandb.finish()
     log.info(f"Pipeline complete. Results: {metrics}")

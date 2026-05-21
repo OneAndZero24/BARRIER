@@ -26,6 +26,21 @@ Key config fields:
 - `paths.classifier_ckpt` – path to ResNet34 classifier checkpoint
 - `wandb.entity` – your wandb team/user
 
+### Paper Reproduction Helpers
+
+For the CIFAR-10 class-wise forgetting results in Table 3, run the class-wise SLURM wrapper and then collect the outputs:
+
+```bash
+sbatch scripts/slurm_ddpm_classwise_table3.sh
+python scripts/collect_ddpm_classwise_table3.py --root results/fulleval
+```
+
+For the Figure 3 cat-forgetting grid, render a custom visualization from the chosen checkpoint folder:
+
+```bash
+CKPT_FOLDER=results/fulleval/<run-dir> bash scripts/render_ddpm_fig3_cat_grid.sh
+```
+
 ### wandb Sweeps
 
 Sweeps run the pipeline with different hyperparameter combinations. The sweep

@@ -847,9 +847,30 @@ class Diffusion(object):
         elif self.args.mode == "sample_classes":
             self.sample_classes(test_model, self.args.cond_scale)
         elif self.args.mode == "visualization":
-            self.sample_visualization(
-                model, str(self.args.cond_scale), self.args.cond_scale
+            visualization_counts = getattr(self.args, "visualization_counts", "")
+            visualization_name = getattr(self.args, "visualization_name", "") or str(
+                self.args.cond_scale
             )
+            if visualization_counts:
+                class_labels, _ = create_class_labels(
+                    self.args.classes_to_generate, n_classes=self.config.data.n_classes
+                )
+                counts = [int(x) for x in visualization_counts.split(",") if x.strip()]
+                if len(counts) != len(class_labels):
+                    raise ValueError(
+                        "visualization_counts must match classes_to_generate length"
+                    )
+                self.sample_visualization_custom(
+                    model,
+                    visualization_name,
+                    self.args.cond_scale,
+                    class_labels,
+                    counts,
+                )
+            else:
+                self.sample_visualization(
+                    model, visualization_name, self.args.cond_scale
+                )
 
     def sample_classes(self, model, cond_scale):
         """
@@ -1110,6 +1131,50 @@ class Diffusion(object):
                 tvu.save_image(
                     grid, os.path.join(self.args.ckpt_folder, f"sample-{name}.png")
                 )  # if called from sample.py
+
+    def sample_visualization_custom(self, model, name, cond_scale, class_labels, class_counts):
+        config = self.config
+        assert len(class_labels) == len(class_counts)
+
+        total_n_samples = sum(class_counts)
+        if total_n_samples <= 0:
+            raise ValueError("visualization class counts must sum to a positive number")
+
+        with torch.no_grad():
+            all_imgs = []
+            for class_label, class_count in zip(class_labels, class_counts):
+                for _ in tqdm.tqdm(
+                    range(class_count),
+                    desc=f"Generating visualization samples for class {class_label}",
+                ):
+                    x = torch.randn(
+                        1,
+                        config.data.channels,
+                        config.data.image_size,
+                        config.data.image_size,
+                        device=self.device,
+                    )
+                    c = torch.ones(x.size(0), device=self.device, dtype=int) * int(class_label)
+                    x = self.sample_image(x, model, c, cond_scale)
+                    x = inverse_data_transform(config, x)
+                    all_imgs.append(x)
+
+            all_imgs = torch.cat(all_imgs)
+            grid = tvu.make_grid(
+                all_imgs,
+                nrow=max(1, max(class_counts)),
+                normalize=True,
+                padding=0,
+            )
+
+            try:
+                tvu.save_image(
+                    grid, os.path.join(self.config.log_dir, f"sample-{name}.png")
+                )
+            except AttributeError:
+                tvu.save_image(
+                    grid, os.path.join(self.args.ckpt_folder, f"sample-{name}.png")
+                )
 
     def generate_mask(self):
         args, config = self.args, self.config
