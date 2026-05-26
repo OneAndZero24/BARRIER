@@ -47,6 +47,14 @@ METHOD="rl"
 USE_ACTUAL_BOUNDS=true
 REMAIN_FRAC=1.0
 BASE_SEED=1234
+DEFAULT_PRETRAIN_ROOT="/shared/results/common/miksa/intact/DDPM/results/cifar10"
+LOCAL_PRETRAIN_ROOT="$PWD/results/cifar10"
+TRAIN_BASE_IF_MISSING="${TRAIN_BASE_IF_MISSING:-true}"
+BASE_TRAIN_CONFIG="${BASE_TRAIN_CONFIG:-cifar10_train.yml}"
+
+# Optional override, e.g.:
+#   sbatch --export=ALL,PRETRAINED_CKPT_FOLDER=/path/to/base_run scripts/slurm_ddpm_cat_full_remain.sh
+PRETRAINED_CKPT_FOLDER="${PRETRAINED_CKPT_FOLDER:-}"
 
 # Base reference dataset for FID/classifier evaluation.
 REF_DATASET_DIR="$PWD/cifar10_without_label_${FORGET_CLASS}"
@@ -59,6 +67,41 @@ echo "  forget_class=${FORGET_CLASS}  lr=${LR}  n_iters=${NITERS}  lambda=${LAMB
 echo "  reduced_dim=${REDUCED_DIM}  method=${METHOD}  use_actual_bounds=${USE_ACTUAL_BOUNDS}"
 echo "  remain_fraction=${REMAIN_FRAC}  seed=${BASE_SEED}"
 echo "============================================"
+
+if [[ -z "${PRETRAINED_CKPT_FOLDER}" ]]; then
+    LATEST_CKPT_FILE="$(find "${DEFAULT_PRETRAIN_ROOT}" -type f -path '*/ckpts/ckpt.pth' 2>/dev/null | sort | tail -n1 || true)"
+    if [[ -n "${LATEST_CKPT_FILE}" ]]; then
+        PRETRAINED_CKPT_FOLDER="$(dirname "$(dirname "${LATEST_CKPT_FILE}")")"
+    fi
+fi
+
+if [[ -z "${PRETRAINED_CKPT_FOLDER}" ]]; then
+    LATEST_LOCAL_CKPT_FILE="$(find "${LOCAL_PRETRAIN_ROOT}" -type f -path '*/ckpts/ckpt.pth' 2>/dev/null | sort | tail -n1 || true)"
+    if [[ -n "${LATEST_LOCAL_CKPT_FILE}" ]]; then
+        PRETRAINED_CKPT_FOLDER="$(dirname "$(dirname "${LATEST_LOCAL_CKPT_FILE}")")"
+    fi
+fi
+
+if [[ -z "${PRETRAINED_CKPT_FOLDER}" || ! -f "${PRETRAINED_CKPT_FOLDER}/ckpts/ckpt.pth" ]]; then
+    if [[ "${TRAIN_BASE_IF_MISSING}" == "true" ]]; then
+        echo "No valid pretrained checkpoint found. Training base DDPM first."
+        python train.py --config "${BASE_TRAIN_CONFIG}" --mode train --seed "${BASE_SEED}"
+        LATEST_LOCAL_CKPT_FILE="$(find "${LOCAL_PRETRAIN_ROOT}" -type f -path '*/ckpts/ckpt.pth' 2>/dev/null | sort | tail -n1 || true)"
+        if [[ -n "${LATEST_LOCAL_CKPT_FILE}" ]]; then
+            PRETRAINED_CKPT_FOLDER="$(dirname "$(dirname "${LATEST_LOCAL_CKPT_FILE}")")"
+        fi
+    fi
+fi
+
+if [[ -z "${PRETRAINED_CKPT_FOLDER}" || ! -f "${PRETRAINED_CKPT_FOLDER}/ckpts/ckpt.pth" ]]; then
+    echo "Error: could not locate a valid pretrained DDPM checkpoint folder." >&2
+    echo "Set TRAIN_BASE_IF_MISSING=true to auto-train, or provide PRETRAINED_CKPT_FOLDER." >&2
+    echo "Set PRETRAINED_CKPT_FOLDER to a base run directory containing ckpts/ckpt.pth" >&2
+    echo "Example: PRETRAINED_CKPT_FOLDER=/shared/results/common/miksa/intact/DDPM/results/cifar10/<run_ts> sbatch scripts/slurm_ddpm_cat_full_remain.sh" >&2
+    exit 1
+fi
+
+echo "Using pretrained checkpoint folder: ${PRETRAINED_CKPT_FOLDER}"
 
 if [[ ! -d "${REF_DATASET_DIR}" ]]; then
   echo "Reference dataset not found at ${REF_DATASET_DIR}; generating it now."
@@ -88,6 +131,7 @@ remain_frac = float("${REMAIN_FRAC}")
 seed = int("${BASE_SEED}")
 
 cfg["paths"]["ref_dataset_dir"] = os.path.abspath("${REF_DATASET_DIR}")
+cfg["paths"]["pretrained_ckpt_folder"] = os.path.abspath("${PRETRAINED_CKPT_FOLDER}")
 cfg["unlearn"]["label_to_forget"] = forget_class
 cfg["unlearn"]["lr"] = lr
 cfg["unlearn"]["n_iters"] = niters
