@@ -25,32 +25,21 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --time=48:00:00
-#SBATCH --partition=plgrid-gpu-gh200
+#SBATCH --partition=dgxh100
+#SBATCH --qos=big
 #SBATCH --array=0-159
 
 set -euo pipefail
 
 # ---- Environment ----
-ml ML-bundle/25.10
-VENV_ROOT="${VENV_ROOT:-$SCRATCH/sd_venv}"
-if [ ! -f "$VENV_ROOT/bin/activate" ]; then
-    echo "ERROR: virtualenv not found at $VENV_ROOT"
-    echo "Create it with: ml ML-bundle/25.10 && python3.9 -m venv \"$VENV_ROOT\""
-    exit 1
-fi
-source "$VENV_ROOT/bin/activate"
+# Use the same conda environment and shared cache used by slurm_fulleval_class_all.sh
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ldm
+export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
+export RESULTS_ROOT=/shared/results/common/miksa/intact/SD
 cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
-if [ -n "${SCRATCH:-}" ]; then
-    CACHE_BASE="$SCRATCH/.cache"
-    RESULTS_ROOT="$SCRATCH/intact/SD"
-else
-    CACHE_BASE="$HOME/.cache/intact"
-    RESULTS_ROOT="$HOME/results/intact/SD"
-fi
-
-export CACHE_ROOT="$CACHE_BASE"
 export HF_HOME="$CACHE_ROOT/huggingface"
 export TORCH_HOME="$CACHE_ROOT/torch"
 export XDG_DATA_HOME="$CACHE_ROOT"
