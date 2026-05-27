@@ -1,0 +1,32 @@
+# =============================================================================
+# wandb Sweep – SD Class Forgetting Full Evaluation
+# =============================================================================
+# Each sweep trial runs the full 10-class forget/evaluate loop and logs the
+# averaged metrics. The sweep objective is to keep UA near 98% and the
+# remaining-class average near 80%.
+# =============================================================================
+
+program: scripts/run_class_fulleval_sweep.py
+method: grid
+name: sd-class-fulleval-30
+entity: oneandzero24
+project: intact-sd
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - "--config"
+  - "configs/pipeline_class_fulleval.yaml"
+
+metric:
+  name: target_gap
+  goal: minimize
+
+parameters:
+  unlearn.lr:
+    values: [3.5e-6, 5.0e-6, 7.5e-6, 1.0e-5, 1.5e-5]
+  unlearn.epochs:
+    values: [5, 10, 4]
+  intact.lambda_interval:
+    values: [2.0, 10.0]

@@ -45,6 +45,7 @@ if [ $# -eq 0 ]; then
   echo "Usage: $0 <sweep_name>"
   echo "Available sweeps:"
   echo "  - sweep_class"
+  echo "  - sweep_class_fulleval"
   echo "  - sweep_nsfw"
   exit 1
 fi

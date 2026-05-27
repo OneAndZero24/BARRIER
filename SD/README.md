@@ -39,9 +39,16 @@ fields in the pipeline YAML.
 # Class forgetting sweep
 ./run_sweep.sh sweep_class
 
+# Full-eval sweep over all 10 forgotten classes
+wandb sweep configs/sweep_class_fulleval.yaml
+
 # NSFW removal sweep
 ./run_sweep.sh sweep_nsfw
 ```
+
+For SLURM, use `scripts/slurm_class_fulleval_sweep.sh <wandb-sweep-id>`. Each
+trial runs the 10 class-forgetting evaluations, then logs average UA, average
+retain accuracy, and `target_gap` for sweep selection.
 
 To add a new sweep parameter, copy any dotted config key into the sweep's
 `parameters:` block with `values:` (grid) or `min:`/`max:` (random).

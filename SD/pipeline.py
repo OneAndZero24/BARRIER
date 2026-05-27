@@ -1288,6 +1288,8 @@ def main():
                         help="Skip unlearning, only run generation + evaluation")
     parser.add_argument("--fid-batch-size", type=int, default=64,
                         help="Batch size for FID feature extraction (lower = less memory)")
+    parser.add_argument("--metrics-out", type=str, default=None,
+                        help="Optional JSON file path to write final metrics")
     cli = parser.parse_args()
 
     cfg = load_config(cli.config)
@@ -1549,6 +1551,14 @@ def main():
         wandb.finish()
     else:
         log.info("wandb disabled, skipping logging")
+
+    if cli.metrics_out:
+        import json
+
+        metrics_out_path = Path(cli.metrics_out)
+        metrics_out_path.parent.mkdir(parents=True, exist_ok=True)
+        with metrics_out_path.open("w") as f:
+            json.dump(metrics, f, indent=2, sort_keys=True)
 
     log.info(f"Pipeline complete. Metrics: {metrics}")
 
