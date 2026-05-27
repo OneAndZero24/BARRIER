@@ -36,7 +36,7 @@ paths:
 unlearn:
   method: "intact"
   class_to_forget: 0
-  alpha: 0.12
+  alpha: 0.0
   batch_size: 8
   epochs: 3
   lr: 5.0e-6

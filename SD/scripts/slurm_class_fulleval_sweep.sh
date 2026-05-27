@@ -16,6 +16,9 @@
 
 set -euo pipefail
 
+WANDB_ENTITY="oneandzero24"
+WANDB_PROJECT="intact-sd"
+
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <wandb-sweep-id>"
   exit 1
@@ -29,4 +32,4 @@ export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
 cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
-wandb agent "$SWEEP_ID"
+wandb agent "$WANDB_ENTITY/$WANDB_PROJECT/$SWEEP_ID"

@@ -18,6 +18,7 @@ export CLIP_CACHE_DIR="/shared/results/common/miksa/.cache/clip"
 
 MAIN_DIR="configs"
 PROJECT_NAME="intact-sd"
+ENTITY_NAME="oneandzero24"
 
 run_sweep_and_agent() {
   SWEEP_NAME="$1"
@@ -37,7 +38,7 @@ run_sweep_and_agent() {
   rm ${SWEEP_NAME}_temp_output.txt
 
   echo "Starting WandB agent for sweep ID: $SWEEP_ID"
-  wandb agent "$SWEEP_ID"
+  wandb agent "$ENTITY_NAME/$PROJECT_NAME/$SWEEP_ID"
 }
 
 # Main execution
