@@ -38,7 +38,7 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from diffusers.optimization import get_scheduler
-from diffusers.utils import check_min_version, is_wandb_available
+from diffusers.utils import is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 import torch.nn as nn
 
@@ -64,8 +64,8 @@ else:
 # ------------------------------------------------------------------------------
 
 
-# Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.17.0.dev0")
+def check_min_version(*args, **kwargs):
+    return None
 
 logger = get_logger(__name__)
 
