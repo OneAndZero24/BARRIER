@@ -54,7 +54,7 @@ BASE_MODEL="CompVis/stable-diffusion-v1-4"
 EXTERNAL_ATTACKS="ud,rab,cce"
 RAB_COMMAND=""
 
-python SD/experiments/table2/run_table2.py \
+python experiments/table2/run_table2.py \
   --concept "${CONCEPT}" \
   --method "${METHOD}" \
   --checkpoint "${CHECKPOINT}" \
