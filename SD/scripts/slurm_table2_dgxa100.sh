@@ -23,6 +23,7 @@ set -euo pipefail
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
+pip install --disable-pip-version-check --quiet git+https://github.com/Phoveran/fastargs.git@main#egg=fastargs
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export HF_HOME="/shared/results/common/miksa/.cache/huggingface"
 export TORCH_HOME="/shared/results/common/miksa/.cache/torch"

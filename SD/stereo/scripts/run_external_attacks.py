@@ -8,6 +8,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _ensure_pip_dependency(import_name: str, pip_spec: str) -> None:
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"[deps] installing missing dependency: {pip_spec}")
+        subprocess.run([sys.executable, "-m", "pip", "install", pip_spec], check=True)
+
+
 def _run(cmd, cwd: Path) -> None:
     print(f"[run] (cwd={cwd}) {' '.join(cmd)}")
     subprocess.run(cmd, cwd=str(cwd), check=True)
@@ -16,6 +24,8 @@ def _run(cmd, cwd: Path) -> None:
 def run_ud(args: argparse.Namespace) -> None:
     if not args.ud_config:
         raise ValueError("--ud_config is required for attack=ud")
+
+    _ensure_pip_dependency("fastargs", "git+https://github.com/Phoveran/fastargs.git@main#egg=fastargs")
 
     ud_root = REPO_ROOT / "SD" / "stereo" / "attacks" / "vendors" / "unlearndiffatk"
     cmd = [
