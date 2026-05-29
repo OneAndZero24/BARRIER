@@ -15,8 +15,20 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SD_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# SLURM executes a copied script from /var/spool/slurmd; use submit dir instead.
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+  cd "${SLURM_SUBMIT_DIR}"
+fi
+
+if [[ -f "experiments/table2/calculate_asr.py" ]]; then
+  SD_ROOT="$PWD"
+elif [[ -f "SD/experiments/table2/calculate_asr.py" ]]; then
+  SD_ROOT="$PWD/SD"
+else
+  echo "Could not locate experiments/table2/calculate_asr.py from submit directory: $PWD" >&2
+  exit 1
+fi
+
 cd "${SD_ROOT}"
 
 # ---- Environment ----
