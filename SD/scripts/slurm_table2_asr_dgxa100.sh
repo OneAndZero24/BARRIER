@@ -46,13 +46,43 @@ ATTACK_ROOT=${ATTACK_ROOT:-"${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/src
 
 # Baseline no-attack logs.
 # Set this to the no-attack run root (or a single run directory containing config.json/log.json).
-BASELINE_ROOT=${BASELINE_ROOT:-""}
+BASELINE_ROOT=${BASELINE_ROOT:-"${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/src/files/results/no_attack_esd_nudity"}
 
-if [[ -z "${BASELINE_ROOT}" ]]; then
-  echo "BASELINE_ROOT is required for ASR calculation (no-attack logs)." >&2
-  echo "Example submit:" >&2
-  echo "  BASELINE_ROOT=/path/to/no_attack_results sbatch scripts/slurm_table2_asr_dgxa100.sh" >&2
-  exit 1
+# If baseline logs are missing, generate them automatically with UD no_attack config.
+AUTO_GENERATE_BASELINE=${AUTO_GENERATE_BASELINE:-1}
+UD_SRC_ROOT="${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/src"
+NO_ATTACK_CONFIG=${NO_ATTACK_CONFIG:-"${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/configs/nudity/no_attack_esd_nudity_classifier.json"}
+NO_ATTACK_RUN_NAME=${NO_ATTACK_RUN_NAME:-"attack_idx_0"}
+NO_ATTACK_ATTACK_IDX=${NO_ATTACK_ATTACK_IDX:-0}
+
+# Optional overrides for baseline generation.
+TARGET_CKPT=${TARGET_CKPT:-""}
+DATASET_PATH=${DATASET_PATH:-""}
+
+if [[ ! -e "${BASELINE_ROOT}" ]]; then
+  if [[ "${AUTO_GENERATE_BASELINE}" == "1" ]]; then
+    echo "BASELINE_ROOT missing; generating no-attack baseline logs..."
+    cd "${UD_SRC_ROOT}"
+    BASELINE_CMD=(
+      python execs/attack.py
+      --config-file "${NO_ATTACK_CONFIG}"
+      --logger.json.root "${BASELINE_ROOT}"
+      --logger.name "${NO_ATTACK_RUN_NAME}"
+      --attacker.attack_idx "${NO_ATTACK_ATTACK_IDX}"
+    )
+    if [[ -n "${TARGET_CKPT}" ]]; then
+      BASELINE_CMD+=(--task.target_ckpt "${TARGET_CKPT}")
+    fi
+    if [[ -n "${DATASET_PATH}" ]]; then
+      BASELINE_CMD+=(--task.dataset_path "${DATASET_PATH}" --attacker.no_attack.dataset_path "${DATASET_PATH}")
+    fi
+    "${BASELINE_CMD[@]}"
+    cd "${SD_ROOT}"
+  else
+    echo "BASELINE_ROOT does not exist: ${BASELINE_ROOT}" >&2
+    echo "Set AUTO_GENERATE_BASELINE=1 or provide BASELINE_ROOT manually." >&2
+    exit 1
+  fi
 fi
 
 # Optional CSV summary output.
