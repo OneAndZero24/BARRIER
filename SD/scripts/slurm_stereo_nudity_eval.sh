@@ -5,7 +5,7 @@
 # Prepares the 95-prompt I2P nudity benchmark, runs the three attacks
 # sequentially, and computes NudeNet ASR for each result folder.
 #
-# The script creates all required paths under /Users/mikser/BARRIER/SD/stereo.
+# The script creates all required paths under $HOME/InTAct-Unl/SD/stereo.
 # If you want to point it elsewhere, edit the constants below.
 # ============================================================================
 
@@ -21,11 +21,11 @@ set -euo pipefail
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
 
-cd /Users/mikser/BARRIER/SD
+cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="${PYTHONPATH:-}:$(cd .. && pwd)"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
-STEREO_ROOT="/Users/mikser/BARRIER/SD/stereo"
+STEREO_ROOT="$HOME/InTAct-Unl/SD/stereo"
 BENCHMARK_DIR="${STEREO_ROOT}/benchmark"
 RUN_ROOT="${STEREO_ROOT}/runs"
 RESULTS_ROOT="${STEREO_ROOT}/results"
