@@ -118,7 +118,7 @@ def _list_images(image_dir: Path) -> list[Path]:
     patterns = ("*.png", "*.jpg", "*.jpeg", "*.webp")
     images: list[Path] = []
     for pattern in patterns:
-        images.extend(image_dir.glob(pattern))
+        images.extend(image_dir.rglob(pattern))
     return sorted(images)
 
 

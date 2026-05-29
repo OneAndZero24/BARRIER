@@ -2,8 +2,8 @@
 # ============================================================================
 # SLURM – STEREO Nudity End-to-End Pipeline
 # ============================================================================
-# Prepares the 95-prompt I2P nudity benchmark, runs the three attacks
-# sequentially, and computes NudeNet ASR for each result folder.
+# Prepares the 95-prompt I2P nudity benchmark, runs the supported attack
+# sequentially, and computes NudeNet ASR for the result folder.
 #
 # The script creates all required paths under $HOME/InTAct-Unl/SD/stereo.
 # If you want to point it elsewhere, edit the constants below.
@@ -38,16 +38,13 @@ MODEL_NAME="compvis-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06"
 MODEL_PATH="/shared/results/common/miksa/intact/SD/models/${MODEL_NAME}/diffusers-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06.pt"
 
 DIFFUSION_MU_REPO="${VENDOR_ROOT}/Diffusion-MU-Attack"
-RING_A_BELL_REPO="${VENDOR_ROOT}/Ring-A-Bell"
-CCE_REPO="${VENDOR_ROOT}/circumventing-concept-erasure"
 
 DIFFUSION_MU_DIR="${RUN_ROOT}/diffusion_mu/generated"
-RING_A_BELL_DIR="${RUN_ROOT}/ring_a_bell/generated"
-CCE_DIR="${RUN_ROOT}/cce/generated"
-CCE_EMBED_DIR="${RUN_ROOT}/cce/embeddings"
+DIFFUSION_MU_LOGS="${RUN_ROOT}/diffusion_mu/logs"
 
 mkdir -p "${BENCHMARK_DIR}" "${RUN_ROOT}" "${RESULTS_ROOT}" "${PROMPTS_ROOT}" "${VENDOR_ROOT}" \
-  "${DIFFUSION_MU_DIR}" "${RING_A_BELL_DIR}" "${CCE_DIR}" "${CCE_EMBED_DIR}"
+  "${DIFFUSION_MU_DIR}"
+mkdir -p "${DIFFUSION_MU_LOGS}"
 
 clone_repo() {
   local repo_url="$1"
@@ -108,40 +105,14 @@ score_attack() {
 run_diffusion_mu_attack() {
   clone_repo "https://github.com/OPTML-Group/Diffusion-MU-Attack.git" "${DIFFUSION_MU_REPO}"
   pushd "${DIFFUSION_MU_REPO}" >/dev/null
-  python attack.py \
-    --model_path "${MODEL_PATH}" \
-    --prompts_path "${PROMPTS_TXT}" \
-    --output_dir "${DIFFUSION_MU_DIR}"
-  popd >/dev/null
-}
 
-run_ring_a_bell_attack() {
-  clone_repo "https://github.com/chiayi-hsu/Ring-A-Bell.git" "${RING_A_BELL_REPO}"
-  pushd "${RING_A_BELL_REPO}" >/dev/null
-  python rab_attack.py \
-    --model_path "${MODEL_PATH}" \
-    --prompts_path "${PROMPTS_TXT}" \
-    --empirical_concept_len 3 \
-    --prompt_len 16 \
-    --output_dir "${RING_A_BELL_DIR}"
-  popd >/dev/null
-}
-
-run_cce_attack() {
-  clone_repo "https://github.com/NYU-DICE-Lab/circumventing-concept-erasure.git" "${CCE_REPO}" "new_packages"
-  pushd "${CCE_REPO}" >/dev/null
-
-  python textual_inversion.py \
-    --model_path "${MODEL_PATH}" \
-    --concept "nudity" \
-    --output_dir "${CCE_EMBED_DIR}"
-
-  python generate_cce.py \
-    --model_path "${MODEL_PATH}" \
-    --embedding_path "${CCE_EMBED_DIR}/learned_embeds.bin" \
-    --prompts_path "${PROMPTS_TXT}" \
-    --prepend_embedding True \
-    --output_dir "${CCE_DIR}"
+  for idx in $(seq 0 94); do
+    python src/execs/attack.py \
+      --config-file configs/nudity/text_grad_esd_nudity_classifier.json \
+      --attacker.attack_idx "${idx}" \
+      --logger.name "attack_idx_${idx}" \
+      --logger.json.root "${DIFFUSION_MU_LOGS}"
+  done
 
   popd >/dev/null
 }
@@ -153,11 +124,5 @@ echo "Prompt text: ${PROMPTS_TXT}"
 
 run_diffusion_mu_attack
 score_attack "diffusion_mu" "${DIFFUSION_MU_DIR}"
-
-run_ring_a_bell_attack
-score_attack "ring_a_bell" "${RING_A_BELL_DIR}"
-
-run_cce_attack
-score_attack "cce" "${CCE_DIR}"
 
 echo "End-to-end STEREO nudity pipeline complete."
