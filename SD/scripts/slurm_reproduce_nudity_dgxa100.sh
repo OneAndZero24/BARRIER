@@ -47,15 +47,12 @@ export HF_HOME="/shared/results/common/${USER:-user}/.cache/huggingface"
 export TORCH_HOME="/shared/results/common/${USER:-user}/.cache/torch"
 export XDG_CACHE_HOME="/shared/results/common/${USER:-user}/.cache"
 
-# Inputs
-CHECKPOINT=${CHECKPOINT:-}
-if [[ -z "${CHECKPOINT}" ]]; then
-  echo "Provide CHECKPOINT=/path/to/checkpoint.pt" >&2
-  exit 1
-fi
+# Inputs (hardcoded per user request)
+CHECKPOINT="/shared/results/common/miksa/intact/SD/models/compvis-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06/diffusers-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06.pt"
 
-OUTPUT_ROOT=${OUTPUT_ROOT:-"/shared/results/common/${USER:-user}/intact/SD/nudity_reproduce_$(date +%Y%m%d_%H%M%S)"}
-I2P_PROMPTS_PATH=${I2P_PROMPTS_PATH:-}
+OUTPUT_ROOT=${OUTPUT_ROOT:-"/shared/results/common/miksa/intact/SD/nudity_reproduce_$(date +%Y%m%d_%H%M%S)"}
+# Use the provided I2P prompts CSV in-repo
+I2P_PROMPTS_PATH="SD/prompts/unsafe-prompts4703.csv"
 
 # Ensure dependencies
 python - <<'PY'
