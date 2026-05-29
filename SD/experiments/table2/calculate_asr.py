@@ -24,9 +24,24 @@ def convert_time(time_str: str) -> float:
     return hours * 60 + minutes + seconds_microseconds / 60
 
 
+def _is_run_dir(path: Path) -> bool:
+    return path.is_dir() and (path / "config.json").exists() and (path / "log.json").exists()
+
+
 def _collect_experiments(root: Path) -> list:
+    if not root.exists():
+        raise FileNotFoundError(
+            f"Path does not exist: {root}. "
+            "For UD defaults, check stereo/attacks/vendors/unlearndiffatk/src/files/results/."
+        )
+
+    if _is_run_dir(root):
+        return [get_parser(str(root))]
+
     experiments = []
     for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
         try:
             experiments.append(get_parser(str(entry)))
         except Exception as exc:

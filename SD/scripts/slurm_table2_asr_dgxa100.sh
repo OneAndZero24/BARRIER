@@ -41,13 +41,27 @@ export XDG_CACHE_HOME="/shared/results/common/miksa/.cache"
 
 # ---- Inputs ----
 # Attacked UnlearnDiffAtk logs.
-ATTACK_ROOT="/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/attacks/barrier_nudity/ud_runs"
+# Default points to UD's own logger output path used by run_table2.py.
+ATTACK_ROOT=${ATTACK_ROOT:-"${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/src/files/results/text_grad_esd_nudity_classifier"}
 
 # Baseline no-attack logs.
-BASELINE_ROOT="/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/attacks/barrier_nudity/no_attack_runs"
+# Set this to the no-attack run root (or a single run directory containing config.json/log.json).
+BASELINE_ROOT=${BASELINE_ROOT:-""}
+
+if [[ -z "${BASELINE_ROOT}" ]]; then
+  echo "BASELINE_ROOT is required for ASR calculation (no-attack logs)." >&2
+  echo "Example submit:" >&2
+  echo "  BASELINE_ROOT=/path/to/no_attack_results sbatch scripts/slurm_table2_asr_dgxa100.sh" >&2
+  exit 1
+fi
 
 # Optional CSV summary output.
-CSV_PATH="/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/metrics/asr_summary.csv"
+CSV_PATH=${CSV_PATH:-"/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/metrics/asr_summary.csv"}
+
+echo "SD_ROOT=${SD_ROOT}"
+echo "ATTACK_ROOT=${ATTACK_ROOT}"
+echo "BASELINE_ROOT=${BASELINE_ROOT}"
+echo "CSV_PATH=${CSV_PATH}"
 
 python experiments/table2/calculate_asr.py \
   --root "${ATTACK_ROOT}" \
