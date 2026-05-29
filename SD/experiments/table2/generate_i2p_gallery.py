@@ -62,7 +62,7 @@ def main():
                     add_special_tokens=True,
                     truncation=False,
                     return_tensors=None,
-                ).input_ids[0]
+                )["input_ids"]
             )
         )
         df = df[token_lengths <= 77].copy()
