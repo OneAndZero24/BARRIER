@@ -14,8 +14,3 @@ class NudeDetector:
     def censor(self, image_path, classes=None, output_path=None):
         classes = [] if classes is None else classes
         return self._detector.censor(image_path, classes=classes, output_path=output_path)
-
-
-if __name__ == "__main__":
-    detector = NudeDetector()
-    detections = detector.detect("/Users/praneeth.bedapudi/Desktop/images.jpeg")
