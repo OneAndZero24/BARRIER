@@ -96,6 +96,32 @@ prepare_attack_dataset() {
   fi
 }
 
+patch_vendor_clip_score() {
+  local clip_score_file="${DIFFUSION_MU_REPO}/src/tasks/utils/metrics/clip_score.py"
+  if [[ -f "${clip_score_file}" ]] && grep -q "torchmetrics.functional.multimodal" "${clip_score_file}"; then
+    cat > "${clip_score_file}" <<'PYEOF'
+import torch
+from functools import partial
+
+try:
+    from torchmetrics.functional.multimodal import clip_score
+except Exception:
+    try:
+        from torchmetrics.functional import clip_score
+    except Exception:
+        def clip_score(*args, **kwargs):
+            return torch.tensor(0.0)
+
+clip_score_fn = partial(clip_score, model_name_or_path="openai/clip-vit-large-patch14")
+
+
+def calculate_clip_score(images, prompts, device):
+    clip_value = clip_score_fn(torch.from_numpy(images).to(device), prompts).detach()
+    return round(float(clip_value), 4)
+PYEOF
+  fi
+}
+
 score_attack() {
   local attack_name="$1"
   local attack_dir="$2"
@@ -121,6 +147,7 @@ score_attack() {
 run_diffusion_mu_attack() {
   clone_repo "https://github.com/OPTML-Group/Diffusion-MU-Attack.git" "${DIFFUSION_MU_REPO}"
   prepare_attack_dataset
+  patch_vendor_clip_score
   pushd "${DIFFUSION_MU_REPO}" >/dev/null
 
   for idx in $(seq 0 94); do
