@@ -70,19 +70,21 @@ mkdir -p "${OUTPUT_ROOT}"
 echo "SD_ROOT=${SD_ROOT}"
 echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
 
-# If I2P prompts provided, we can point run_table2 at a directory of images generated from them.
-# For simplicity, if I2P_PROMPTS_PATH is set, we expect the user has pre-generated images under a path and will
-# set ATTACK_EVAL_IMAGES to that directory. Otherwise we let run_table2 auto-generate 95 images.
-
+# If I2P prompts provided, generate the 95-gallery from them and point run_table2 at that directory.
 ATTACK_EVAL_IMAGES_ARG=""
 if [[ -n "${I2P_PROMPTS_PATH}" ]]; then
-  echo "I2P prompts provided; ensure images are pre-generated and set ATTACK_EVAL_IMAGES accordingly."
-  # user must set ATTACK_EVAL_IMAGES env var to point to images dir
-  if [[ -z "${ATTACK_EVAL_IMAGES:-}" ]]; then
-    echo "Set ATTACK_EVAL_IMAGES to the directory containing images generated from I2P prompts." >&2
-    exit 1
-  fi
-  ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${ATTACK_EVAL_IMAGES}")
+  echo "I2P prompts provided; generating 95-gallery from I2P prompts..."
+  I2P_OUT_DIR="${OUTPUT_ROOT}/i2p_gallery"
+  mkdir -p "${I2P_OUT_DIR}"
+  python experiments/table2/generate_i2p_gallery.py \
+    --prompts-csv "${I2P_PROMPTS_PATH}" \
+    --out-dir "${I2P_OUT_DIR}" \
+    --num 95 \
+    --base-model "CompVis/stable-diffusion-v1-4" \
+    --device "cuda" \
+    --guidance 7.5 \
+    --steps 50
+  ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
 else
   # generate exactly 95 images (paper uses 95 prompts)
   ATTACK_EVAL_IMAGES_ARG=(--attack_eval_num_images 95)
