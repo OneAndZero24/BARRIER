@@ -74,7 +74,7 @@ def main():
             f"Only {len(df)} prompts remain after filtering, fewer than requested --num {args.num}."
         )
 
-    filtered_prompts_csv = out_dir / "i2p_prompts_filtered.csv"
+    filtered_prompts_csv = out_dir.parent / "i2p_prompts_filtered.csv"
     df.to_csv(filtered_prompts_csv, index=False)
 
     module.generate_images(
