@@ -1,107 +1,95 @@
 #!/usr/bin/env python3
-"""Generate a 95-image I2P gallery from a prompts CSV using Stable Diffusion.
+"""Generate a 95-image gallery using the repo's SD eval pipeline.
 
-Behavior:
-- If the CSV has a column named 'nudity_percentage' the script prefers rows with >50.
-- Otherwise it uses the first available text-like column or plain lines.
+This matches the normal SD NSFW flow because it delegates to
+`eval-scripts/generate-images.py`, which reads prompts from a CSV and does not
+apply a diffusers safety checker that can turn outputs black.
 """
 import argparse
-import csv
-import os
+import importlib.util
 import sys
-import torch
+from pathlib import Path
 
-
-def read_prompts(csv_path):
-    # try CSV DictReader first
-    prompts = []
-    try:
-        with open(csv_path, newline='', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            if not rows:
-                return []
-            # prefer nudity_percentage > 50
-            if 'nudity_percentage' in rows[0]:
-                filtered = [r for r in rows if r.get('nudity_percentage')]
-                try:
-                    filtered = [r for r in rows if float(r.get('nudity_percentage', 0)) > 50.0]
-                except Exception:
-                    filtered = []
-                src = filtered or rows
-            else:
-                src = rows
-
-            # find a good text column
-            text_col = None
-            for key in ['prompt', 'text', 'prompt_text', 'caption']:
-                if key in src[0]:
-                    text_col = key
-                    break
-            if text_col:
-                prompts = [r[text_col].strip() for r in src if r.get(text_col)]
-            else:
-                # fallback: use first non-empty column
-                cols = list(src[0].keys())
-                if cols:
-                    prompts = [r[cols[0]].strip() for r in src if r.get(cols[0])]
-    except Exception:
-        # fallback: try reading as plain lines
-        try:
-            with open(csv_path, 'r', encoding='utf-8') as f:
-                prompts = [l.strip() for l in f if l.strip()]
-        except Exception:
-            prompts = []
-    return prompts
+import pandas as pd
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prompts-csv', required=True)
-    parser.add_argument('--out-dir', required=True)
-    parser.add_argument('--num', type=int, default=95)
-    parser.add_argument('--base-model', default='CompVis/stable-diffusion-v1-4')
-    parser.add_argument('--device', default='cuda')
-    parser.add_argument('--guidance', type=float, default=7.5)
-    parser.add_argument('--steps', type=int, default=50)
-    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument("--prompts-csv", required=True)
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--num", type=int, default=95)
+    parser.add_argument("--base-model", default="CompVis/stable-diffusion-v1-4")
+    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--guidance", type=float, default=7.5)
+    parser.add_argument("--steps", type=int, default=50)
+    parser.add_argument("--model-dir", default="models")
     args = parser.parse_args()
 
-    os.makedirs(args.out_dir, exist_ok=True)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    prompts = read_prompts(args.prompts_csv)
-    if not prompts:
-        print('No prompts found in', args.prompts_csv, file=sys.stderr)
-        sys.exit(2)
+    df = pd.read_csv(args.prompts_csv)
+    if "prompt" not in df.columns:
+        raise SystemExit(f"Expected a 'prompt' column in {args.prompts_csv}")
 
-    prompts = prompts[: args.num]
+    if "nudity_percentage" not in df.columns:
+        raise SystemExit(f"Expected a 'nudity_percentage' column in {args.prompts_csv}")
 
+    df = df[df["nudity_percentage"] > 0.5].copy()
+    if df.empty:
+        raise SystemExit(f"No prompts left after nudity_percentage > 0.5 filter in {args.prompts_csv}")
+
+    eval_scripts_dir = Path(__file__).resolve().parents[2] / "eval-scripts" / "generate-images.py"
+    spec = importlib.util.spec_from_file_location("generate_images", eval_scripts_dir)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    tokenizer = None
     try:
-        from diffusers import StableDiffusionPipeline
-    except Exception as e:
-        print('diffusers not installed or failed to import:', e, file=sys.stderr)
-        sys.exit(3)
+        from transformers import CLIPTokenizer
 
-    device = args.device
-    torch_dtype = torch.float16 if ('cuda' in device and torch.cuda.is_available()) else torch.float32
-    # Disable diffusers safety checker to allow NSFW outputs (consistent with project NSFW pipeline)
-    pipe = StableDiffusionPipeline.from_pretrained(args.base_model, safety_checker=None, torch_dtype=torch_dtype)
-    pipe = pipe.to(device)
+        tokenizer = CLIPTokenizer.from_pretrained(args.base_model, subfolder="tokenizer")
+    except Exception:
+        tokenizer = None
 
-    for i, prompt in enumerate(prompts):
-        seed = args.seed + i
-        generator = torch.Generator(device=device if device.startswith('cuda') else 'cpu')
-        try:
-            generator = generator.manual_seed(seed)
-        except Exception:
-            generator = None
+    if tokenizer is not None:
+        token_lengths = df["prompt"].astype(str).map(
+            lambda prompt: len(
+                tokenizer(
+                    prompt,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=tokenizer.model_max_length,
+                    return_tensors="pt",
+                ).input_ids[0]
+            )
+        )
+        df = df[token_lengths < 77].copy()
+        if df.empty:
+            raise SystemExit(f"No prompts left after token-length < 77 filter in {args.prompts_csv}")
 
-        out = pipe(prompt, guidance_scale=args.guidance, num_inference_steps=args.steps, generator=generator)
-        image = out.images[0]
-        fn = os.path.join(args.out_dir, f"{i:03d}.png")
-        image.save(fn)
-        print('Wrote', fn)
+    filtered_prompts_csv = out_dir / "i2p_prompts_filtered.csv"
+    df.to_csv(filtered_prompts_csv, index=False)
+
+    module.generate_images(
+        model_name="",
+        prompts_path=str(filtered_prompts_csv),
+        save_path=str(out_dir),
+        device=args.device,
+        guidance_scale=args.guidance,
+        image_size=512,
+        ddim_steps=args.steps,
+        num_samples=1,
+        from_case=0,
+        base_model_path=args.base_model,
+        base_config_path=None,
+        model_dir=args.model_dir,
+        max_prompts=args.num,
+        n_outer=1,
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
