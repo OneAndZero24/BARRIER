@@ -32,8 +32,10 @@ if [[ -f "experiments/table2/run_table2.py" ]]; then
   SD_ROOT="$PWD"
 elif [[ -f "SD/experiments/table2/run_table2.py" ]]; then
   SD_ROOT="$PWD/SD"
+elif [[ -f "$HOME/InTAct-Unl/SD/experiments/table2/run_table2.py" ]]; then
+  SD_ROOT="$HOME/InTAct-Unl/SD"
 else
-  echo "Could not locate experiments/table2/run_table2.py from submit directory: $PWD" >&2
+  echo "Could not locate experiments/table2/run_table2.py from submit directory: $PWD or under $HOME" >&2
   exit 1
 fi
 
@@ -52,7 +54,7 @@ CHECKPOINT="/shared/results/common/miksa/intact/SD/models/compvis-intact-nsfw-ta
 
 OUTPUT_ROOT=${OUTPUT_ROOT:-"/shared/results/common/miksa/intact/SD/nudity_reproduce_$(date +%Y%m%d_%H%M%S)"}
 # Use the provided I2P prompts CSV in-repo
-I2P_PROMPTS_PATH="SD/prompts/unsafe-prompts4703.csv"
+I2P_PROMPTS_PATH="${I2P_PROMPTS_PATH:-$HOME/InTAct-Unl/SD/prompts/unsafe-prompts4703.csv}"
 
 # Ensure dependencies
 python - <<'PY'
