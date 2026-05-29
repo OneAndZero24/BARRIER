@@ -78,15 +78,30 @@ if [[ -n "${I2P_PROMPTS_PATH}" ]]; then
   echo "I2P prompts provided; generating 95-gallery from I2P prompts..."
   I2P_OUT_DIR="${OUTPUT_ROOT}/i2p_gallery"
   mkdir -p "${I2P_OUT_DIR}"
-  python experiments/table2/generate_i2p_gallery.py \
-    --prompts-csv "${I2P_PROMPTS_PATH}" \
-    --out-dir "${I2P_OUT_DIR}" \
-    --num 95 \
-    --base-model "CompVis/stable-diffusion-v1-4" \
-    --device "cuda" \
-    --guidance 7.5 \
-    --steps 50
-  ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
+  if [[ -f "experiments/table2/generate_i2p_gallery.py" ]]; then
+    python experiments/table2/generate_i2p_gallery.py \
+      --prompts-csv "${I2P_PROMPTS_PATH}" \
+      --out-dir "${I2P_OUT_DIR}" \
+      --num 95 \
+      --base-model "CompVis/stable-diffusion-v1-4" \
+      --device "cuda" \
+      --guidance 7.5 \
+      --steps 50
+    ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
+  elif [[ -f "$HOME/InTAct-Unl/SD/experiments/table2/generate_i2p_gallery.py" ]]; then
+    python "$HOME/InTAct-Unl/SD/experiments/table2/generate_i2p_gallery.py" \
+      --prompts-csv "${I2P_PROMPTS_PATH}" \
+      --out-dir "${I2P_OUT_DIR}" \
+      --num 95 \
+      --base-model "CompVis/stable-diffusion-v1-4" \
+      --device "cuda" \
+      --guidance 7.5 \
+      --steps 50
+    ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
+  else
+    echo "generate_i2p_gallery.py not found in repository or under $HOME; falling back to run_table2 auto-generation."
+    ATTACK_EVAL_IMAGES_ARG=(--attack_eval_num_images 95)
+  fi
 else
   # generate exactly 95 images (paper uses 95 prompts)
   ATTACK_EVAL_IMAGES_ARG=(--attack_eval_num_images 95)
