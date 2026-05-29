@@ -12,6 +12,7 @@ import argparse
 import copy
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -108,6 +109,16 @@ def load_metrics_if_present(metrics_path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
+def remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    elif path.exists():
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def numeric_metric(metrics: Dict[str, Any], key: str) -> Optional[float]:
     value = metrics.get(key)
     if isinstance(value, bool):
@@ -135,30 +146,38 @@ def main() -> None:
 
     trial_key = trial_key_from_config(base_cfg)
     base_output_dir = Path(base_cfg["paths"]["output_dir"])
-    base_model_dir = Path(base_cfg["paths"]["model_save_dir"])
-    base_logs_dir = Path(base_cfg["paths"]["logs_dir"])
-    base_cfg["paths"]["output_dir"] = str(base_output_dir / f"sweep_{trial_key}")
-    base_cfg["paths"]["model_save_dir"] = str(base_model_dir / f"sweep_{trial_key}")
-    base_cfg["paths"]["logs_dir"] = str(base_logs_dir / f"sweep_{trial_key}")
+    trial_root = base_output_dir / f"sweep_{trial_key}"
+    resume_root = trial_root / "resume"
+    tmp_root = trial_root / "tmp"
+    trial_root.mkdir(parents=True, exist_ok=True)
+    resume_root.mkdir(parents=True, exist_ok=True)
 
     class_results: List[Dict[str, Any]] = []
 
     for class_id, class_name in enumerate(IMAGENETTE_CLASSES):
         class_cfg = copy.deepcopy(base_cfg)
         class_cfg["unlearn"]["class_to_forget"] = class_id
-        class_cfg["paths"]["output_dir"] = str(Path(base_cfg["paths"]["output_dir"]) / f"class_{class_id}")
+        class_cfg["unlearn"]["save_compvis"] = False
+        class_cfg["unlearn"]["save_diffusers"] = False
+        class_cfg["unlearn"]["save_history_logs"] = False
+        class_cfg["paths"]["output_dir"] = str(trial_root / f"class_{class_id}")
+        class_cfg["paths"]["model_save_dir"] = str(tmp_root / f"class_{class_id}" / "models")
+        class_cfg["paths"]["logs_dir"] = str(tmp_root / f"class_{class_id}" / "logs")
 
         with tempfile.TemporaryDirectory(prefix=f"sd_fulleval_{class_id}_") as tmpdir:
             tmp_path = Path(tmpdir)
             cfg_path = tmp_path / "config.yaml"
             metrics_path = tmp_path / "metrics.json"
-            existing_metrics_path = Path(class_cfg["paths"]["output_dir"]) / "metrics.json"
+            existing_metrics_path = resume_root / f"class_{class_id}" / "metrics.json"
             metrics = load_metrics_if_present(existing_metrics_path)
             if metrics is None:
                 existing_metrics_path.parent.mkdir(parents=True, exist_ok=True)
                 write_config(cfg_path, class_cfg)
                 metrics = run_pipeline(script_dir, cfg_path, metrics_path)
                 existing_metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True))
+            remove_path(Path(class_cfg["paths"]["output_dir"]))
+            remove_path(Path(class_cfg["paths"]["model_save_dir"]))
+            remove_path(Path(class_cfg["paths"]["logs_dir"]))
 
         class_results.append({"class_id": class_id, "class_name": class_name, "metrics": metrics})
 
