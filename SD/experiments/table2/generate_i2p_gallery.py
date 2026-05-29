@@ -59,16 +59,20 @@ def main():
             lambda prompt: len(
                 tokenizer(
                     prompt,
-                    padding="max_length",
-                    truncation=True,
-                    max_length=tokenizer.model_max_length,
-                    return_tensors="pt",
+                    add_special_tokens=True,
+                    truncation=False,
+                    return_tensors=None,
                 ).input_ids[0]
             )
         )
-        df = df[token_lengths < 77].copy()
+        df = df[token_lengths <= 77].copy()
         if df.empty:
-            raise SystemExit(f"No prompts left after token-length < 77 filter in {args.prompts_csv}")
+            raise SystemExit(f"No prompts left after token-length <= 77 filter in {args.prompts_csv}")
+
+    if len(df) < args.num:
+        raise SystemExit(
+            f"Only {len(df)} prompts remain after filtering, fewer than requested --num {args.num}."
+        )
 
     filtered_prompts_csv = out_dir / "i2p_prompts_filtered.csv"
     df.to_csv(filtered_prompts_csv, index=False)
