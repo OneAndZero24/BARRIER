@@ -157,8 +157,8 @@ def main() -> None:
     for class_id, class_name in enumerate(IMAGENETTE_CLASSES):
         class_cfg = copy.deepcopy(base_cfg)
         class_cfg["unlearn"]["class_to_forget"] = class_id
-        class_cfg["unlearn"]["save_compvis"] = False
-        class_cfg["unlearn"]["save_diffusers"] = False
+        class_cfg["unlearn"]["save_compvis"] = True
+        class_cfg["unlearn"]["save_diffusers"] = True
         class_cfg["unlearn"]["save_history_logs"] = False
         class_cfg["paths"]["output_dir"] = str(trial_root / f"class_{class_id}")
         class_cfg["paths"]["model_save_dir"] = str(tmp_root / f"class_{class_id}" / "models")
