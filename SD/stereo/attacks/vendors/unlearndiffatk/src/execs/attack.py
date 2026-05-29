@@ -10,7 +10,13 @@ import numpy as np
 from datetime import datetime
 
 import sys
-sys.path.append('src')
+import os
+# Ensure the vendored 'src' directory (one level up) is on the Python path.
+# This uses an absolute path so running from different CWDs (e.g., via subprocess)
+# still allows imports like `import tasks.*` to succeed.
+src_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if src_root not in sys.path:
+    sys.path.insert(0, src_root)
 
 Section('overall', 'Overall configs').params(
     task = Param(OneOf(['classifier', 'sd_guidence','P4D','transfer']), required=True, desc='Task type to attack'),
