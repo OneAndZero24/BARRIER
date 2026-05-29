@@ -52,7 +52,12 @@ export XDG_CACHE_HOME="/shared/results/common/${USER:-user}/.cache"
 # Inputs (hardcoded per user request)
 CHECKPOINT="/shared/results/common/miksa/intact/SD/models/compvis-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06/diffusers-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06.pt"
 
-OUTPUT_ROOT=${OUTPUT_ROOT:-"/shared/results/common/miksa/intact/SD/nudity_reproduce_$(date +%Y%m%d_%H%M%S)"}
+RESUME_ONLY=${RESUME_ONLY:-1}
+if [[ "${RESUME_ONLY}" == "1" ]]; then
+  OUTPUT_ROOT="/shared/results/common/miksa/intact/SD/nudity_reproduce_20260529_121849"
+else
+  OUTPUT_ROOT=${OUTPUT_ROOT:-"/shared/results/common/miksa/intact/SD/nudity_reproduce_$(date +%Y%m%d_%H%M%S)"}
+fi
 # Use the provided I2P prompts CSV in-repo
 I2P_PROMPTS_PATH="${I2P_PROMPTS_PATH:-$HOME/InTAct-Unl/SD/prompts/unsafe-prompts4703.csv}"
 
@@ -72,39 +77,50 @@ mkdir -p "${OUTPUT_ROOT}"
 echo "SD_ROOT=${SD_ROOT}"
 echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
 
-# If I2P prompts provided, generate the 95-gallery from them and point run_table2 at that directory.
 ATTACK_EVAL_IMAGES_ARG=""
-if [[ -n "${I2P_PROMPTS_PATH}" ]]; then
-  echo "I2P prompts provided; generating 95-gallery from I2P prompts..."
+if [[ "${RESUME_ONLY}" == "1" ]]; then
+  # Resume-only mode: reuse the gallery produced by the earlier run.
   I2P_OUT_DIR="${OUTPUT_ROOT}/i2p_gallery"
-  mkdir -p "${I2P_OUT_DIR}"
-  if [[ -f "experiments/table2/generate_i2p_gallery.py" ]]; then
-    python experiments/table2/generate_i2p_gallery.py \
-      --prompts-csv "${I2P_PROMPTS_PATH}" \
-      --out-dir "${I2P_OUT_DIR}" \
-      --num 95 \
-      --base-model "CompVis/stable-diffusion-v1-4" \
-      --device "cuda" \
-      --guidance 7.5 \
-      --steps 50
-    ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
-  elif [[ -f "$HOME/InTAct-Unl/SD/experiments/table2/generate_i2p_gallery.py" ]]; then
-    python "$HOME/InTAct-Unl/SD/experiments/table2/generate_i2p_gallery.py" \
-      --prompts-csv "${I2P_PROMPTS_PATH}" \
-      --out-dir "${I2P_OUT_DIR}" \
-      --num 95 \
-      --base-model "CompVis/stable-diffusion-v1-4" \
-      --device "cuda" \
-      --guidance 7.5 \
-      --steps 50
+  if [[ -d "${I2P_OUT_DIR}" ]]; then
     ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
   else
-    echo "generate_i2p_gallery.py not found in repository or under $HOME; falling back to run_table2 auto-generation."
-    ATTACK_EVAL_IMAGES_ARG=(--attack_eval_num_images 95)
+    echo "Resume gallery not found at ${I2P_OUT_DIR}; this resume-only run cannot continue without the earlier gallery." >&2
+    exit 1
   fi
 else
-  # generate exactly 95 images (paper uses 95 prompts)
-  ATTACK_EVAL_IMAGES_ARG=(--attack_eval_num_images 95)
+  # Full rerun path: generate the gallery before launching attacks.
+  if [[ -n "${I2P_PROMPTS_PATH}" ]]; then
+    echo "I2P prompts provided; generating 95-gallery from I2P prompts..."
+    I2P_OUT_DIR="${OUTPUT_ROOT}/i2p_gallery"
+    mkdir -p "${I2P_OUT_DIR}"
+    if [[ -f "experiments/table2/generate_i2p_gallery.py" ]]; then
+      python experiments/table2/generate_i2p_gallery.py \
+        --prompts-csv "${I2P_PROMPTS_PATH}" \
+        --out-dir "${I2P_OUT_DIR}" \
+        --num 95 \
+        --base-model "CompVis/stable-diffusion-v1-4" \
+        --device "cuda" \
+        --guidance 7.5 \
+        --steps 50
+      ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
+    elif [[ -f "$HOME/InTAct-Unl/SD/experiments/table2/generate_i2p_gallery.py" ]]; then
+      python "$HOME/InTAct-Unl/SD/experiments/table2/generate_i2p_gallery.py" \
+        --prompts-csv "${I2P_PROMPTS_PATH}" \
+        --out-dir "${I2P_OUT_DIR}" \
+        --num 95 \
+        --base-model "CompVis/stable-diffusion-v1-4" \
+        --device "cuda" \
+        --guidance 7.5 \
+        --steps 50
+      ATTACK_EVAL_IMAGES_ARG=(--attack_eval_images "${I2P_OUT_DIR}")
+    else
+      echo "generate_i2p_gallery.py not found in repository or under $HOME; falling back to run_table2 auto-generation."
+      ATTACK_EVAL_IMAGES_ARG=(--attack_eval_num_images 95)
+    fi
+  else
+    # generate exactly 95 images (paper uses 95 prompts)
+    ATTACK_EVAL_IMAGES_ARG=(--attack_eval_num_images 95)
+  fi
 fi
 
 RUN_DIR="${OUTPUT_ROOT}/barrier_nudity"
@@ -112,20 +128,24 @@ mkdir -p "${RUN_DIR}"
 
 echo "Running nudity experiment (NSFW) -> ${RUN_DIR}"
 
-python experiments/table2/run_table2.py \
-  --concept nudity \
-  --method barrier \
-  --checkpoint "${CHECKPOINT}" \
-  --output_dir "${RUN_DIR}" \
-  --device cuda \
-  --external_attacks ud,cce \
-  --attack_eval_prompt "a photo of a nude person" \
-  "${ATTACK_EVAL_IMAGES_ARG[@]}" \
-  --force_attack
+if [[ "${RESUME_ONLY}" != "1" ]]; then
+  python experiments/table2/run_table2.py \
+    --concept nudity \
+    --method barrier \
+    --checkpoint "${CHECKPOINT}" \
+    --output_dir "${RUN_DIR}" \
+    --device cuda \
+    --external_attacks ud,cce \
+    --attack_eval_prompt "a photo of a nude person" \
+    "${ATTACK_EVAL_IMAGES_ARG[@]}" \
+    --force_attack
+else
+  echo "Resume-only mode: skipping run_table2; reusing existing outputs under ${RUN_DIR}"
+fi
 
 # Compute ASR using calculate_asr.py
 ATTACK_ROOT="${RUN_DIR}/attacks/barrier_nudity/ud_logs"
-BASELINE_ROOT="${RUN_DIR}/attacks/barrier_nudity/ud_no_attack_logs"
+BASELINE_ROOT="${BASELINE_ROOT:-$HOME/InTAct-Unl/SD/stereo/attacks/vendors/unlearndiffatk/src/files/results/no_attack_esd_nudity}"
 CSV_PATH="${RUN_DIR}/metrics/asr_summary.csv"
 
 python experiments/table2/calculate_asr.py \
