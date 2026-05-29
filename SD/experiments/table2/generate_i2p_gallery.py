@@ -84,7 +84,8 @@ def main():
 
     device = args.device
     torch_dtype = torch.float16 if ('cuda' in device and torch.cuda.is_available()) else torch.float32
-    pipe = StableDiffusionPipeline.from_pretrained(args.base_model, torch_dtype=torch_dtype)
+    # Disable diffusers safety checker to allow NSFW outputs (consistent with project NSFW pipeline)
+    pipe = StableDiffusionPipeline.from_pretrained(args.base_model, safety_checker=None, torch_dtype=torch_dtype)
     pipe = pipe.to(device)
 
     for i, prompt in enumerate(prompts):
