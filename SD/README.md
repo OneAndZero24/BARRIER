@@ -42,6 +42,9 @@ fields in the pipeline YAML.
 # Full-eval sweep over all 10 forgotten classes
 wandb sweep configs/sweep_class_fulleval.yaml
 
+# Parallel SLURM array launch, one run per task
+sbatch --array=0-3 scripts/slurm_class_fulleval_sweep_array.sh <wandb-sweep-id>
+
 # NSFW removal sweep
 ./run_sweep.sh sweep_nsfw
 ```
@@ -49,6 +52,14 @@ wandb sweep configs/sweep_class_fulleval.yaml
 For SLURM, use `scripts/slurm_class_fulleval_sweep.sh <wandb-sweep-id>`. Each
 trial runs the 10 class-forgetting evaluations, then logs average UA, average
 retain accuracy, and `target_gap` for sweep selection.
+
+If checkpoint loading fails with a `torchmetrics` / `pytorch_lightning`
+import error, recreate the `ldm` environment from `environment.yaml` or force
+the pinned versions from that file.
+
+The array launcher is resumable at the class-evaluation level: if the job
+times out, submit the same command again and already-finished class metrics
+will be reused from disk.
 
 To add a new sweep parameter, copy any dotted config key into the sweep's
 `parameters:` block with `values:` (grid) or `min:`/`max:` (random).

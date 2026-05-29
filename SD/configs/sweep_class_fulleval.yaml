@@ -25,8 +25,8 @@ metric:
 
 parameters:
   unlearn.lr:
-    values: [3.5e-6, 5.0e-6, 7.5e-6, 1.0e-5, 1.5e-5]
+    values: [1.0e-5, 5e-5, 1.0e-4, 5.0e-6, 1.0e-6]
   unlearn.epochs:
-    values: [5, 10, 4]
+    values: [10, 20]
   intact.lambda_interval:
-    values: [2.0, 10.0]
+    values: [10.0, 1.0, 100.0]

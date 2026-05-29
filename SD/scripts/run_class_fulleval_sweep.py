@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -63,6 +64,22 @@ def write_config(path: Path, cfg: Dict[str, Any]) -> None:
         yaml.safe_dump(cfg, f, sort_keys=False)
 
 
+def trial_key_from_config(cfg: Dict[str, Any]) -> str:
+    """Build a stable key for a hyperparameter setting.
+
+    This lets a re-run of the same trial reuse the same output directory and
+    continue from any class evaluations already completed on disk.
+    """
+
+    payload = {
+        "pipeline": cfg.get("pipeline", {}),
+        "unlearn": cfg.get("unlearn", {}),
+        "intact": cfg.get("intact", {}),
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()[:12]
+
+
 def run_pipeline(script_dir: Path, cfg_path: Path, metrics_path: Path) -> Dict[str, Any]:
     command = [
         sys.executable,
@@ -76,6 +93,19 @@ def run_pipeline(script_dir: Path, cfg_path: Path, metrics_path: Path) -> Dict[s
     subprocess.run(command, check=True, cwd=str(script_dir))
     with metrics_path.open("r") as f:
         return json.load(f)
+
+
+def load_metrics_if_present(metrics_path: Path) -> Optional[Dict[str, Any]]:
+    if not metrics_path.exists():
+        return None
+    try:
+        with metrics_path.open("r") as f:
+            metrics = json.load(f)
+        if isinstance(metrics, dict):
+            return metrics
+    except Exception:
+        return None
+    return None
 
 
 def numeric_metric(metrics: Dict[str, Any], key: str) -> Optional[float]:
@@ -103,13 +133,13 @@ def main() -> None:
         )
         base_cfg = merge_dot_config(base_cfg, dict(wandb.config))
 
-    run_id = wandb.run.id if use_wandb else "local"
+    trial_key = trial_key_from_config(base_cfg)
     base_output_dir = Path(base_cfg["paths"]["output_dir"])
     base_model_dir = Path(base_cfg["paths"]["model_save_dir"])
     base_logs_dir = Path(base_cfg["paths"]["logs_dir"])
-    base_cfg["paths"]["output_dir"] = str(base_output_dir / f"sweep_{run_id}")
-    base_cfg["paths"]["model_save_dir"] = str(base_model_dir / f"sweep_{run_id}")
-    base_cfg["paths"]["logs_dir"] = str(base_logs_dir / f"sweep_{run_id}")
+    base_cfg["paths"]["output_dir"] = str(base_output_dir / f"sweep_{trial_key}")
+    base_cfg["paths"]["model_save_dir"] = str(base_model_dir / f"sweep_{trial_key}")
+    base_cfg["paths"]["logs_dir"] = str(base_logs_dir / f"sweep_{trial_key}")
 
     class_results: List[Dict[str, Any]] = []
 
@@ -122,8 +152,13 @@ def main() -> None:
             tmp_path = Path(tmpdir)
             cfg_path = tmp_path / "config.yaml"
             metrics_path = tmp_path / "metrics.json"
-            write_config(cfg_path, class_cfg)
-            metrics = run_pipeline(script_dir, cfg_path, metrics_path)
+            existing_metrics_path = Path(class_cfg["paths"]["output_dir"]) / "metrics.json"
+            metrics = load_metrics_if_present(existing_metrics_path)
+            if metrics is None:
+                existing_metrics_path.parent.mkdir(parents=True, exist_ok=True)
+                write_config(cfg_path, class_cfg)
+                metrics = run_pipeline(script_dir, cfg_path, metrics_path)
+                existing_metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True))
 
         class_results.append({"class_id": class_id, "class_name": class_name, "metrics": metrics})
 

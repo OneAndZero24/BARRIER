@@ -61,6 +61,55 @@ def _resolve_cache_root() -> str:
 
 _CACHE_ROOT = _resolve_cache_root()
 
+
+def _patch_torchmetrics_compat() -> None:
+    """Provide missing torchmetrics symbols expected by old pytorch-lightning.
+
+    Some HPC environments have a newer torchmetrics build than the pinned
+    training stack.  Older pytorch-lightning releases still import
+    ``torchmetrics.utilities.data.get_num_classes`` during checkpoint loading,
+    so we install a small compatibility shim before any checkpoint load can
+    trigger that import path.
+    """
+
+    try:
+        import torchmetrics.utilities.data as torchmetrics_data  # type: ignore
+    except Exception:
+        return
+
+    if hasattr(torchmetrics_data, "get_num_classes"):
+        return
+
+    def get_num_classes(preds=None, target=None):
+        for value in (target, preds):
+            if value is None:
+                continue
+
+            try:
+                if hasattr(value, "detach"):
+                    value = value.detach()
+                if hasattr(value, "cpu"):
+                    value = value.cpu()
+                if hasattr(value, "numpy"):
+                    value = value.numpy()
+            except Exception:
+                continue
+
+            try:
+                if hasattr(value, "size") and value.size == 0:
+                    return 0
+                if hasattr(value, "max"):
+                    return int(value.max()) + 1
+            except Exception:
+                continue
+
+        return 1
+
+    torchmetrics_data.get_num_classes = get_num_classes
+
+
+_patch_torchmetrics_compat()
+
 # HuggingFace (hub, datasets, tokenizers, diffusers)
 os.environ.setdefault("HF_HOME", os.path.join(_CACHE_ROOT, "huggingface"))
 
