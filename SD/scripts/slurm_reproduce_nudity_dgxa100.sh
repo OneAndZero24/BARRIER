@@ -126,6 +126,15 @@ fi
 RUN_DIR="${OUTPUT_ROOT}/barrier_nudity"
 mkdir -p "${RUN_DIR}"
 
+ATTACK_ROOT="${RUN_DIR}/attacks/barrier_nudity/ud_logs"
+BASELINE_ROOT="${BASELINE_ROOT:-${RUN_DIR}/attacks/barrier_nudity/ud_no_attack_logs}"
+AUTO_GENERATE_BASELINE=${AUTO_GENERATE_BASELINE:-1}
+NO_ATTACK_CONFIG=${NO_ATTACK_CONFIG:-"${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/configs/nudity/no_attack_esd_nudity_classifier.json"}
+NO_ATTACK_RUN_NAME=${NO_ATTACK_RUN_NAME:-"attack_idx_0"}
+NO_ATTACK_ATTACK_IDX=${NO_ATTACK_ATTACK_IDX:-0}
+UD_SRC_ROOT="${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/src"
+UD_DATASET_PATH="${RUN_DIR}/attacks/barrier_nudity/ud_dataset/nudity"
+
 echo "Running nudity experiment (NSFW) -> ${RUN_DIR}"
 
 if [[ "${RESUME_ONLY}" != "1" ]]; then
@@ -143,9 +152,33 @@ else
   echo "Resume-only mode: skipping run_table2; reusing existing outputs under ${RUN_DIR}"
 fi
 
+# Ensure the no-attack baseline exists for ASR computation.
+if [[ ! -e "${BASELINE_ROOT}" ]]; then
+  if [[ "${AUTO_GENERATE_BASELINE}" == "1" ]]; then
+    if [[ ! -f "${RUN_DIR}/checkpoints/barrier_nudity_unet.pt" ]]; then
+      echo "Missing exported checkpoint at ${RUN_DIR}/checkpoints/barrier_nudity_unet.pt; cannot generate baseline." >&2
+      exit 1
+    fi
+
+    echo "BASELINE_ROOT missing; generating UD no-attack logs at ${BASELINE_ROOT}"
+    pushd "${UD_SRC_ROOT}" >/dev/null
+    python execs/attack.py \
+      --config-file "${NO_ATTACK_CONFIG}" \
+      --logger.json.root "${BASELINE_ROOT}" \
+      --logger.name "${NO_ATTACK_RUN_NAME}" \
+      --attacker.attack_idx "${NO_ATTACK_ATTACK_IDX}" \
+      --task.target_ckpt "${RUN_DIR}/checkpoints/barrier_nudity_unet.pt" \
+      --task.dataset_path "${UD_DATASET_PATH}" \
+      --attacker.no_attack.dataset_path "${UD_DATASET_PATH}"
+    popd >/dev/null
+  else
+    echo "BASELINE_ROOT does not exist: ${BASELINE_ROOT}" >&2
+    echo "Set AUTO_GENERATE_BASELINE=1 or provide BASELINE_ROOT manually." >&2
+    exit 1
+  fi
+fi
+
 # Compute ASR using calculate_asr.py
-ATTACK_ROOT="${RUN_DIR}/attacks/barrier_nudity/ud_logs"
-BASELINE_ROOT="${BASELINE_ROOT:-$HOME/InTAct-Unl/SD/stereo/attacks/vendors/unlearndiffatk/src/files/results/no_attack_esd_nudity}"
 CSV_PATH="${RUN_DIR}/metrics/asr_summary.csv"
 
 python experiments/table2/calculate_asr.py \
