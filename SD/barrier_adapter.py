@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Optional
 
 import torch
@@ -26,11 +25,7 @@ def load_barrier_pipeline(
     device: str = "cuda",
     torch_dtype: Optional[torch.dtype] = None,
 ) -> "StableDiffusionPipeline":
-    """
-    Load a normal StableDiffusionPipeline and patch in the BARRIER unlearned UNet.
-
-    This keeps downstream attack code unaware of BARRIER internals.
-    """
+    """Load a normal StableDiffusionPipeline and patch in the BARRIER UNet."""
     from diffusers import StableDiffusionPipeline
 
     dtype = torch_dtype
@@ -45,23 +40,3 @@ def load_barrier_pipeline(
     state_dict = torch.load(unet_checkpoint, map_location="cpu")
     pipe.unet.load_state_dict(state_dict)
     return pipe.to(device)
-
-
-def load_barrier_stereo_diffuser(
-    unet_checkpoint: str,
-    *,
-    device: str = "cuda",
-    scheduler: str = "DDIM",
-) -> "StableDiffuser":
-    """
-    Build the vendored STEREO StableDiffuser and inject BARRIER UNet weights.
-
-    This adapter is thin by design and does not alter attack logic.
-    """
-    from SD.stereo.vendor.utils_vendor import StableDiffuser
-
-    diffuser = StableDiffuser(scheduler=scheduler).to(device)
-    state_dict = torch.load(Path(unet_checkpoint), map_location="cpu")
-    diffuser.unet.load_state_dict(state_dict)
-    diffuser.eval()
-    return diffuser
