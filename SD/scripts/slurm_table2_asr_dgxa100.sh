@@ -42,11 +42,11 @@ export XDG_CACHE_HOME="/shared/results/common/miksa/.cache"
 # ---- Inputs ----
 # Attacked UnlearnDiffAtk logs.
 # Default points to UD's own logger output path used by run_table2.py.
-ATTACK_ROOT=${ATTACK_ROOT:-"${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/src/files/results/text_grad_esd_nudity_classifier"}
+ATTACK_ROOT=${ATTACK_ROOT:-"/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/attacks/barrier_nudity/ud_logs"}
 
 # Baseline no-attack logs.
 # Set this to the no-attack run root (or a single run directory containing config.json/log.json).
-BASELINE_ROOT=${BASELINE_ROOT:-"${SD_ROOT}/stereo/attacks/vendors/unlearndiffatk/src/files/results/no_attack_esd_nudity"}
+BASELINE_ROOT=${BASELINE_ROOT:-"/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/attacks/barrier_nudity/ud_no_attack_logs"}
 
 # If baseline logs are missing, generate them automatically with UD no_attack config.
 AUTO_GENERATE_BASELINE=${AUTO_GENERATE_BASELINE:-1}
@@ -56,8 +56,8 @@ NO_ATTACK_RUN_NAME=${NO_ATTACK_RUN_NAME:-"attack_idx_0"}
 NO_ATTACK_ATTACK_IDX=${NO_ATTACK_ATTACK_IDX:-0}
 
 # Optional overrides for baseline generation.
-TARGET_CKPT=${TARGET_CKPT:-""}
-DATASET_PATH=${DATASET_PATH:-""}
+TARGET_CKPT=${TARGET_CKPT:-"/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/checkpoints/barrier_nudity_unet.pt"}
+DATASET_PATH=${DATASET_PATH:-"/shared/results/common/miksa/intact/SD/barrier_nudity_dgxa100/attacks/barrier_nudity/ud_dataset/nudity"}
 
 if [[ ! -e "${BASELINE_ROOT}" ]]; then
   if [[ "${AUTO_GENERATE_BASELINE}" == "1" ]]; then
@@ -70,12 +70,8 @@ if [[ ! -e "${BASELINE_ROOT}" ]]; then
       --logger.name "${NO_ATTACK_RUN_NAME}"
       --attacker.attack_idx "${NO_ATTACK_ATTACK_IDX}"
     )
-    if [[ -n "${TARGET_CKPT}" ]]; then
-      BASELINE_CMD+=(--task.target_ckpt "${TARGET_CKPT}")
-    fi
-    if [[ -n "${DATASET_PATH}" ]]; then
-      BASELINE_CMD+=(--task.dataset_path "${DATASET_PATH}" --attacker.no_attack.dataset_path "${DATASET_PATH}")
-    fi
+    BASELINE_CMD+=(--task.target_ckpt "${TARGET_CKPT}")
+    BASELINE_CMD+=(--task.dataset_path "${DATASET_PATH}" --attacker.no_attack.dataset_path "${DATASET_PATH}")
     "${BASELINE_CMD[@]}"
     cd "${SD_ROOT}"
   else

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+import pandas as pd
 
 import torch
 
@@ -79,6 +80,52 @@ def _count_pngs(path: Path) -> int:
     if not path.exists():
         return 0
     return sum(1 for _ in path.rglob("*.png"))
+
+
+def _prepare_ud_dataset(
+    *,
+    source_images_dir: Path,
+    output_dir: Path,
+    default_prompt: str,
+    guidance_scale: float,
+    force: bool,
+) -> Path:
+    dataset_dir = output_dir
+    imgs_dir = dataset_dir / "imgs"
+    prompts_csv = dataset_dir / "prompts.csv"
+
+    image_paths = sorted(
+        [
+            p
+            for p in source_images_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        ]
+    )
+    if not image_paths:
+        raise FileNotFoundError(f"No images found for UD dataset creation under {source_images_dir}")
+
+    if dataset_dir.exists() and prompts_csv.exists() and imgs_dir.exists() and any(imgs_dir.iterdir()) and not force:
+        return dataset_dir
+
+    if dataset_dir.exists() and force:
+        shutil.rmtree(dataset_dir)
+    imgs_dir.mkdir(parents=True, exist_ok=True)
+
+    rows = []
+    for idx, src in enumerate(image_paths):
+        dst_name = f"{idx}_0.png"
+        dst = imgs_dir / dst_name
+        shutil.copy2(src, dst)
+        rows.append(
+            {
+                "prompt": default_prompt,
+                "evaluation_seed": idx,
+                "evaluation_guidance": guidance_scale,
+            }
+        )
+
+    pd.DataFrame(rows).to_csv(prompts_csv, index=False)
+    return dataset_dir
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -175,6 +222,16 @@ def run(args: argparse.Namespace) -> dict:
                     / args.concept
                     / "text_grad_esd_nudity_classifier.json"
                 )
+                ud_prompt = args.attack_eval_prompt or DEFAULT_EVAL_PROMPT.get(args.concept, f"a photo of a {args.concept}")
+                ud_dataset_dir = _prepare_ud_dataset(
+                    source_images_dir=Path(attack_eval_images),
+                    output_dir=attacks_dir / "ud_dataset" / args.concept,
+                    default_prompt=ud_prompt,
+                    guidance_scale=args.attack_eval_guidance_scale,
+                    force=args.force_attack,
+                )
+                ud_log_root = attacks_dir / "ud_logs"
+                ud_log_root.mkdir(parents=True, exist_ok=True)
                 cmd = [
                     sys.executable,
                     str(
@@ -194,10 +251,22 @@ def run(args: argparse.Namespace) -> dict:
                     str(args.attack_idx),
                     "--logger.name",
                     f"attack_idx_{args.attack_idx}",
+                    "--logger.json.root",
+                    str(ud_log_root),
+                    "--task.target_ckpt",
+                    str(exported_unet),
+                    "--task.dataset_path",
+                    str(ud_dataset_dir),
                 ]
                 print(f"[external-attack] running ud with {ud_config}")
                 subprocess.run(cmd, check=True, cwd=str(REPO_ROOT / "SD" / "stereo" / "attacks" / "vendors" / "unlearndiffatk" / "src"))
-                external_attack_logs.append({"attack": "ud", "status": "ok", "config": ud_config})
+                external_attack_logs.append({
+                    "attack": "ud",
+                    "status": "ok",
+                    "config": ud_config,
+                    "dataset_path": str(ud_dataset_dir),
+                    "log_root": str(ud_log_root),
+                })
             elif attack_name == "rab":
                 if args.rab_command:
                     print("[external-attack] running rab")
