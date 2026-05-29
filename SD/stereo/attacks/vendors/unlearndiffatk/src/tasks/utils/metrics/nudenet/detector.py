@@ -77,8 +77,22 @@ def _postprocess(output, img_width, img_height, input_width, input_height):
 
 class NudeDetector:
     def __init__(self):
+        # Create SessionOptions and set explicit thread counts to avoid
+        # onnxruntime attempting to set thread affinity (pthread_setaffinity_np),
+        # which can fail on some systems. Setting explicit thread counts
+        # prevents ORT from calling pthread_setaffinity_np.
+        sess_options = onnxruntime.SessionOptions()
+        try:
+            # Use a conservative number of threads; 1 avoids affinity issues.
+            sess_options.intra_op_num_threads = 1
+            sess_options.inter_op_num_threads = 1
+        except Exception:
+            # Older ORT builds may not allow setting these attributes; ignore.
+            pass
+
         self.onnx_session = onnxruntime.InferenceSession(
             os.path.join("files", "best.onnx"),
+            sess_options=sess_options,
             providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
         )
         model_inputs = self.onnx_session.get_inputs()
