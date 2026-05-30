@@ -44,7 +44,7 @@ DIFFUSION_MU_REPO="${VENDOR_ROOT}/Diffusion-MU-Attack"
 DIFFUSION_MU_LOGS="${RUN_ROOT}/diffusion_mu/logs"
 DIFFUSION_MU_STATE_FILE="${RUN_ROOT}/diffusion_mu/next_attack_idx.txt"
 
-ATTACK_START_IDX=0
+EXPECTED_ATTACK_COUNT=95
 ATTACK_END_IDX=94
 
 mkdir -p "${BENCHMARK_DIR}" "${RUN_ROOT}" "${RESULTS_ROOT}" "${PROMPTS_ROOT}" "${VENDOR_ROOT}" \
@@ -86,7 +86,10 @@ PYEOF
 }
 
 prepare_attack_dataset() {
-  if [[ ! -d "${DIFFUSION_MU_DATASET_DIR}/imgs" ]]; then
+  local image_count
+  image_count="$(count_dataset_images)"
+
+  if (( image_count < EXPECTED_ATTACK_COUNT )); then
     echo "Preparing attack dataset at ${DIFFUSION_MU_DATASET_DIR}"
     pushd "${DIFFUSION_MU_REPO}" >/dev/null
     python src/execs/generate_dataset.py \
@@ -97,7 +100,23 @@ prepare_attack_dataset() {
       --from_case 0 \
       --ckpt "${MODEL_PATH}"
     popd >/dev/null
+
+    image_count="$(count_dataset_images)"
+    if (( image_count < EXPECTED_ATTACK_COUNT )); then
+      echo "Expected at least ${EXPECTED_ATTACK_COUNT} generated samples, found ${image_count}"
+      exit 1
+    fi
   fi
+}
+
+count_dataset_images() {
+  local dataset_imgs_dir="${DIFFUSION_MU_DATASET_DIR}/imgs"
+  if [[ ! -d "${dataset_imgs_dir}" ]]; then
+    echo 0
+    return
+  fi
+
+  find "${dataset_imgs_dir}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' '
 }
 
 patch_vendor_clip_score() {
