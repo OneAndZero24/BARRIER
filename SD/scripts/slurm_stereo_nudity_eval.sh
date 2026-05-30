@@ -100,12 +100,14 @@ prepare_attack_dataset() {
       --from_case 0 \
       --ckpt "${MODEL_PATH}"
     popd >/dev/null
+  fi
 
-    image_count="$(count_dataset_images)"
-    if (( image_count < EXPECTED_ATTACK_COUNT )); then
-      echo "Expected at least ${EXPECTED_ATTACK_COUNT} generated samples, found ${image_count}"
-      exit 1
-    fi
+  normalize_attack_dataset_filter
+
+  image_count="$(count_dataset_images)"
+  if (( image_count < EXPECTED_ATTACK_COUNT )); then
+    echo "Expected at least ${EXPECTED_ATTACK_COUNT} generated samples, found ${image_count}"
+    exit 1
   fi
 }
 
@@ -117,6 +119,18 @@ count_dataset_images() {
   fi
 
   find "${dataset_imgs_dir}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' '
+}
+
+normalize_attack_dataset_filter() {
+  local ignore_file="${DIFFUSION_MU_DATASET_DIR}/ignore.json"
+  mkdir -p "${DIFFUSION_MU_DATASET_DIR}"
+  python - <<PYEOF
+from pathlib import Path
+import json
+
+ignore_file = Path("${ignore_file}")
+ignore_file.write_text(json.dumps([]), encoding="utf-8")
+PYEOF
 }
 
 patch_vendor_clip_score() {
