@@ -45,6 +45,7 @@ DIFFUSION_MU_LOGS="${RUN_ROOT}/diffusion_mu/logs"
 DIFFUSION_MU_STATE_FILE="${RUN_ROOT}/diffusion_mu/next_attack_idx.txt"
 
 EXPECTED_ATTACK_COUNT=95
+ATTACK_START_IDX=82
 ATTACK_END_IDX=94
 
 mkdir -p "${BENCHMARK_DIR}" "${RUN_ROOT}" "${RESULTS_ROOT}" "${PROMPTS_ROOT}" "${VENDOR_ROOT}" \
@@ -167,14 +168,6 @@ import re
 state_file = Path("${DIFFUSION_MU_STATE_FILE}")
 logs_root = Path("${DIFFUSION_MU_LOGS}")
 
-if state_file.exists():
-    try:
-        value = int(state_file.read_text(encoding="utf-8").strip())
-        print(max(0, value))
-        raise SystemExit(0)
-    except Exception:
-        pass
-
 completed = set()
 for entry in logs_root.glob("attack_idx_*"):
     if not entry.is_dir():
@@ -188,6 +181,18 @@ for entry in logs_root.glob("attack_idx_*"):
 next_idx = 0
 while next_idx in completed:
     next_idx += 1
+
+if completed:
+  print(next_idx)
+  raise SystemExit(0)
+
+if state_file.exists():
+  try:
+    value = int(state_file.read_text(encoding="utf-8").strip())
+    print(max(0, value))
+    raise SystemExit(0)
+  except Exception:
+    pass
 
 print(next_idx)
 PYEOF
@@ -227,8 +232,7 @@ run_diffusion_mu_attack() {
   patch_vendor_clip_score
   pushd "${DIFFUSION_MU_REPO}" >/dev/null
 
-  local start_idx
-  start_idx="$(get_resume_attack_idx)"
+  local start_idx="${ATTACK_START_IDX}"
   if (( start_idx > ATTACK_END_IDX )); then
     echo "All attack indices are already complete; skipping attack generation."
     popd >/dev/null
