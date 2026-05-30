@@ -45,7 +45,7 @@ DIFFUSION_MU_LOGS="${RUN_ROOT}/diffusion_mu/logs"
 DIFFUSION_MU_STATE_FILE="${RUN_ROOT}/diffusion_mu/next_attack_idx.txt"
 
 EXPECTED_ATTACK_COUNT=95
-ATTACK_START_IDX=82
+ATTACK_START_IDX=81
 ATTACK_END_IDX=94
 
 mkdir -p "${BENCHMARK_DIR}" "${RUN_ROOT}" "${RESULTS_ROOT}" "${PROMPTS_ROOT}" "${VENDOR_ROOT}" \
@@ -198,12 +198,6 @@ print(next_idx)
 PYEOF
 }
 
-save_resume_attack_idx() {
-  local next_idx="$1"
-  mkdir -p "$(dirname "${DIFFUSION_MU_STATE_FILE}")"
-  printf '%s\n' "${next_idx}" > "${DIFFUSION_MU_STATE_FILE}"
-}
-
 score_attack() {
   local attack_name="$1"
   local attack_dir="$2"
@@ -242,13 +236,6 @@ run_diffusion_mu_attack() {
   echo "Resuming Diffusion-MU attack from index ${start_idx}"
 
   for idx in $(seq "${start_idx}" "${ATTACK_END_IDX}"); do
-    local attack_log_dir="${DIFFUSION_MU_LOGS}/attack_idx_${idx}"
-    if [[ -d "${attack_log_dir}" ]] && find "${attack_log_dir}" -type f -print -quit | grep -q .; then
-      echo "Skipping completed attack_idx_${idx}"
-      save_resume_attack_idx "$((idx + 1))"
-      continue
-    fi
-
     python src/execs/attack.py \
       --config-file configs/nudity/text_grad_esd_nudity_classifier.json \
       --task.target_ckpt "${MODEL_PATH}" \
@@ -256,8 +243,6 @@ run_diffusion_mu_attack() {
       --attacker.attack_idx "${idx}" \
       --logger.name "attack_idx_${idx}" \
       --logger.json.root "${DIFFUSION_MU_LOGS}"
-
-    save_resume_attack_idx "$((idx + 1))"
   done
 
   popd >/dev/null
