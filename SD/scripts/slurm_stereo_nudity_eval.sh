@@ -304,6 +304,17 @@ run_cce_attack() {
   patch_cce_clip_score
   prepare_cce_prompts
 
+  local -a cce_xformers_args=()
+  if python - <<'PYEOF'
+try:
+    import xformers  # noqa: F401
+except Exception:
+    raise SystemExit(1)
+PYEOF
+  then
+    cce_xformers_args+=("--enable_xformers_memory_efficient_attention")
+  fi
+
   pushd "${CCE_REPO}/uce" >/dev/null
 
   echo "Training CCE model from baseline outputs"
@@ -331,7 +342,7 @@ run_cce_attack() {
     --mixed_precision "fp16" \
     --report_to "tensorboard" \
     --logging_dir "${CCE_OUTPUT_DIR}/logs" \
-    --enable_xformers_memory_efficient_attention
+    "${cce_xformers_args[@]}"
 
   popd >/dev/null
 
