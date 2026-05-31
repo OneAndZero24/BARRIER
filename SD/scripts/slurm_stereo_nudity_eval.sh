@@ -552,14 +552,14 @@ echo "Benchmark prepared"
 echo "Prompt text: ${PROMPTS_TXT}"
 
 prepare_unlearned_baseline
-score_attack "baseline_unlearned" "${BASELINE_IMAGE_DIR}"
 prepare_vanilla_reference
 score_baseline_reference
 
-run_cce_attack
-score_attack "cce" "${CCE_EVAL_DIR}"
+# FID-only mode: leave the attack / ASR branches disabled.
+# score_attack "baseline_unlearned" "${BASELINE_IMAGE_DIR}"
+# run_cce_attack
+# score_attack "cce" "${CCE_EVAL_DIR}"
+# run_diffusion_mu_attack
+# score_attack "diffusion_mu" "${DIFFUSION_MU_LOGS}"
 
-#run_diffusion_mu_attack
-#score_attack "diffusion_mu" "${DIFFUSION_MU_LOGS}"
-
-echo "End-to-end STEREO nudity pipeline complete."
+echo "FID-only STEREO nudity metrics complete."
