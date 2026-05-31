@@ -309,7 +309,7 @@ run_cce_attack() {
   echo "Training CCE model from baseline outputs"
   accelerate launch concept_inversion.py \
     --pretrained_model_name_or_path "${BASE_MODEL_ID}" \
-    --tokenizer_name "${BASE_MODEL_ID}" \
+    --tokenizer_name "openai/clip-vit-large-patch14" \
     --train_data_dir "${CCE_TRAIN_DIR}" \
     --i2p \
     --i2p_metadata_path "${CCE_METADATA_FILE}" \
