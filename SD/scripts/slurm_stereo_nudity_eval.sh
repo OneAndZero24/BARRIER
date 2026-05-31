@@ -2,8 +2,8 @@
 # ============================================================================
 # SLURM – STEREO Nudity End-to-End Pipeline
 # ============================================================================
-# Prepares the 95-prompt I2P nudity benchmark, evaluates the unlearned model,
-# runs CCE and Diffusion-MU, and computes NudeNet ASR for each result folder.
+# Re-evaluates already-generated STEREO nudity outputs with NudeNet ASR.
+# This script does not regenerate images; it only scores existing folders.
 #
 # The script creates all required paths under $HOME/InTAct-Unl/SD/stereo.
 # If you want to point it elsewhere, edit the constants below.
@@ -546,20 +546,15 @@ run_diffusion_mu_attack() {
   popd >/dev/null
 }
 
-prepare_benchmark
+echo "ASR-only STEREO nudity re-evaluation"
+echo "  baseline:       ${BASELINE_REFERENCE_DIR}"
+echo "  unlearned:      ${BASELINE_IMAGE_DIR}"
+echo "  unlearn attack: ${DIFFUSION_MU_LOGS}"
+echo "  cce:            ${CCE_EVAL_DIR}"
 
-echo "Benchmark prepared"
-echo "Prompt text: ${PROMPTS_TXT}"
+score_attack "baseline" "${BASELINE_REFERENCE_DIR}"
+score_attack "unlearned" "${BASELINE_IMAGE_DIR}"
+score_attack "unlearn_attack" "${DIFFUSION_MU_LOGS}"
+score_attack "cce" "${CCE_EVAL_DIR}"
 
-prepare_unlearned_baseline
-prepare_vanilla_reference
-score_baseline_reference
-
-# FID-only mode: leave the attack / ASR branches disabled.
-# score_attack "baseline_unlearned" "${BASELINE_IMAGE_DIR}"
-# run_cce_attack
-# score_attack "cce" "${CCE_EVAL_DIR}"
-# run_diffusion_mu_attack
-# score_attack "diffusion_mu" "${DIFFUSION_MU_LOGS}"
-
-echo "FID-only STEREO nudity metrics complete."
+echo "ASR-only STEREO nudity metrics complete."
