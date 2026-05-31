@@ -490,7 +490,6 @@ split_id_replacement = "\n".join([
     "        return sot_id, mid_id, eot_id",
     "",
 ])
-text, _ = re.subn(split_id_pattern, split_id_replacement, text, count=1)
 
 split_embd_pattern = r'(?ms)^    def split_embd\(.*?(?=^    def |\Z)'
 split_embd_replacement = "\n".join([
@@ -502,7 +501,33 @@ split_embd_replacement = "\n".join([
     "        return sot_embd, mid_embd, eot_embd",
     "",
 ])
-text, _ = re.subn(split_embd_pattern, split_embd_replacement, text, count=1)
+
+def upsert_method(source_text, method_pattern, replacement_text):
+    updated, replaced = re.subn(method_pattern, replacement_text, source_text, count=1)
+    if replaced:
+        return updated
+
+    init_pattern = r'(?ms)^class\s+TextGrad\b.*?^    def __init__\(.*?(?=^    def |\Z)'
+    def append_after_init(match):
+        return match.group(0) + "\n" + replacement_text
+
+    updated, inserted = re.subn(init_pattern, append_after_init, source_text, count=1)
+    if inserted:
+        return updated
+
+    run_pattern = r'(?m)^    def run\('
+    updated, inserted = re.subn(run_pattern, replacement_text + "\n    def run(", source_text, count=1)
+    if inserted:
+        return updated
+
+    return source_text
+
+text = upsert_method(text, split_id_pattern, split_id_replacement)
+text = upsert_method(text, split_embd_pattern, split_embd_replacement)
+
+if "def split_id(" not in text or "def split_embd(" not in text:
+    raise SystemExit(f"Failed to patch split helpers in {file_path}")
+
 file_path.write_text(text, encoding="utf-8")
 PYEOF
 }
