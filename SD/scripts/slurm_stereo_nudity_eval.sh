@@ -430,31 +430,6 @@ count_attack_images() {
   find "${attack_dir}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' '
 }
 
-safe_diffusion_mu_attack_indices() {
-  python - <<PYEOF
-from pathlib import Path
-import csv
-
-from transformers import CLIPTokenizer
-
-csv_path = Path("${BENCHMARK_CSV}")
-tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-
-safe_indices = []
-with csv_path.open(newline="", encoding="utf-8") as handle:
-    rows = list(csv.DictReader(handle))
-
-for row in rows:
-    case_number = int(row["case_number"])
-    prompt = str(row["prompt"])
-    token_count = len(tokenizer.tokenize(prompt))
-    if token_count <= 70:
-        safe_indices.append(case_number)
-
-print(" ".join(str(idx) for idx in safe_indices))
-PYEOF
-}
-
 normalize_attack_dataset_filter() {
   local ignore_file="${DIFFUSION_MU_DATASET_DIR}/ignore.json"
   mkdir -p "${DIFFUSION_MU_DATASET_DIR}"
@@ -491,6 +466,30 @@ def calculate_clip_score(images, prompts, device):
     return round(float(clip_value), 4)
 PYEOF
   fi
+}
+
+patch_vendor_prompt_split() {
+  local attacker_file="${DIFFUSION_MU_REPO}/src/attackers/text_grad_.py"
+  if [[ ! -f "${attacker_file}" ]]; then
+    return
+  fi
+
+  python - <<PYEOF
+from pathlib import Path
+
+file_path = Path("${attacker_file}")
+text = file_path.read_text(encoding="utf-8")
+old = '    sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len,self.k, 76-orig_prompt_len-self.k], dim=1)'
+new = '\n'.join([
+    '    max_prompt_len = 76 - self.k - 1',
+    '    if orig_prompt_len > max_prompt_len:',
+    '        orig_prompt_len = max_prompt_len',
+    '    sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len, self.k, 76 - orig_prompt_len - self.k], dim=1)',
+])
+if old in text and new not in text:
+    text = text.replace(old, new)
+    file_path.write_text(text, encoding="utf-8")
+PYEOF
 }
 
 get_resume_attack_idx() {
@@ -592,10 +591,8 @@ rerun_incomplete_diffusion_mu_attacks() {
   clone_repo "https://github.com/OPTML-Group/Diffusion-MU-Attack.git" "${DIFFUSION_MU_REPO}"
   prepare_attack_dataset
   patch_vendor_clip_score
+  patch_vendor_prompt_split
   pushd "${DIFFUSION_MU_REPO}" >/dev/null
-
-  local -a safe_indices=()
-  read -r -a safe_indices <<< "$(safe_diffusion_mu_attack_indices)"
 
   for entry in "${DIFFUSION_MU_LOGS}"/attack_idx_*; do
     [[ -d "${entry}" ]] || continue
@@ -607,18 +604,6 @@ rerun_incomplete_diffusion_mu_attacks() {
 
     local attack_idx
     attack_idx="${entry##*_}"
-    local skip_index=1
-    for safe_idx in "${safe_indices[@]}"; do
-      if [[ "${safe_idx}" == "${attack_idx}" ]]; then
-        skip_index=0
-        break
-      fi
-    done
-    if [[ "${skip_index}" -ne 0 ]]; then
-      echo "Skipping attack_idx_${attack_idx} (${count} images): prompt length is too long for Diffusion-MU rerun"
-      continue
-    fi
-
     echo "Re-running incomplete Diffusion-MU attack_idx_${attack_idx} (${count} images)"
     python src/execs/attack.py \
       --config-file configs/nudity/text_grad_esd_nudity_classifier.json \
