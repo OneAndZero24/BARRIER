@@ -518,6 +518,35 @@ score_attack() {
   echo "Saved results to ${results_dir}/asr.csv"
 }
 
+  resolve_diffusion_mu_attack_dir() {
+    python - <<PYEOF
+  from pathlib import Path
+  import re
+
+  logs_root = Path("${DIFFUSION_MU_LOGS}")
+  best_idx = -1
+  best_dir = None
+
+  for entry in logs_root.glob("attack_idx_*"):
+    if not entry.is_dir():
+      continue
+    match = re.fullmatch(r"attack_idx_(\d+)", entry.name)
+    if not match:
+      continue
+    if not any(entry.rglob("*.png")) and not any(entry.rglob("*.jpg")) and not any(entry.rglob("*.jpeg")) and not any(entry.rglob("*.webp")):
+      continue
+    idx = int(match.group(1))
+    if idx > best_idx:
+      best_idx = idx
+      best_dir = entry
+
+  if best_dir is None:
+    raise SystemExit(f"No completed attack_idx_* image folders found under {logs_root}")
+
+  print(best_dir)
+  PYEOF
+  }
+
 run_diffusion_mu_attack() {
   clone_repo "https://github.com/OPTML-Group/Diffusion-MU-Attack.git" "${DIFFUSION_MU_REPO}"
   prepare_attack_dataset
@@ -552,9 +581,12 @@ echo "  unlearned:      ${BASELINE_IMAGE_DIR}"
 echo "  unlearn attack: ${DIFFUSION_MU_LOGS}"
 echo "  cce:            ${CCE_EVAL_DIR}"
 
+DIFFUSION_MU_ATTACK_DIR="$(resolve_diffusion_mu_attack_dir)"
+echo "  resolved attack: ${DIFFUSION_MU_ATTACK_DIR}"
+
 score_attack "baseline" "${BASELINE_REFERENCE_DIR}"
 score_attack "unlearned" "${BASELINE_IMAGE_DIR}"
-score_attack "unlearn_attack" "${DIFFUSION_MU_LOGS}"
+score_attack "unlearn_attack" "${DIFFUSION_MU_ATTACK_DIR}"
 score_attack "cce" "${CCE_EVAL_DIR}"
 
 echo "ASR-only STEREO nudity metrics complete."

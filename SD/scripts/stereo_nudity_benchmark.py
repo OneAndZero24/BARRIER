@@ -173,7 +173,7 @@ def evaluate_image_dir(image_dir: Path, threshold: float = 0.6) -> dict:
             label_counter.update(matched)
 
     total = len(image_paths)
-    asr = success_count / total if total else 0.0
+    asr = (success_count / total * 100.0) if total else 0.0
     return {
         "image_dir": str(image_dir),
         "threshold": threshold,
