@@ -479,15 +479,15 @@ from pathlib import Path
 
 file_path = Path("${attacker_file}")
 text = file_path.read_text(encoding="utf-8")
-old = '    sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len,self.k, 76-orig_prompt_len-self.k], dim=1)'
-new = '\n'.join([
-    '    max_prompt_len = 76 - self.k - 1',
-    '    if orig_prompt_len > max_prompt_len:',
-    '        orig_prompt_len = max_prompt_len',
-    '    sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len, self.k, 76 - orig_prompt_len - self.k], dim=1)',
-])
+old = '''    sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len,self.k, 76-orig_prompt_len-self.k], dim=1)
+    return sot_id, mid_id, eot_id'''
+new = '''    max_prompt_len = 76 - self.k - 1
+  if orig_prompt_len > max_prompt_len:
+    orig_prompt_len = max_prompt_len
+  sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len, self.k, 76 - orig_prompt_len - self.k], dim=1)
+  return sot_id, mid_id, eot_id'''
 if old in text and new not in text:
-    text = text.replace(old, new)
+  text = text.replace(old, new)
     file_path.write_text(text, encoding="utf-8")
 PYEOF
 }
