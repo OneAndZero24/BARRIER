@@ -498,8 +498,87 @@ split_embd_replacement = "\n".join([
     "        if orig_prompt_len > max_prompt_len:",
     "            orig_prompt_len = max_prompt_len",
     "        sot_embd, mid_embd, _, eot_embd = torch.split(input_embed, [1, orig_prompt_len, self.k, 76 - orig_prompt_len - self.k], dim=1)",
+  "        self.sot_embd = sot_embd",
+  "        self.mid_embd = mid_embd",
+  "        self.eot_embd = eot_embd",
     "        return sot_embd, mid_embd, eot_embd",
     "",
+])
+
+construct_embd_pattern = r'(?ms)^    def construct_embd\(.*?(?=^    def |\Z)'
+construct_embd_replacement = "\n".join([
+  "    def construct_embd(self, adv_embedding):",
+  "        if self.insertion_location == 'prefix_k':",
+  "            embedding = torch.cat([self.sot_embd, adv_embedding, self.mid_embd, self.eot_embd], dim=1)",
+  "        elif self.insertion_location == 'suffix_k':",
+  "            embedding = torch.cat([self.sot_embd, self.mid_embd, adv_embedding, self.eot_embd], dim=1)",
+  "        elif self.insertion_location == 'mid_k':",
+  "            embedding = [self.sot_embd]",
+  "            total_num = self.mid_embd.size(1)",
+  "            embedding.append(self.mid_embd[:, :total_num // 2, :])",
+  "            embedding.append(adv_embedding)",
+  "            embedding.append(self.mid_embd[:, total_num // 2:, :])",
+  "            embedding.append(self.eot_embd)",
+  "            embedding = torch.cat(embedding, dim=1)",
+  "        elif self.insertion_location == 'insert_k':",
+  "            embedding = [self.sot_embd]",
+  "            total_num = self.mid_embd.size(1)",
+  "            internals = total_num // (self.k + 1)",
+  "            for i in range(self.k):",
+  "                embedding.append(self.mid_embd[:, internals * i:internals * (i + 1), :])",
+  "                embedding.append(adv_embedding[:, i, :].unsqueeze(1))",
+  "            embedding.append(self.mid_embd[:, internals * (i + 1):, :])",
+  "            embedding.append(self.eot_embd)",
+  "            embedding = torch.cat(embedding, dim=1)",
+  "        elif self.insertion_location == 'per_k_words':",
+  "            embedding = [self.sot_embd]",
+  "            for i in range(adv_embedding.size(1) - 1):",
+  "                embedding.append(adv_embedding[:, i, :].unsqueeze(1))",
+  "                embedding.append(self.mid_embd[:, 3 * i:3 * (i + 1), :])",
+  "            embedding.append(adv_embedding[:, -1, :].unsqueeze(1))",
+  "            embedding.append(self.mid_embd[:, 3 * (i + 1):, :])",
+  "            embedding.append(self.eot_embd)",
+  "            embedding = torch.cat(embedding, dim=1)",
+  "        return embedding",
+  "",
+])
+
+construct_id_pattern = r'(?ms)^    def construct_id\(.*?(?=^    def |\Z)'
+construct_id_replacement = "\n".join([
+  "    def construct_id(self, adv_id, sot_id, eot_id, mid_id):",
+  "        if self.insertion_location == 'prefix_k':",
+  "            input_ids = torch.cat([sot_id, adv_id, mid_id, eot_id], dim=1)",
+  "        elif self.insertion_location == 'suffix_k':",
+  "            input_ids = torch.cat([sot_id, mid_id, adv_id, eot_id], dim=1)",
+  "        elif self.insertion_location == 'mid_k':",
+  "            input_ids = [sot_id]",
+  "            total_num = mid_id.size(1)",
+  "            input_ids.append(mid_id[:, :total_num // 2])",
+  "            input_ids.append(adv_id)",
+  "            input_ids.append(mid_id[:, total_num // 2:])",
+  "            input_ids.append(eot_id)",
+  "            input_ids = torch.cat(input_ids, dim=1)",
+  "        elif self.insertion_location == 'insert_k':",
+  "            input_ids = [sot_id]",
+  "            total_num = mid_id.size(1)",
+  "            internals = total_num // (self.k + 1)",
+  "            for i in range(self.k):",
+  "                input_ids.append(mid_id[:, internals * i:internals * (i + 1)])",
+  "                input_ids.append(adv_id[:, i].unsqueeze(1))",
+  "            input_ids.append(mid_id[:, internals * (i + 1):])",
+  "            input_ids.append(eot_id)",
+  "            input_ids = torch.cat(input_ids, dim=1)",
+  "        elif self.insertion_location == 'per_k_words':",
+  "            input_ids = [sot_id]",
+  "            for i in range(adv_id.size(1) - 1):",
+  "                input_ids.append(adv_id[:, i].unsqueeze(1))",
+  "                input_ids.append(mid_id[:, 3 * i:3 * (i + 1)])",
+  "            input_ids.append(adv_id[:, -1].unsqueeze(1))",
+  "            input_ids.append(mid_id[:, 3 * (i + 1):])",
+  "            input_ids.append(eot_id)",
+  "            input_ids = torch.cat(input_ids, dim=1)",
+  "        return input_ids",
+  "",
 ])
 
 def upsert_method(source_text, method_pattern, replacement_text):
@@ -524,9 +603,13 @@ def upsert_method(source_text, method_pattern, replacement_text):
 
 text = upsert_method(text, split_id_pattern, split_id_replacement)
 text = upsert_method(text, split_embd_pattern, split_embd_replacement)
+text = upsert_method(text, construct_embd_pattern, construct_embd_replacement)
+text = upsert_method(text, construct_id_pattern, construct_id_replacement)
 
-if "def split_id(" not in text or "def split_embd(" not in text:
-    raise SystemExit(f"Failed to patch split helpers in {file_path}")
+required_methods = ["split_id", "split_embd", "construct_embd", "construct_id"]
+missing = [name for name in required_methods if f"def {name}(" not in text]
+if missing:
+  raise SystemExit(f"Failed to patch required helpers in {file_path}: {', '.join(missing)}")
 
 file_path.write_text(text, encoding="utf-8")
 PYEOF
