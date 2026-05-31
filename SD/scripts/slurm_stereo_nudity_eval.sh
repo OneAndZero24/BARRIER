@@ -271,6 +271,7 @@ PYEOF
 
 run_cce_attack() {
   clone_repo "https://github.com/NYU-DICE-Lab/circumventing-concept-erasure.git" "${CCE_REPO}"
+  patch_cce_diffusers_gate
   patch_cce_clip_score
   prepare_cce_prompts
 
@@ -311,6 +312,20 @@ run_cce_attack() {
     --base_model_path "${CCE_OUTPUT_DIR}" \
     --num_samples 1 \
     --from_case 0
+}
+
+patch_cce_diffusers_gate() {
+  local concept_inversion_file="${CCE_REPO}/uce/concept_inversion.py"
+  if [[ -f "${concept_inversion_file}" ]] && grep -q 'check_min_version("0.17.0.dev0")' "${concept_inversion_file}"; then
+    python - <<PYEOF
+from pathlib import Path
+
+file_path = Path("${concept_inversion_file}")
+text = file_path.read_text(encoding="utf-8")
+text = text.replace('check_min_version("0.17.0.dev0")', '# patched for local diffusers 0.14.0 compatibility')
+file_path.write_text(text, encoding="utf-8")
+PYEOF
+  fi
 }
 
 patch_cce_clip_score() {
