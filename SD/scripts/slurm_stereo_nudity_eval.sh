@@ -447,7 +447,7 @@ with csv_path.open(newline="", encoding="utf-8") as handle:
 for row in rows:
     case_number = int(row["case_number"])
     prompt = str(row["prompt"])
-    token_count = len(tokenizer(prompt, add_special_tokens=True)["input_ids"]) - 2
+    token_count = len(tokenizer.tokenize(prompt))
     if token_count <= 70:
         safe_indices.append(case_number)
 
@@ -568,7 +568,12 @@ for entry in logs_root.glob("attack_idx_*"):
     match = re.fullmatch(r"attack_idx_(\d+)", entry.name)
     if not match:
         continue
-  image_count = sum(1 for _ in entry.rglob("*.png")) + sum(1 for _ in entry.rglob("*.jpg")) + sum(1 for _ in entry.rglob("*.jpeg")) + sum(1 for _ in entry.rglob("*.webp"))
+  image_count = (
+    sum(1 for _ in entry.rglob("*.png"))
+    + sum(1 for _ in entry.rglob("*.jpg"))
+    + sum(1 for _ in entry.rglob("*.jpeg"))
+    + sum(1 for _ in entry.rglob("*.webp"))
+  )
   if image_count != 51:
         continue
     idx = int(match.group(1))
