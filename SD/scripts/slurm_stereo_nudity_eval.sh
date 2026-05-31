@@ -223,9 +223,9 @@ for start in range(0, len(image_paths), 16):
 fid = FID(feature=2048)
 for start in range(0, len(image_paths), 16):
   batch = torch.stack([
-    torch.from_numpy(__import__("numpy").array(Image.open(path).convert("RGB"))).permute(2, 0, 1).float() / 255.0
+    torch.from_numpy(__import__("numpy").array(Image.open(path).convert("RGB"))).permute(2, 0, 1)
     for path in image_paths[start:start + 16]
-  ])
+  ]).to(torch.uint8)
   batch = batch.to(device)
   fid.update(batch, real=True)
   fid.update(batch, real=False)
