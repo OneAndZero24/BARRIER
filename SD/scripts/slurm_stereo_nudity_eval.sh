@@ -42,6 +42,8 @@ BASELINE_ROOT="${RUN_ROOT}/baseline_unlearned"
 BASELINE_MODEL_DIR="${BASELINE_ROOT}/models"
 BASELINE_MODEL_ALIAS="unlearned"
 BASELINE_IMAGE_DIR="${BASELINE_ROOT}/${BASELINE_MODEL_ALIAS}"
+BASELINE_REFERENCE_ROOT="${BASELINE_ROOT}/vanilla_sd14"
+BASELINE_REFERENCE_DIR="${BASELINE_REFERENCE_ROOT}"
 BASELINE_METADATA_FILE="${BASELINE_ROOT}/metadata.json"
 
 CCE_REPO="${VENDOR_ROOT}/circumventing-concept-erasure"
@@ -71,6 +73,7 @@ mkdir -p "${BENCHMARK_DIR}" "${RUN_ROOT}" "${RESULTS_ROOT}" "${PROMPTS_ROOT}" "$
 mkdir -p "${DIFFUSION_MU_LOGS}"
 
 mkdir -p "${BASELINE_MODEL_DIR}" "${BASELINE_ROOT}" "${CCE_ROOT}"
+mkdir -p "${BASELINE_REFERENCE_ROOT}"
 
 clone_repo() {
   local repo_url="$1"
@@ -173,6 +176,19 @@ metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 PYEOF
 }
 
+prepare_vanilla_reference() {
+  mkdir -p "${BASELINE_REFERENCE_ROOT}"
+
+  echo "Generating vanilla SD 1.4 reference outputs"
+  python eval-scripts/generate-images.py \
+    --model_name "" \
+    --prompts_path "${BENCHMARK_CSV}" \
+    --save_path "${BASELINE_REFERENCE_ROOT}" \
+    --base_model_path "${BASE_MODEL_ID}" \
+    --num_samples 1 \
+    --from_case 0
+}
+
 score_baseline_reference() {
   local results_dir="${RESULTS_ROOT}/baseline_unlearned"
   mkdir -p "${results_dir}"
@@ -180,33 +196,40 @@ score_baseline_reference() {
   python - <<PYEOF
 from pathlib import Path
 import csv
-import json
 
 import torch
 from PIL import Image
 from torchmetrics.image.fid import FID
 from transformers import CLIPModel, CLIPProcessor
+import numpy as np
 
 prompts_path = Path("${BENCHMARK_CSV}")
 image_dir = Path("${BASELINE_IMAGE_DIR}")
+reference_dir = Path("${BASELINE_REFERENCE_DIR}")
 metrics_path = Path("${RESULTS_ROOT}/baseline_unlearned/metrics.csv")
 
 with prompts_path.open(newline='', encoding='utf-8') as handle:
   rows = list(csv.DictReader(handle))
 
 image_paths = []
+reference_paths = []
 prompts = []
 for row in rows:
   case_number = int(row["case_number"])
   image_path = image_dir / f"{case_number}_0.png"
+  reference_path = reference_dir / f"{case_number}_0.png"
   if not image_path.exists():
     raise SystemExit(f"Missing baseline image for metric computation: {image_path}")
+  if not reference_path.exists():
+    raise SystemExit(f"Missing vanilla reference image for metric computation: {reference_path}")
   image_paths.append(image_path)
+  reference_paths.append(reference_path)
   prompts.append(str(row["prompt"]))
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+clip_device = "cuda" if torch.cuda.is_available() else "cpu"
+fid_device = "cpu"
 
-clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(clip_device)
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 clip_model.eval()
 
@@ -215,31 +238,36 @@ for start in range(0, len(image_paths), 16):
   batch_paths = image_paths[start:start + 16]
   batch_prompts = prompts[start:start + 16]
   images = [Image.open(path).convert("RGB") for path in batch_paths]
-  inputs = clip_processor(text=batch_prompts, images=images, return_tensors="pt", padding=True, truncation=True).to(device)
+  inputs = clip_processor(text=batch_prompts, images=images, return_tensors="pt", padding=True, truncation=True).to(clip_device)
   with torch.no_grad():
     outputs = clip_model(**inputs)
     clip_scores.extend(outputs.logits_per_image.diagonal().detach().cpu().tolist())
 
-fid = FID(feature=2048).to(device)
+fid = FID(feature=2048).to(fid_device)
 for start in range(0, len(image_paths), 16):
-  batch = torch.stack([
-    torch.from_numpy(__import__("numpy").array(Image.open(path).convert("RGB"))).permute(2, 0, 1)
+  real_batch = torch.stack([
+    torch.from_numpy(np.array(Image.open(path).convert("RGB"))).permute(2, 0, 1)
+    for path in reference_paths[start:start + 16]
+  ]).to(torch.uint8)
+  fake_batch = torch.stack([
+    torch.from_numpy(np.array(Image.open(path).convert("RGB"))).permute(2, 0, 1)
     for path in image_paths[start:start + 16]
   ]).to(torch.uint8)
-  batch = batch.to(device)
-  fid.update(batch, real=True)
-  fid.update(batch, real=False)
+  real_batch = real_batch.to(fid_device)
+  fake_batch = fake_batch.to(fid_device)
+  fid.update(real_batch, real=True)
+  fid.update(fake_batch, real=False)
 
 metrics = {
   "attack": "baseline_unlearned",
   "clip_score": sum(clip_scores) / len(clip_scores) if clip_scores else 0.0,
-  "fid_self": float(fid.compute().item()),
+  "fid_vs_vanilla": float(fid.compute().item()),
   "images": len(image_paths),
 }
 
 metrics_path.write_text(
-  "attack,images,clip_score,fid_self\n"
-  f"{metrics['attack']},{metrics['images']},{metrics['clip_score']:.6f},{metrics['fid_self']:.6f}\n",
+  "attack,images,clip_score,fid_vs_vanilla\n"
+  f"{metrics['attack']},{metrics['images']},{metrics['clip_score']:.6f},{metrics['fid_vs_vanilla']:.6f}\n",
   encoding="utf-8",
 )
 
@@ -300,6 +328,8 @@ run_cce_attack() {
     --output_dir "${CCE_OUTPUT_DIR}" \
     --num_train_images 95 \
     --mixed_precision "fp16" \
+    --report_to "none" \
+    --logging_dir "${CCE_OUTPUT_DIR}/logs" \
     --enable_xformers_memory_efficient_attention
 
   popd >/dev/null
@@ -497,6 +527,7 @@ echo "Prompt text: ${PROMPTS_TXT}"
 
 prepare_unlearned_baseline
 score_attack "baseline_unlearned" "${BASELINE_IMAGE_DIR}"
+prepare_vanilla_reference
 score_baseline_reference
 
 run_cce_attack
