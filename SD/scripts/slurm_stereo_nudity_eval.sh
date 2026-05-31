@@ -328,7 +328,7 @@ run_cce_attack() {
     --output_dir "${CCE_OUTPUT_DIR}" \
     --num_train_images 95 \
     --mixed_precision "fp16" \
-    --report_to "none" \
+    --report_to "tensorboard" \
     --logging_dir "${CCE_OUTPUT_DIR}/logs" \
     --enable_xformers_memory_efficient_attention
 
