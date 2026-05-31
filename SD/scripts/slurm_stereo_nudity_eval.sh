@@ -420,6 +420,16 @@ count_dataset_images() {
   find "${dataset_imgs_dir}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' '
 }
 
+count_attack_images() {
+  local attack_dir="$1"
+  if [[ ! -d "${attack_dir}" ]]; then
+    echo 0
+    return
+  fi
+
+  find "${attack_dir}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' '
+}
+
 normalize_attack_dataset_filter() {
   local ignore_file="${DIFFUSION_MU_DATASET_DIR}/ignore.json"
   mkdir -p "${DIFFUSION_MU_DATASET_DIR}"
@@ -533,7 +543,8 @@ for entry in logs_root.glob("attack_idx_*"):
     match = re.fullmatch(r"attack_idx_(\d+)", entry.name)
     if not match:
         continue
-    if not any(entry.rglob("*.png")) and not any(entry.rglob("*.jpg")) and not any(entry.rglob("*.jpeg")) and not any(entry.rglob("*.webp")):
+  image_count = sum(1 for _ in entry.rglob("*.png")) + sum(1 for _ in entry.rglob("*.jpg")) + sum(1 for _ in entry.rglob("*.jpeg")) + sum(1 for _ in entry.rglob("*.webp"))
+  if image_count != 51:
         continue
     idx = int(match.group(1))
     if idx > best_idx:
@@ -545,6 +556,35 @@ if best_dir is None:
 
 print(best_dir)
 PYEOF
+}
+
+rerun_incomplete_diffusion_mu_attacks() {
+  clone_repo "https://github.com/OPTML-Group/Diffusion-MU-Attack.git" "${DIFFUSION_MU_REPO}"
+  prepare_attack_dataset
+  patch_vendor_clip_score
+  pushd "${DIFFUSION_MU_REPO}" >/dev/null
+
+  for entry in "${DIFFUSION_MU_LOGS}"/attack_idx_*; do
+    [[ -d "${entry}" ]] || continue
+    local count
+    count="$(count_attack_images "${entry}")"
+    if [[ "${count}" == "51" ]]; then
+      continue
+    fi
+
+    local attack_idx
+    attack_idx="${entry##*_}"
+    echo "Re-running incomplete Diffusion-MU attack_idx_${attack_idx} (${count} images)"
+    python src/execs/attack.py \
+      --config-file configs/nudity/text_grad_esd_nudity_classifier.json \
+      --task.target_ckpt "${MODEL_PATH}" \
+      --task.dataset_path "${DIFFUSION_MU_DATASET_DIR}" \
+      --attacker.attack_idx "${attack_idx}" \
+      --logger.name "attack_idx_${attack_idx}" \
+      --logger.json.root "${DIFFUSION_MU_LOGS}"
+  done
+
+  popd >/dev/null
 }
 
 run_diffusion_mu_attack() {
@@ -581,6 +621,7 @@ echo "  unlearned:      ${BASELINE_IMAGE_DIR}"
 echo "  unlearn attack: ${DIFFUSION_MU_LOGS}"
 echo "  cce:            ${CCE_EVAL_DIR}"
 
+rerun_incomplete_diffusion_mu_attacks
 DIFFUSION_MU_ATTACK_DIR="$(resolve_diffusion_mu_attack_dir)"
 echo "  resolved attack: ${DIFFUSION_MU_ATTACK_DIR}"
 
