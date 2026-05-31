@@ -480,8 +480,8 @@ import re
 
 file_path = Path("${attacker_file}")
 text = file_path.read_text(encoding="utf-8")
-  split_id_pattern = r'(?ms)^    def split_id\(.*?(?=^    def |\Z)'
-  split_id_replacement = '''    def split_id(self, input_ids, orig_prompt_len):
+split_id_pattern = r'(?ms)^    def split_id\(.*?(?=^    def |\Z)'
+split_id_replacement = '''    def split_id(self, input_ids, orig_prompt_len):
       max_prompt_len = 76 - self.k - 1
       if orig_prompt_len > max_prompt_len:
         orig_prompt_len = max_prompt_len
@@ -489,10 +489,10 @@ text = file_path.read_text(encoding="utf-8")
       return sot_id, mid_id, eot_id
 
   '''
-  text, _ = re.subn(split_id_pattern, split_id_replacement, text, count=1)
+text, _ = re.subn(split_id_pattern, split_id_replacement, text, count=1)
 
-  split_embd_pattern = r'(?ms)^    def split_embd\(.*?(?=^    def |\Z)'
-  split_embd_replacement = '''    def split_embd(self, input_embed, orig_prompt_len):
+split_embd_pattern = r'(?ms)^    def split_embd\(.*?(?=^    def |\Z)'
+split_embd_replacement = '''    def split_embd(self, input_embed, orig_prompt_len):
       max_prompt_len = 76 - self.k - 1
       if orig_prompt_len > max_prompt_len:
         orig_prompt_len = max_prompt_len
@@ -500,7 +500,7 @@ text = file_path.read_text(encoding="utf-8")
       return sot_embd, mid_embd, eot_embd
 
   '''
-  text, _ = re.subn(split_embd_pattern, split_embd_replacement, text, count=1)
+text, _ = re.subn(split_embd_pattern, split_embd_replacement, text, count=1)
 file_path.write_text(text, encoding="utf-8")
 PYEOF
 }
