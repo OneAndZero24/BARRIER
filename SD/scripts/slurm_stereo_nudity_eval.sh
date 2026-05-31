@@ -430,6 +430,31 @@ count_attack_images() {
   find "${attack_dir}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' '
 }
 
+safe_diffusion_mu_attack_indices() {
+  python - <<PYEOF
+from pathlib import Path
+import csv
+
+from transformers import CLIPTokenizer
+
+csv_path = Path("${BENCHMARK_CSV}")
+tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+
+safe_indices = []
+with csv_path.open(newline="", encoding="utf-8") as handle:
+    rows = list(csv.DictReader(handle))
+
+for row in rows:
+    case_number = int(row["case_number"])
+    prompt = str(row["prompt"])
+    token_count = len(tokenizer(prompt, add_special_tokens=True)["input_ids"]) - 2
+    if token_count <= 70:
+        safe_indices.append(case_number)
+
+print(" ".join(str(idx) for idx in safe_indices))
+PYEOF
+}
+
 normalize_attack_dataset_filter() {
   local ignore_file="${DIFFUSION_MU_DATASET_DIR}/ignore.json"
   mkdir -p "${DIFFUSION_MU_DATASET_DIR}"
@@ -564,6 +589,9 @@ rerun_incomplete_diffusion_mu_attacks() {
   patch_vendor_clip_score
   pushd "${DIFFUSION_MU_REPO}" >/dev/null
 
+  local -a safe_indices=()
+  read -r -a safe_indices <<< "$(safe_diffusion_mu_attack_indices)"
+
   for entry in "${DIFFUSION_MU_LOGS}"/attack_idx_*; do
     [[ -d "${entry}" ]] || continue
     local count
@@ -574,6 +602,18 @@ rerun_incomplete_diffusion_mu_attacks() {
 
     local attack_idx
     attack_idx="${entry##*_}"
+    local skip_index=1
+    for safe_idx in "${safe_indices[@]}"; do
+      if [[ "${safe_idx}" == "${attack_idx}" ]]; then
+        skip_index=0
+        break
+      fi
+    done
+    if [[ "${skip_index}" -ne 0 ]]; then
+      echo "Skipping attack_idx_${attack_idx} (${count} images): prompt length is too long for Diffusion-MU rerun"
+      continue
+    fi
+
     echo "Re-running incomplete Diffusion-MU attack_idx_${attack_idx} (${count} images)"
     python src/execs/attack.py \
       --config-file configs/nudity/text_grad_esd_nudity_classifier.json \
