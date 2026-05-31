@@ -476,20 +476,20 @@ patch_vendor_prompt_split() {
 
   python - <<PYEOF
 from pathlib import Path
-  import re
+import re
 
 file_path = Path("${attacker_file}")
 text = file_path.read_text(encoding="utf-8")
-  pattern = r'(?ms)^    def split_id\(.*?(?=^    def |\Z)'
-  replacement = '''    def split_id(self, input_ids, orig_prompt_len):
-      max_prompt_len = 76 - self.k - 1
-      if orig_prompt_len > max_prompt_len:
-        orig_prompt_len = max_prompt_len
-      sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len, self.k, 76 - orig_prompt_len - self.k], dim=1)
-      return sot_id, mid_id, eot_id
-  '''
-  text, _ = re.subn(pattern, replacement, text, count=1)
-    file_path.write_text(text, encoding="utf-8")
+pattern = r'(?ms)^    def split_id\(.*?(?=^    def |\Z)'
+replacement = '''    def split_id(self, input_ids, orig_prompt_len):
+        max_prompt_len = 76 - self.k - 1
+        if orig_prompt_len > max_prompt_len:
+            orig_prompt_len = max_prompt_len
+        sot_id, mid_id,_, eot_id = torch.split(input_ids, [1, orig_prompt_len, self.k, 76 - orig_prompt_len - self.k], dim=1)
+        return sot_id, mid_id, eot_id
+'''
+text, _ = re.subn(pattern, replacement, text, count=1)
+file_path.write_text(text, encoding="utf-8")
 PYEOF
 }
 
