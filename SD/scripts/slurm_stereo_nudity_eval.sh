@@ -220,7 +220,7 @@ for start in range(0, len(image_paths), 16):
     outputs = clip_model(**inputs)
     clip_scores.extend(outputs.logits_per_image.diagonal().detach().cpu().tolist())
 
-fid = FID(feature=2048)
+fid = FID(feature=2048).to(device)
 for start in range(0, len(image_paths), 16):
   batch = torch.stack([
     torch.from_numpy(__import__("numpy").array(Image.open(path).convert("RGB"))).permute(2, 0, 1)
