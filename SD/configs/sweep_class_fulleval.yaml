@@ -27,6 +27,6 @@ parameters:
   unlearn.lr:
     values: [1.0e-5, 5e-5, 1.0e-4, 5.0e-6, 1.0e-6]
   unlearn.epochs:
-    values: [10, 20]
+    values: [3, 10, 20]
   intact.lambda_interval:
-    values: [10.0, 1.0, 100.0]
+    values: [0.1, 1.0]
