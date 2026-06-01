@@ -690,13 +690,13 @@ for entry in logs_root.glob("attack_idx_*"):
     match = re.fullmatch(r"attack_idx_(\d+)", entry.name)
     if not match:
         continue
-  image_count = (
-    sum(1 for _ in entry.rglob("*.png"))
-    + sum(1 for _ in entry.rglob("*.jpg"))
-    + sum(1 for _ in entry.rglob("*.jpeg"))
-    + sum(1 for _ in entry.rglob("*.webp"))
-  )
-  if image_count != 51:
+    image_count = (
+        sum(1 for _ in entry.rglob("*.png"))
+        + sum(1 for _ in entry.rglob("*.jpg"))
+        + sum(1 for _ in entry.rglob("*.jpeg"))
+        + sum(1 for _ in entry.rglob("*.webp"))
+    )
+    if image_count != 51:
         continue
     idx = int(match.group(1))
     if idx > best_idx:
