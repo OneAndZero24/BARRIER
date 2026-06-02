@@ -18,12 +18,14 @@ set -euo pipefail
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
 
-cd "$HOME/InTAct-Unl/SD"
+REPO_ROOT="$HOME/InTAct-Unl/SD"
+
+cd "$REPO_ROOT"
 export PYTHONPATH="${PYTHONPATH:-}:$(cd .. && pwd)"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
-STEREO_ROOT="$HOME/InTAct-Unl/SD/stereo"
-PROMPTS_CSV="${STEREO_ROOT}/prompts/Nudity_eta_3_K_16.csv"
+STEREO_ROOT="$REPO_ROOT/stereo"
+PROMPTS_CSV="$REPO_ROOT/prompts/Nudity_eta_3_K_16.csv"
 RUN_ROOT="${STEREO_ROOT}/runs"
 RESULTS_ROOT="${STEREO_ROOT}/results"
 

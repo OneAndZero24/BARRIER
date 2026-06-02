@@ -21,15 +21,17 @@ set -euo pipefail
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
 
-cd "$HOME/InTAct-Unl/SD"
+REPO_ROOT="$HOME/InTAct-Unl/SD"
+
+cd "$REPO_ROOT"
 export PYTHONPATH="${PYTHONPATH:-}:$(cd .. && pwd)"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
-STEREO_ROOT="$HOME/InTAct-Unl/SD/stereo"
+STEREO_ROOT="$REPO_ROOT/stereo"
 BENCHMARK_DIR="${STEREO_ROOT}/benchmark"
 RUN_ROOT="${STEREO_ROOT}/runs"
 RESULTS_ROOT="${STEREO_ROOT}/results"
-PROMPTS_ROOT="${STEREO_ROOT}/prompts"
+PROMPTS_ROOT="$REPO_ROOT/prompts"
 VENDOR_ROOT="${STEREO_ROOT}/vendors"
 BENCHMARK_CSV="${BENCHMARK_DIR}/i2p_nudity_95.csv"
 PROMPTS_TXT="${BENCHMARK_DIR}/i2p_nudity_95.txt"
@@ -38,7 +40,7 @@ MODEL_NAME="compvis-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06"
 MODEL_PATH="/shared/results/common/miksa/intact/SD/models/${MODEL_NAME}/diffusers-intact-nsfw-targets_tgth_675706798c_n3-lambda_0.5-lr_5e-06.pt"
 BASE_MODEL_ID="CompVis/stable-diffusion-v1-4"
 
-NUDITY_PROMPTS_CSV="${STEREO_ROOT}/prompts/Nudity_eta_3_K_16.csv"
+NUDITY_PROMPTS_CSV="${PROMPTS_ROOT}/Nudity_eta_3_K_16.csv"
 NUDITY_SAVE_PATH="${RUN_ROOT}/nudity_check"
 NUDITY_RESULTS_CSV="${RESULTS_ROOT}/nudity_check_results.csv"
 RAB_REPORT_NAME="RAB"
