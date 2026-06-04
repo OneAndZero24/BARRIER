@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from statistics import mean
 from typing import Any, Dict, List, Optional
@@ -148,7 +149,9 @@ def main() -> None:
     base_output_dir = Path(base_cfg["paths"]["output_dir"])
     trial_root = base_output_dir / f"sweep_{trial_key}"
     resume_root = trial_root / "resume"
-    tmp_root = trial_root / "tmp"
+    # Unique per-process run dir so parallel W&B agents don't collide on NFS
+    run_id = uuid.uuid4().hex[:10]
+    run_tmp_root = trial_root / f"run_{run_id}"
     trial_root.mkdir(parents=True, exist_ok=True)
     resume_root.mkdir(parents=True, exist_ok=True)
 
@@ -160,9 +163,9 @@ def main() -> None:
         class_cfg["unlearn"]["save_compvis"] = True
         class_cfg["unlearn"]["save_diffusers"] = True
         class_cfg["unlearn"]["save_history_logs"] = False
-        class_cfg["paths"]["output_dir"] = str(trial_root / f"class_{class_id}")
-        class_cfg["paths"]["model_save_dir"] = str(tmp_root / f"class_{class_id}" / "models")
-        class_cfg["paths"]["logs_dir"] = str(tmp_root / f"class_{class_id}" / "logs")
+        class_cfg["paths"]["output_dir"] = str(run_tmp_root / f"class_{class_id}")
+        class_cfg["paths"]["model_save_dir"] = str(run_tmp_root / f"class_{class_id}" / "models")
+        class_cfg["paths"]["logs_dir"] = str(run_tmp_root / f"class_{class_id}" / "logs")
 
         with tempfile.TemporaryDirectory(prefix=f"sd_fulleval_{class_id}_") as tmpdir:
             tmp_path = Path(tmpdir)

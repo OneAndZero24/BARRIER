@@ -34,6 +34,19 @@ SWEEP_ID="$1"
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
 export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
+
+export HF_HOME="$CACHE_ROOT/huggingface"
+export TORCH_HOME="$CACHE_ROOT/torch"
+export XDG_DATA_HOME="$CACHE_ROOT"
+export XDG_CACHE_HOME="$CACHE_ROOT"
+export WANDB_DIR="$CACHE_ROOT/wandb"
+export WANDB_CACHE_DIR="$CACHE_ROOT/wandb"
+export TMPDIR="$CACHE_ROOT/tmp"
+export CLIP_CACHE_DIR="$CACHE_ROOT/clip"
+# Disables cache-locking that breaks on concurrent NFS mounts
+export HUGGINGFACE_HUB_DISABLE_ENTRYPOINT_INTROSPECTION=1
+
+mkdir -p "$HF_HOME" "$TORCH_HOME" "$TMPDIR"
 cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
