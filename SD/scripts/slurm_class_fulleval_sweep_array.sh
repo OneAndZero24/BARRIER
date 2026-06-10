@@ -17,7 +17,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256GB
 #SBATCH --partition=dgxh100
-#SBATCH --array=0-27
+#SBATCH --array=0-30
 
 set -euo pipefail
 

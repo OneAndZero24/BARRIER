@@ -8,6 +8,7 @@
 
 program: scripts/run_class_fulleval_sweep.py
 method: bayes
+run_cap: 50
 name: sd-class-fulleval-30
 entity: oneandzero24
 project: intact-sd

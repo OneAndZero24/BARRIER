@@ -205,7 +205,7 @@ def main() -> None:
     }
 
     if avg_ua is not None and avg_remain is not None:
-        summary["target_gap"] = abs(avg_ua - 0.98) + abs(avg_remain - 0.80)
+        summary["target_gap"] = abs(avg_ua - 0.99) + abs(avg_remain - 0.85)
         summary["target_score"] = -summary["target_gap"]
     else:
         summary["target_gap"] = None
