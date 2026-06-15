@@ -1,0 +1,53 @@
+# =============================================================================
+# SD Artist Forgetting Config (Based on pipeline_class_fulleval.yaml)
+# =============================================================================
+# Usage:
+#   python train-scripts/train_artists.py --config configs/pipeline_artists.yaml
+# =============================================================================
+
+wandb:
+  project: "intact-sd"
+  entity: oneandzero24
+  group: "artist-fulleval"
+  tags: ["sd", "artist", "intact", "fulleval"]
+
+pipeline:
+  setting: "sd"
+  seed: 42
+  device: "0"
+
+paths:
+  sd_config: "configs/stable-diffusion/v1-intact.yaml"
+  sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  diffusers_config: "diffusers_unet_config.json"
+  test_csv_path: "dataset/validation_niche_artists.csv"
+  save_path: "ckpt2/SD_adv_train"
+
+unlearn:
+  concepts: ["Kelly McKernan", "Van Gogh"]
+  concept_type: "art"
+  guided_concepts: null
+  preserve_concepts: null
+  technique: "replace"
+  preserve_scale: 0.1
+  preserve_number: null
+  erase_scale: 1.0
+  lamb: 0.1
+  emb_computing: "close_standardreg"
+  reg_item: "1st"
+  regular_scale: 1.0e-3
+  num_samples: 1
+  ddim_steps: 50
+  epochs: 3
+  lr: 1.0e-5
+  intact: true
+
+intact:
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 64
+  infinity_scale: 18.0
+  use_actual_bounds: true
+  normalize_protection: true
