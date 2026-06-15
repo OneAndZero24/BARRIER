@@ -11,7 +11,7 @@ import random
 import pandas as pd
 import argparse
 import os
-from diffusers import StableDiffusionPipeline, LMSDiscreteScheduler
+from diffusers import StableDiffusionPipeline, LMSDiscreteScheduler, AutoencoderKL, UNet2DConditionModel
 from transformers import CLIPTokenizer
 from functools import reduce
 import operator
@@ -25,6 +25,69 @@ from erase_methods import edit_model_adversarial
 from execs import generate_images, compute_nudity_rate
 from utils.embedding_calculation import close_form_emb, close_form_emb_regzero
 from InTAct.intact import UnlearnIntervalProtection
+
+# Helper to load Stable Diffusion pipeline from either a diffusers directory or a .ckpt file + config
+def load_sd_pipeline(ckpt_path: str, config_path: str | None, device: str):
+    """Load a StableDiffusionPipeline.
+    If ``ckpt_path`` ends with ``.ckpt`` we convert the checkpoint using the project's
+    conversion utilities (convertModels). Otherwise we assume it is a diffusers-format
+    directory or a HuggingFace hub identifier.
+    ``device`` is the torch device string (e.g., ``'cuda'`` or ``'cpu'``).
+    """
+    if ckpt_path.endswith('.ckpt'):
+        # Convert legacy checkpoint to diffusers components
+        from convertModels import (
+            create_vae_diffusers_config,
+            create_unet_diffusers_config,
+            convert_ldm_vae_checkpoint,
+            convert_ldm_unet_checkpoint,
+            convert_ldm_clip_checkpoint,
+        )
+        from omegaconf import OmegaConf
+        # Load checkpoint
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
+        if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+            checkpoint = checkpoint["state_dict"]
+        # Load original config
+        if config_path is None:
+            raise ValueError("sd_config path is required when loading from a .ckpt file")
+        original_config = OmegaConf.load(config_path)
+        # VAE
+        vae_cfg = create_vae_diffusers_config(original_config, image_size=512)
+        vae = AutoencoderKL(**vae_cfg)
+        vae.load_state_dict(convert_ldm_vae_checkpoint(checkpoint, vae_cfg))
+        # UNet
+        unet_cfg = create_unet_diffusers_config(original_config, image_size=512)
+        unet_cfg["upcast_attention"] = False
+        unet = UNet2DConditionModel(**unet_cfg)
+        unet.load_state_dict(convert_ldm_unet_checkpoint(checkpoint, unet_cfg))
+        # Text encoder & tokenizer
+        tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        text_encoder = convert_ldm_clip_checkpoint(checkpoint)
+        # Scheduler (matches the default used elsewhere)
+        scheduler = LMSDiscreteScheduler(
+            beta_start=0.00085,
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            num_train_timesteps=1000,
+        )
+        # Assemble pipeline
+        pipeline = StableDiffusionPipeline(
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            unet=unet,
+            scheduler=scheduler,
+            safety_checker=None,
+            feature_extractor=None,
+        )
+        pipeline.to(device)
+        return pipeline
+    else:
+        # Assume diffusers format or hub identifier
+        pipeline = StableDiffusionPipeline.from_pretrained(ckpt_path)
+        pipeline.to(device)
+        return pipeline
 
 def setup_seed(seed=123):
     random.seed(seed)
@@ -51,6 +114,8 @@ if __name__ == '__main__':
     parser.add_argument('--preserve_concepts', help='whether to preserve old prompts', type=str, default=None)
     parser.add_argument('--technique', help='technique to erase (either replace or tensor)', type=str, required=False, default='replace')
     parser.add_argument('--base', help='base version for stable diffusion', type=str, required=False, default='1.4')
+    parser.add_argument('--sd_ckpt', help='path to stable diffusion checkpoint or diffusers directory', type=str, required=False, default=None)
+    parser.add_argument('--sd_config', help='path to stable diffusion config (required if sd_ckpt is .ckpt)', type=str, required=False, default=None)
     parser.add_argument('--target_ckpt', help='target checkpoint to load, UCE', type=str, required=False, default='ckpt/unified-concept-editing/erased-nudity-towards_uncond-preserve_false-sd_1_4-method_replace-1-1.0.pt')
     parser.add_argument('--preserve_scale', help='scale to preserve concepts', type=float, required=False, default=0.1)
     parser.add_argument('--preserve_number', help='number of preserve concepts', type=int, required=False, default=None)
@@ -144,23 +209,14 @@ if __name__ == '__main__':
     regular_scale = args.regular_scale
     num_samples = args.num_samples
     ddim_steps = args.ddim_steps
-    sd14="/share/ckpt/gongchao/model_zoo/models--CompVis--stable-diffusion-v1-4/snapshots/133a221b8aa7292a167afc5127cb63fb5005638b"
-    sd21='/share/ckpt/gongchao/model_zoo/models--stabilityai--stable-diffusion-2-1-base/snapshots/5ede9e4bf3e3fd1cb0ef2f7a3fff13ee514fdf06'
-    if args.base=='1.4':
-        model_version = sd14
-    elif args.base=='2.1':
-        model_version = sd21
-    else:
-        model_version = sd14
-    ldm_stable = StableDiffusionPipeline.from_pretrained(
-        model_version,
-        )
-    ldm_stable_copy = StableDiffusionPipeline.from_pretrained(
-        model_version,
-        )
-    ldm_stable = ldm_stable.to(device)
-    ldm_stable_copy = ldm_stable_copy.to(device)
-    tokenizer = CLIPTokenizer.from_pretrained(model_version, subfolder="tokenizer")
+    # Load base Stable Diffusion model using configuration paths.
+    # ``args.sd_ckpt`` points to the checkpoint (either .ckpt or a diffusers directory).
+    # ``args.sd_config`` is required when loading from a legacy .ckpt file.
+    # ``load_sd_pipeline`` handles both cases and returns a ready‑to‑use pipeline.
+    ldm_stable = load_sd_pipeline(args.sd_ckpt, getattr(args, 'sd_config', None), device)
+    ldm_stable_copy = load_sd_pipeline(args.sd_ckpt, getattr(args, 'sd_config', None), device)
+    # ``StableDiffusionPipeline`` provides a ``tokenizer`` attribute.
+    tokenizer = ldm_stable.tokenizer
 
     target_ckpt = args.target_ckpt
     dev_df = pd.read_csv(args.test_csv_path)
