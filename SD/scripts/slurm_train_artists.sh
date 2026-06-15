@@ -13,8 +13,8 @@
 #SBATCH --qos=big
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=256GB
-#SBATCH --partition=dgxh100
+#SBATCH --mem=80GB
+#SBATCH --partition=dgxa100
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
