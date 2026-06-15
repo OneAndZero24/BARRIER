@@ -20,9 +20,15 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ldm
 
-# Resolve paths dynamically
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-cd "${SCRIPT_DIR}/.."
+# Resolve paths dynamically based on SLURM submission or current directory
+if [ -n "$SLURM_SUBMIT_DIR" ]; then
+    cd "$SLURM_SUBMIT_DIR"
+fi
+
+if [ -d "SD" ]; then
+    cd SD
+fi
+
 export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
 
 # Redirect caches to scratch directory (from setup_cache.py candidates)
