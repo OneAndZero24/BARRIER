@@ -109,8 +109,13 @@ if __name__ == '__main__':
     setup_seed(seed_shuffle)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    concepts = args.concepts.split(',')
-    concepts = [con.strip() for con in concepts]
+    # `args.concepts` may come from CLI (string) or from a config file (list).
+    # Normalise it to a list of stripped strings.
+    if isinstance(args.concepts, str):
+        concepts = [c.strip() for c in args.concepts.split(',')]
+    else:
+        concepts = [str(c).strip() for c in args.concepts]
+
 
     if args.old_target_concept is None:
         old_target_concept = [None for _ in concepts]
