@@ -51,7 +51,7 @@ intact:
   lambda_interval: 4.0
   lower_percentile: 0.05
   upper_percentile: 0.95
-  reduced_dim: 64
+  reduced_dim: 128
   infinity_scale: 18.0
   use_actual_bounds: true
   normalize_protection: true
