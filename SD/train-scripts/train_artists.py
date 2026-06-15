@@ -1,6 +1,10 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Add project root and rece directory to sys.path for module imports
+root = Path(__file__).resolve().parents[2]
+rece_path = root / 'SD' / 'rece'
+sys.path.insert(0, str(root))
+sys.path.insert(0, str(rece_path))
 
 import torch
 import random
@@ -18,10 +22,7 @@ import numpy as np
 import pickle
 
 from erase_methods import edit_model_adversarial
-from attack_methods import *
-from execs import generate_images
-from utils import generate_latents
-from execs import compute_nudity_rate
+from execs import generate_images, compute_nudity_rate
 from utils.embedding_calculation import close_form_emb, close_form_emb_regzero
 from InTAct.intact import UnlearnIntervalProtection
 
