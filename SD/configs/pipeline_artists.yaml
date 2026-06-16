@@ -20,7 +20,7 @@ paths:
   sd_config: "configs/stable-diffusion/v1-intact.yaml"
   sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
   diffusers_config: "diffusers_unet_config.json"
-  test_csv_path: "dataset/validation_niche_artists.csv"
+  test_csv_path: "rece/dataset/validation_niche_artists.csv"
   save_path: "ckpt2/SD_adv_train"
 
 unlearn:
