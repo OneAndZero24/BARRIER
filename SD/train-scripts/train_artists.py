@@ -259,7 +259,7 @@ if __name__ == '__main__':
     # It should contain prompt, evaluation_seed
     adv_df = pd.DataFrame(columns=['prompt', 'evaluation_seed'])
     for concept in concepts:
-        adv_df = adv_df.append({'prompt':concept, 'evaluation_seed':args.seed}, ignore_index=True)
+        adv_df = pd.concat([adv_df, pd.DataFrame([{'prompt': concept, 'evaluation_seed': args.seed}])], ignore_index=True)
 
 
     old_texts = []
