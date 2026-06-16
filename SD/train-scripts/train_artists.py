@@ -11,8 +11,6 @@ import random
 import pandas as pd
 import argparse
 import os
-from diffusers import StableDiffusionPipeline, LMSDiscreteScheduler, AutoencoderKL, UNet2DConditionModel
-from transformers import CLIPTokenizer
 from functools import reduce
 import operator
 import time
@@ -20,21 +18,38 @@ import tqdm
 import json
 import numpy as np
 import pickle
+from typing import Optional, TYPE_CHECKING
 
-from erase_methods import edit_model_adversarial
-from execs import generate_images, compute_nudity_rate
-from utils.embedding_calculation import close_form_emb, close_form_emb_regzero
+if TYPE_CHECKING:
+    from diffusers import StableDiffusionPipeline, LMSDiscreteScheduler, AutoencoderKL, UNet2DConditionModel
+    from transformers import CLIPTokenizer
+else:
+    StableDiffusionPipeline = LMSDiscreteScheduler = AutoencoderKL = UNet2DConditionModel = None  # type: ignore
+    CLIPTokenizer = None
+
+
+# Lazy imports for optional heavy dependencies – they are only required at runtime on the HPC where the packages are installed.
+# Heavy imports (diffusers, transformers) are imported inside load_sd_pipeline at runtime.
+# They are not required for static analysis and will be available on the HPC.
+
+
+
+from erase_methods import edit_model_adversarial  # type: ignore
+from execs import generate_images, compute_nudity_rate  # type: ignore
+from utils.embedding_calculation import close_form_emb, close_form_emb_regzero  # type: ignore
 from InTAct.intact import UnlearnIntervalProtection
 
 # Helper to load Stable Diffusion pipeline from either a diffusers directory or a .ckpt file + config
-def load_sd_pipeline(ckpt_path: str, config_path: str | None, device: str):
+def load_sd_pipeline(ckpt_path: str, config_path: Optional[str], device: str):
     """Load a StableDiffusionPipeline.
     If ``ckpt_path`` ends with ``.ckpt`` we convert the checkpoint using the project's
     conversion utilities (convertModels). Otherwise we assume it is a diffusers-format
     directory or a HuggingFace hub identifier.
     ``device`` is the torch device string (e.g., ``'cuda'`` or ``'cpu'``).
     """
-    if ckpt_path.endswith('.ckpt'):
+    # Import heavy dependencies lazily at runtime.
+    from diffusers import StableDiffusionPipeline, LMSDiscreteScheduler, AutoencoderKL, UNet2DConditionModel
+    from transformers import CLIPTokenizer
         # Convert legacy checkpoint to diffusers components
         from convertModels import (
             create_vae_diffusers_config,
@@ -300,6 +315,9 @@ if __name__ == '__main__':
     print(print_text)
     
     
+    # Initialize save_path to avoid unbound warnings
+    save_path = ''
+    # Determine output directory based on args
     if args.intact:
         save_path = f'{args.save_path}/{concept_type}/intact/{print_text}/lambda_{args.lambda_interval}_lr_{args.lr}/seed_{seed}'
     else:
