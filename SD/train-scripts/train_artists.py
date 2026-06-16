@@ -50,59 +50,54 @@ def load_sd_pipeline(ckpt_path: str, config_path: Optional[str], device: str):
     # Import heavy dependencies lazily at runtime.
     from diffusers import StableDiffusionPipeline, LMSDiscreteScheduler, AutoencoderKL, UNet2DConditionModel
     from transformers import CLIPTokenizer
-        # Convert legacy checkpoint to diffusers components
-        from convertModels import (
-            create_vae_diffusers_config,
-            create_unet_diffusers_config,
-            convert_ldm_vae_checkpoint,
-            convert_ldm_unet_checkpoint,
-            convert_ldm_clip_checkpoint,
-        )
-        from omegaconf import OmegaConf
-        # Load checkpoint
-        checkpoint = torch.load(ckpt_path, map_location="cpu")
-        if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
-            checkpoint = checkpoint["state_dict"]
-        # Load original config
-        if config_path is None:
-            raise ValueError("sd_config path is required when loading from a .ckpt file")
-        original_config = OmegaConf.load(config_path)
-        # VAE
-        vae_cfg = create_vae_diffusers_config(original_config, image_size=512)
-        vae = AutoencoderKL(**vae_cfg)
-        vae.load_state_dict(convert_ldm_vae_checkpoint(checkpoint, vae_cfg))
-        # UNet
-        unet_cfg = create_unet_diffusers_config(original_config, image_size=512)
-        unet_cfg["upcast_attention"] = False
-        unet = UNet2DConditionModel(**unet_cfg)
-        unet.load_state_dict(convert_ldm_unet_checkpoint(checkpoint, unet_cfg))
-        # Text encoder & tokenizer
-        tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-        text_encoder = convert_ldm_clip_checkpoint(checkpoint)
-        # Scheduler (matches the default used elsewhere)
-        scheduler = LMSDiscreteScheduler(
-            beta_start=0.00085,
-            beta_end=0.012,
-            beta_schedule="scaled_linear",
-            num_train_timesteps=1000,
-        )
-        # Assemble pipeline
-        pipeline = StableDiffusionPipeline(
-            vae=vae,
-            text_encoder=text_encoder,
-            tokenizer=tokenizer,
-            unet=unet,
-            scheduler=scheduler,
-            safety_checker=None,
-            feature_extractor=None,
-        )
-        pipeline.to(device)
-        return pipeline
-    else:
-        # Assume diffusers format or hub identifier
-        pipeline = StableDiffusionPipeline.from_pretrained(ckpt_path)
-        pipeline.to(device)
-        return pipeline
+    # Convert legacy checkpoint to diffusers components
+    from convertModels import (
+        create_vae_diffusers_config,
+        create_unet_diffusers_config,
+        convert_ldm_vae_checkpoint,
+        convert_ldm_unet_checkpoint,
+        convert_ldm_clip_checkpoint,
+    )
+    from omegaconf import OmegaConf
+    # Load checkpoint
+    checkpoint = torch.load(ckpt_path, map_location="cpu")
+    if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        checkpoint = checkpoint["state_dict"]
+    # Load original config
+    if config_path is None:
+        raise ValueError("sd_config path is required when loading from a .ckpt file")
+    original_config = OmegaConf.load(config_path)
+    # VAE
+    vae_cfg = create_vae_diffusers_config(original_config, image_size=512)
+    vae = AutoencoderKL(**vae_cfg)
+    vae.load_state_dict(convert_ldm_vae_checkpoint(checkpoint, vae_cfg))
+    # UNet
+    unet_cfg = create_unet_diffusers_config(original_config, image_size=512)
+    unet_cfg["upcast_attention"] = False
+    unet = UNet2DConditionModel(**unet_cfg)
+    unet.load_state_dict(convert_ldm_unet_checkpoint(checkpoint, unet_cfg))
+    # Text encoder & tokenizer
+    tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+    text_encoder = convert_ldm_clip_checkpoint(checkpoint)
+    # Scheduler (matches the default used elsewhere)
+    scheduler = LMSDiscreteScheduler(
+        beta_start=0.00085,
+        beta_end=0.012,
+        beta_schedule="scaled_linear",
+        num_train_timesteps=1000,
+    )
+    # Assemble pipeline
+    pipeline = StableDiffusionPipeline(
+        vae=vae,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        unet=unet,
+        scheduler=scheduler,
+        safety_checker=None,
+        feature_extractor=None,
+    )
+    pipeline.to(device)
+    return pipeline
 
 def setup_seed(seed=123):
     random.seed(seed)
