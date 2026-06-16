@@ -17,6 +17,7 @@ pipeline:
   device: "0"
 
 paths:
+  target_ckpt: ""
   sd_config: "configs/stable-diffusion/v1-intact.yaml"
   sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
   diffusers_config: "diffusers_unet_config.json"

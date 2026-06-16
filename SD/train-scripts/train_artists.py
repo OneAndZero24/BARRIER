@@ -134,7 +134,7 @@ if __name__ == '__main__':
     parser.add_argument('--base', help='base version for stable diffusion', type=str, required=False, default='1.4')
     parser.add_argument('--sd_ckpt', help='path to stable diffusion checkpoint or diffusers directory', type=str, required=False, default=None)
     parser.add_argument('--sd_config', help='path to stable diffusion config (required if sd_ckpt is .ckpt)', type=str, required=False, default=None)
-    parser.add_argument('--target_ckpt', help='target checkpoint to load, UCE', type=str, required=False, default='ckpt/unified-concept-editing/erased-nudity-towards_uncond-preserve_false-sd_1_4-method_replace-1-1.0.pt')
+    parser.add_argument('--target_ckpt', help='target checkpoint to load, UCE', type=str, required=False, default='')
     parser.add_argument('--preserve_scale', help='scale to preserve concepts', type=float, required=False, default=0.1)
     parser.add_argument('--preserve_number', help='number of preserve concepts', type=int, required=False, default=None)
     parser.add_argument('--erase_scale', help='scale to erase concepts', type=float, required=False, default=1)
