@@ -14,9 +14,14 @@ Usage:
 from pathlib import Path
 import sys
 root = Path(__file__).resolve().parents[1]
-rece_path = root / 'SD' / 'rece'
+rece_path = root / 'rece'
+train_scripts_path = root / 'train-scripts'
 sys.path.insert(0, str(root))
 sys.path.insert(0, str(rece_path))
+sys.path.insert(0, str(train_scripts_path))
+import os
+os.environ['TMPDIR'] = os.environ.get('CACHE_ROOT', '/tmp') + '/wandb_tmp'
+os.makedirs(os.environ['TMPDIR'], exist_ok=True)
 
 import argparse
 import time
