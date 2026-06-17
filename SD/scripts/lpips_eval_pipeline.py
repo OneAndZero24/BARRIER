@@ -95,9 +95,17 @@ def compute_lpips_between_dirs(dir0: str, dir1: str, loss_fn, filter_files=None)
     return dists
 
 def filter_prompts_by_artist(df_csv: str, artist_name: str):
-    """Return list of filenames that belong to *artist_name*."""
+    """Return list of filenames that belong to *artist_name*.
+    Uses substring matching in both directions since the CSV may store
+    full names ('Vincent Van Gogh') while config uses short forms ('Van Gogh')."""
     df = pd.read_csv(df_csv)
-    matches = df[df['artist'].str.lower() == artist_name.lower()]
+    artist_lower = artist_name.lower()
+    matches = df[df['artist'].str.lower().str.contains(artist_lower)]
+    if matches.empty:
+        # Fallback: search for any CSV artist name that contains a token from artist_name
+        tokens = artist_lower.replace('-', ' ').split()
+        candidate = df[df['artist'].apply(lambda a: any(t in a.lower() for t in tokens if len(t) > 2))]
+        matches = candidate
     base_nums = sorted(set(matches['case_number']))
     return sorted([f'{cn}_0.png' for cn in base_nums])
 
@@ -136,16 +144,18 @@ if __name__ == '__main__':
     emb_computing  = un_cfg.get('emb_computing', 'close_regzero')
     reg_item       = un_cfg.get('reg_item', '1st')
     regular_scale  = un_cfg.get('regular_scale', 1e-3)
-    num_samples    = un_cfg.get('num_samples', 1)
-    ddim_steps     = un_cfg.get('ddim_steps', 50)
-    epochs         = un_cfg.get('epochs', 3)
-    lr             = un_cfg.get('lr', 1e-5)
-    use_intact     = un_cfg.get('intact', True)
+    num_samples            = un_cfg.get('num_samples', 1)
+    ddim_steps             = un_cfg.get('ddim_steps', 50)
+    epochs                 = un_cfg.get('epochs', 3)
+    lr                     = un_cfg.get('lr', 1e-5)
+    use_intact             = un_cfg.get('intact', True)
+    inner_iters            = un_cfg.get('inner_iterations', 250)
+    eval_prompts_sample    = un_cfg.get('eval_prompts_per_artist', None)
 
     sd_ckpt        = path_cfg.get('sd_ckpt', 'models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt')
     sd_config      = path_cfg.get('sd_config', 'configs/stable-diffusion/v1-intact.yaml')
     target_ckpt    = path_cfg.get('target_ckpt', '')
-    test_csv       = path_cfg.get('test_csv_path', 'rece/dataset/validation_niche_artists.csv')
+    test_csv       = path_cfg.get('test_csv_path', 'rece/dataset/artists1734_prompts.csv')
     save_root      = path_cfg.get('save_path', '/shared/results/common/miksa/intact/SD/lpips_eval')
 
     seed           = pipe_cfg.get('seed', 42)
@@ -166,6 +176,7 @@ if __name__ == '__main__':
             'technique': technique,
             'emb_computing': emb_computing,
             'epochs': epochs,
+            'inner_iterations': inner_iters,
             'lr': lr,
             'regular_scale': regular_scale,
             'use_intact': use_intact,
@@ -308,28 +319,31 @@ if __name__ == '__main__':
             pipe.unet.train()
 
             for epoch in tqdm(range(epochs), desc=f'Epoch ({artist})'):
-                for i_idx in range(len(old_texts)):
-                    bc = old_texts[i_idx]
-                    bn = new_texts[i_idx]
-                    id_c = tokenizer(bc, padding='max_length', max_length=tokenizer.model_max_length,
-                                     truncation=True, return_tensors='pt').input_ids.to(device)
-                    id_n = tokenizer(bn, padding='max_length', max_length=tokenizer.model_max_length,
-                                     truncation=True, return_tensors='pt').input_ids.to(device)
-                    with torch.no_grad():
-                        inp_emb = pipe_copy.text_encoder(id_c)[0]
-                        new_emb = pipe_copy.text_encoder(id_n)[0]
-                    optimizer.zero_grad()
-                    z = torch.randn((1,4,64,64), device=device)
-                    noise = torch.randn_like(z)
-                    t_ = torch.randint(0,1000,(1,),device=device).long()
-                    z_noisy = pipe.scheduler.add_noise(z, noise, t_)
-                    with torch.no_grad():
-                        tgt = pipe_copy.unet(z_noisy, t_, encoder_hidden_states=new_emb).sample
-                    pred = pipe.unet(z_noisy, t_, encoder_hidden_states=inp_emb).sample
-                    loss = criteria(pred, tgt) + protect.compute_protection_loss(pipe.unet, device)
-                    loss.backward()
-                    optimizer.step()
-                generate_images(pipe, dev_df, f'{run_path}/epoch_{epoch}', ddim_steps=ddim_steps, num_samples=num_samples)
+                prog_bar = tqdm(total=inner_iters * len(old_texts), desc=f'Steps ep {epoch}', leave=False)
+                for step in range(inner_iters):
+                    for i_idx in range(len(old_texts)):
+                        bc = old_texts[i_idx]
+                        bn = new_texts[i_idx]
+                        id_c = tokenizer(bc, padding='max_length', max_length=tokenizer.model_max_length,
+                                         truncation=True, return_tensors='pt').input_ids.to(device)
+                        id_n = tokenizer(bn, padding='max_length', max_length=tokenizer.model_max_length,
+                                         truncation=True, return_tensors='pt').input_ids.to(device)
+                        with torch.no_grad():
+                            inp_emb = pipe_copy.text_encoder(id_c)[0]
+                            new_emb = pipe_copy.text_encoder(id_n)[0]
+                        optimizer.zero_grad()
+                        z = torch.randn((1,4,64,64), device=device)
+                        noise = torch.randn_like(z)
+                        t_ = torch.randint(0,1000,(1,),device=device).long()
+                        z_noisy = pipe.scheduler.add_noise(z, noise, t_)
+                        with torch.no_grad():
+                            tgt = pipe_copy.unet(z_noisy, t_, encoder_hidden_states=new_emb).sample
+                        pred = pipe.unet(z_noisy, t_, encoder_hidden_states=inp_emb).sample
+                        loss = criteria(pred, tgt) + protect.compute_protection_loss(pipe.unet, device)
+                        loss.backward()
+                        optimizer.step()
+                        prog_bar.update(1)
+                prog_bar.close()
                 torch.save(pipe.unet.state_dict(), f'{run_path}/epoch_{epoch}.pt')
 
         else:
@@ -363,23 +377,28 @@ if __name__ == '__main__':
                 pipe = edit_model_adversarial(pipe, adv_embs, new_embs, retain_texts,
                                               technique=technique, preserve_scale=preserve_scale,
                                               erase_scale=erase_scale, lamb=lamb)
-                generate_images(pipe, dev_df, f'{run_path}/epoch_{epoch}', ddim_steps=ddim_steps, num_samples=num_samples)
                 torch.save(pipe.unet.state_dict(), f'{run_path}/epoch_{epoch}.pt')
+
+        # Only generate eval images for final checkpoint (8670 prompts is expensive per epoch)
+        pipe.unet.load_state_dict(torch.load(f'{run_path}/epoch_{epochs-1}.pt'))
+        pipe.to(device)
+        generate_images(pipe, dev_df, f'{run_path}/final', ddim_steps=ddim_steps, num_samples=num_samples)
 
         total_time = time.time() - start
 
         # ---- LPIPS evaluation -----------------------------------------------
-        final_epoch = epochs - 1
-        erased_dir = f'{run_path}/epoch_{final_epoch}'
-
-        # Filter artist-specific prompts (erased) and the rest (unerased)
-        erased_files   = filter_prompts_by_artist(test_csv, artist)
+        erased_dir = f'{run_path}/final'
 
         all_files = sorted([f for f in os.listdir(os.path.join(f'{run_path}/before/imgs')) if f.endswith('.png')])
-        unerased_files = [f for f in all_files if f not in erased_files]
+        erased_matched = filter_prompts_by_artist(test_csv, artist)
+        if eval_prompts_sample is not None and len(erased_matched) > eval_prompts_sample:
+            import random as _rnd
+            _rnd.seed(seed)
+            erased_matched = _rnd.sample(erased_matched, eval_prompts_sample)
+        unerased_matched = [f for f in all_files if f not in erased_matched]
 
-        lpips_e = compute_lpips_between_dirs(f'{run_path}/before', erased_dir, loss_fn, filter_files=erased_files)
-        lpips_u = compute_lpips_between_dirs(f'{run_path}/before', erased_dir, loss_fn, filter_files=unerased_files)
+        lpips_e = compute_lpips_between_dirs(f'{run_path}/before', erased_dir, loss_fn, filter_files=erased_matched)
+        lpips_u = compute_lpips_between_dirs(f'{run_path}/before', erased_dir, loss_fn, filter_files=unerased_matched)
 
         avg_e = np.mean(list(lpips_e.values())) if lpips_e else 0.0
         avg_u = np.mean(list(lpips_u.values())) if lpips_u else 0.0
@@ -396,9 +415,8 @@ if __name__ == '__main__':
             'hyperparams/epochs': epochs,
             'hyperparams/regular_scale': regular_scale,
             'time/total_sec': total_time,
-        }, step=final_epoch)
+        }, step=epochs)
 
-        # Per-file breakdown tables
         e_rows = [[fn, f'{v:.6f}'] for fn,v in lpips_e.items()]
         u_rows = [[fn, f'{v:.6f}'] for fn,v in lpips_u.items()]
         run.log({
@@ -406,9 +424,7 @@ if __name__ == '__main__':
             f'lpips_u_table/{artist}': wandb.Table(data=u_rows, columns=['file','LPIPS']),
         })
 
-        # Side-by-side comparison images (baseline vs unlearned)
         def get_img_pairs(d_baseline: str, d_train: str, files: list):
-            """Return list of [wandb.Image(baseline), wandb.Image(trained)] for each file."""
             pairs = []
             base_dir = os.path.join(d_baseline, 'imgs')
             train_dir = os.path.join(d_train, 'imgs')
@@ -419,16 +435,14 @@ if __name__ == '__main__':
                     pairs.append((fp_b, fp_t, fn))
             return pairs
 
-        # Erased artist comparisons
-        erased_pairs = get_img_pairs(f'{run_path}/before', erased_dir, erased_files)
+        erased_pairs = get_img_pairs(f'{run_path}/before', erased_dir, erased_matched)
         if erased_pairs:
             tb_e = wandb.Table(columns=['index', 'prompt', 'baseline', 'unlearned'])
             for idx, (fp_b, fp_t, fn) in enumerate(erased_pairs):
                 tb_e.add_data(idx, fn, wandb.Image(fp_b), wandb.Image(fp_t))
             run.log({f'comparison_erased/{artist}': tb_e})
 
-        # Unerased artist comparisons
-        unerased_pairs = get_img_pairs(f'{run_path}/before', erased_dir, unerased_files)
+        unerased_pairs = get_img_pairs(f'{run_path}/before', erased_dir, unerased_matched)
         if unerased_pairs:
             tb_u = wandb.Table(columns=['index', 'prompt', 'baseline', 'unlearned'])
             for idx, (fp_b, fp_t, fn) in enumerate(unerased_pairs):

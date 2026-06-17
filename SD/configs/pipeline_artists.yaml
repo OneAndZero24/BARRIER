@@ -21,7 +21,7 @@ paths:
   sd_config: "configs/stable-diffusion/v1-intact.yaml"
   sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
   diffusers_config: "diffusers_unet_config.json"
-  test_csv_path: "rece/dataset/validation_niche_artists.csv"
+  test_csv_path: "rece/dataset/artists1734_prompts.csv"
   save_path: "/shared/results/common/miksa/intact/SD"
 
 unlearn:
@@ -39,7 +39,9 @@ unlearn:
   regular_scale: 1.0e-3
   num_samples: 1
   ddim_steps: 50
-  epochs: 3
+  epochs: 1
+  inner_iterations: 500
+  eval_prompts_per_artist: 20
   lr: 1.0e-5
   intact: true
 
