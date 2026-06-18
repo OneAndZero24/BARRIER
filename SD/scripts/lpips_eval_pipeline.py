@@ -37,7 +37,8 @@ import numpy as np
 import torch
 import lpips
 import cv2
-os.environ.setdefault('WANDB_DISABLE_SERVICE', 'true')
+wandb_dir = tempfile.mkdtemp(prefix='wandb_dir_')
+os.environ['WANDB_DIR'] = wandb_dir
 import wandb
 from tqdm import tqdm
 
@@ -474,4 +475,6 @@ if __name__ == '__main__':
     # Clean up temporary wandb directory to avoid leftover files
     import shutil
     shutil.rmtree(temp_wandb_dir, ignore_errors=True)
+    # Clean up isolated WandB directory
+    shutil.rmtree(wandb_dir, ignore_errors=True)
     print('\nPipeline complete. Results logged to wandb.')
