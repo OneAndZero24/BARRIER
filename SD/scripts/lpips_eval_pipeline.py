@@ -37,6 +37,7 @@ import numpy as np
 import torch
 import lpips
 import cv2
+os.environ.setdefault('WANDB_DISABLE_SERVICE', 'true')
 import wandb
 from tqdm import tqdm
 
