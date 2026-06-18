@@ -20,8 +20,12 @@ sys.path.insert(0, str(root))
 sys.path.insert(0, str(rece_path))
 sys.path.insert(0, str(train_scripts_path))
 import os
-os.environ['TMPDIR'] = os.environ.get('CACHE_ROOT', '/tmp') + '/wandb_tmp'
-os.makedirs(os.environ['TMPDIR'], exist_ok=True)
+# Use a unique temporary directory for wandb to avoid cleanup conflicts.
+# This avoids shared TMPDIR usage that can cause "Directory not empty" errors.
+import tempfile
+temp_wandb_dir = tempfile.mkdtemp(prefix='wandb_tmp_')
+os.environ['TMPDIR'] = temp_wandb_dir
+# No need to manually create; mkdtemp already does.
 
 import argparse
 import time
@@ -466,4 +470,7 @@ if __name__ == '__main__':
     run.log({'summary_lpips': summary_table, 'mean_LPIPS_d': mean_d})
     run.summary['mean_LPIPS_d'] = mean_d
     run.finish()
+    # Clean up temporary wandb directory to avoid leftover files
+    import shutil
+    shutil.rmtree(temp_wandb_dir, ignore_errors=True)
     print('\nPipeline complete. Results logged to wandb.')
