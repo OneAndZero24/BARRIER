@@ -46,6 +46,7 @@ intact:
   base_method: "rl"
   # Baseline defaults for full-eval runs; SLURM grid overrides these.
   # Compact block-scoped targets to keep memory lower during the grid.
+  target_blocks: [4, 6, 8, 10]
   target_layers: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v', 'attn2.to_out.0']
   lambda_interval: 4.0
   lower_percentile: 0.05
