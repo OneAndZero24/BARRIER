@@ -121,8 +121,8 @@ def compute_clip_score(image_paths: List[str], prompts: List[str],
     if not image_paths:
         return None
 
-    model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(device)
-    processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     model.eval()
 
     scores = []
@@ -355,16 +355,17 @@ def _load_coco_captions(
     seed: int = 42,
     coco_ann_path: Optional[str] = None,
     coco_prompts_csv_path: Optional[str] = None,
-) -> List[Tuple[str, str]]:
+) -> List[Tuple[str, str, Optional[int]]]:
     """
-    Load ``n`` random (image_path_or_id, caption) pairs from MS-COCO val.
+    Load ``n`` (image_path_or_id, caption, coco_id) triples from MS-COCO val.
+    coco_id is the numeric COCO image id (used to match real images), or None.
 
     Tries (in order):
-        1. Local prompts CSV ``coco_prompts_csv_path`` with a ``prompt`` column.
+        1. Local prompts CSV ``coco_prompts_csv_path`` with ``prompt`` and ``coco_id`` columns.
         2. Local annotation JSON ``coco_ann_path``  (COCO val captions JSON).
         3. HuggingFace ``nlphuji/mscoco_2014_5k_test_image_text_retrieval``.
 
-    Returns list of (image_path_or_url, caption) tuples.
+    Returns list of (image_path_or_url, caption, coco_id) tuples.
     """
     rng = np.random.RandomState(seed)
 
@@ -377,16 +378,22 @@ def _load_coco_captions(
             if "prompt" not in df.columns:
                 log.warning(f"COCO prompts CSV missing 'prompt' column: {coco_prompts_csv_path}")
             else:
-                prompts = [str(p) for p in df["prompt"].dropna().tolist() if str(p).strip()]
-                if prompts:
-                    if len(prompts) > n:
-                        idxs = rng.choice(len(prompts), n, replace=False)
-                        prompts = [prompts[i] for i in idxs]
-                    pairs = [(str(i), caption) for i, caption in enumerate(prompts)]
+                has_coco_id = "coco_id" in df.columns
+                if len(df) > n:
+                    idxs = rng.choice(len(df), n, replace=False)
+                    df = df.iloc[idxs].reset_index(drop=True)
+                triples = []
+                for _, row in df.iterrows():
+                    caption = str(row["prompt"])
+                    if not caption.strip():
+                        continue
+                    coco_id = int(row["coco_id"]) if has_coco_id else None
+                    triples.append((str(len(triples)), caption, coco_id))
+                if triples:
                     log.info(
-                        f"Loaded {len(pairs)} COCO prompts from local CSV: {coco_prompts_csv_path}"
+                        f"Loaded {len(triples)} COCO prompts from local CSV: {coco_prompts_csv_path}"
                     )
-                    return pairs
+                    return triples
         except Exception as e:
             log.warning(f"Could not load COCO prompts CSV {coco_prompts_csv_path}: {e}")
 
@@ -395,24 +402,22 @@ def _load_coco_captions(
         import json
         with open(coco_ann_path) as f:
             data = json.load(f)
-        # Build image_id → file_name map
         id2file = {}
         for img in data.get("images", []):
             id2file[img["id"]] = img.get("file_name", str(img["id"]))
         anns = data.get("annotations", [])
         rng.shuffle(anns)
-        # Deduplicate by image id — one caption per image
         seen = set()
-        pairs = []
+        triples = []
         for ann in anns:
             img_id = ann["image_id"]
             if img_id in seen:
                 continue
             seen.add(img_id)
-            pairs.append((id2file.get(img_id, str(img_id)), ann["caption"]))
-            if len(pairs) >= n:
+            triples.append((id2file.get(img_id, str(img_id)), ann["caption"], img_id))
+            if len(triples) >= n:
                 break
-        return pairs
+        return triples
 
     # --- Strategy 2: HuggingFace datasets ---
     try:
@@ -423,14 +428,14 @@ def _load_coco_captions(
             split="test",
         )
         idxs = rng.choice(len(ds), min(n, len(ds)), replace=False)
-        pairs = []
+        triples = []
         for i in idxs:
             ex = ds[int(i)]
             cap = ex.get("caption", ex.get("text", ""))
             if isinstance(cap, list):
                 cap = cap[0]
-            pairs.append((str(i), cap))
-        return pairs
+            triples.append((str(i), cap, None))
+        return triples
     except Exception as e:
         log.warning(f"Could not load COCO from HuggingFace: {e}")
 
@@ -445,28 +450,33 @@ def generate_coco_prompts_csv(
     coco_prompts_csv_path: Optional[str] = None,
 ) -> str:
     """
-    Write a prompts CSV (case_number, prompt, evaluation_seed) with
+    Write a prompts CSV (case_number, prompt, evaluation_seed, coco_id) with
     ``n`` MS-COCO val captions for image generation.
 
     Returns the written path.
     """
     import csv
-    pairs = _load_coco_captions(
+    triples = _load_coco_captions(
         n=n,
         seed=seed,
         coco_ann_path=coco_ann_path,
         coco_prompts_csv_path=coco_prompts_csv_path,
     )
-    if not pairs:
+    if not triples:
         raise RuntimeError("Failed to load any MS-COCO captions")
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["case_number", "prompt", "evaluation_seed"])
+        writer = csv.DictWriter(f, fieldnames=["case_number", "prompt", "evaluation_seed", "coco_id"])
         writer.writeheader()
-        for i, (_img_id, caption) in enumerate(pairs):
-            writer.writerow({"case_number": i, "prompt": caption, "evaluation_seed": seed})
-    log.info(f"Wrote {len(pairs)} MS-COCO captions to {output_path}")
+        for i, (_img_id, caption, coco_id) in enumerate(triples):
+            writer.writerow({
+                "case_number": i,
+                "prompt": caption,
+                "evaluation_seed": seed,
+                "coco_id": coco_id if coco_id is not None else "",
+            })
+    log.info(f"Wrote {len(triples)} MS-COCO captions to {output_path}")
     return output_path
 
 
@@ -559,9 +569,15 @@ def compute_fid_coco(
     max_fake: Optional[int] = None,
     batch_size: int = 64,
     coco_hf_dataset: Optional[str] = None,
+    coco_prompts_csv: Optional[str] = None,
 ) -> Optional[float]:
     """
     FID between generated images (from COCO captions) and real COCO val images.
+
+    When ``coco_prompts_csv`` is provided (with a ``coco_id`` column), only real
+    images whose COCO id matches one of the selected prompts are used —
+    guaranteeing that FID is computed on the *same* prompts/generated subset
+    and their corresponding ground-truth images.
 
     SD-style behavior:
     - Prefer a local COCO validation directory when available.
@@ -581,6 +597,15 @@ def compute_fid_coco(
     n_real = 0
     rng = np.random.RandomState(seed)
 
+    # Parse coco_ids from prompts CSV if provided
+    coco_ids = None
+    if coco_prompts_csv and os.path.exists(coco_prompts_csv):
+        import pandas as pd
+        df = pd.read_csv(coco_prompts_csv)
+        if "coco_id" in df.columns:
+            coco_ids = set(int(v) for v in df["coco_id"].dropna().astype(int))
+            log.info(f"Using {len(coco_ids)} coco_ids from prompts CSV to match real images")
+
     if coco_hf_dataset:
         try:
             log.info("Loading real COCO images from HF dataset %s for FID …", coco_hf_dataset)
@@ -598,6 +623,21 @@ def compute_fid_coco(
             str(f) for ext in ["png", "jpg", "jpeg"]
             for f in pathlib.Path(coco_images_dir).rglob(f"*.{ext}")
         ])
+        if coco_ids:
+            # Filter to images whose COCO id matches the selected prompts
+            filtered = []
+            for path in all_real:
+                fname = os.path.basename(path)
+                for cid in coco_ids:
+                    # COCO_val2014_000000XXXXXX.jpg
+                    if f"_{cid:012d}" in fname or str(cid) in fname:
+                        filtered.append(path)
+                        break
+            if filtered:
+                log.info(f"Filtered real COCO images: {len(filtered)}/{len(all_real)} matched")
+                all_real = filtered
+            else:
+                log.warning("No real COCO images matched coco_ids; falling back to all images")
         if n and len(all_real) > n:
             idxs = rng.choice(len(all_real), n, replace=False)
             all_real = [all_real[i] for i in idxs]
@@ -691,8 +731,8 @@ def compute_ua_concept(images_dir: str, concept_prompts: List[str],
         log.warning("transformers not installed")
         return None
 
-    model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(device)
-    processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     model.eval()
 
     img_dir = pathlib.Path(images_dir)

@@ -505,11 +505,14 @@ def run_evaluation(cfg, model_name, images_dir, device_str, model_weights_path=N
         if coco_pregenerated and os.path.isdir(coco_pregenerated):
             log.info(f"Using pre-generated COCO images from {coco_pregenerated}")
             coco_gen_dir = coco_pregenerated
+            coco_prompts_csv_path = coco_cfg.get("pregenerated_prompts_csv")
+            if not coco_prompts_csv_path:
+                coco_prompts_csv_path = os.path.join(output_dir, "coco_prompts.csv")
         else:
             # Generate images from COCO captions
-            coco_prompts_csv = os.path.join(output_dir, "coco_prompts.csv")
+            coco_prompts_csv_path = os.path.join(output_dir, "coco_prompts.csv")
             generate_coco_prompts_csv(
-                coco_prompts_csv, n=coco_n,
+                coco_prompts_csv_path, n=coco_n,
                 coco_ann_path=coco_ann_path,
                 coco_prompts_csv_path=configured_coco_prompts_csv,
             )
@@ -523,7 +526,7 @@ def run_evaluation(cfg, model_name, images_dir, device_str, model_weights_path=N
             coco_batch_size = coco_cfg.get("generation_batch_size", 64)
             coco_gen_dir = generate_images(
                 model_name=model_name,
-                prompts_path=coco_prompts_csv,
+                prompts_path=coco_prompts_csv_path,
                 save_path=coco_save,
                 device=device_str,
                 guidance_scale=ec.get("guidance_scale", 3.5),
@@ -547,6 +550,7 @@ def run_evaluation(cfg, model_name, images_dir, device_str, model_weights_path=N
                 feature=coco_cfg.get("fid_feature", 2048),
                 max_real=coco_cfg.get("max_real"),
                 max_fake=coco_cfg.get("max_fake"),
+                coco_prompts_csv=coco_prompts_csv_path,
             )
             if fid_score is not None:
                 metrics["FID_COCO"] = fid_score
@@ -554,9 +558,6 @@ def run_evaluation(cfg, model_name, images_dir, device_str, model_weights_path=N
 
         # CLIP Score (COCO)
         if coco_cfg.get("clip", True):
-            coco_prompts_csv_path = coco_cfg.get("pregenerated_prompts_csv")
-            if not coco_prompts_csv_path:
-                coco_prompts_csv_path = os.path.join(output_dir, "coco_prompts.csv")
             if os.path.exists(coco_prompts_csv_path):
                 clip_score = compute_clip_score_coco(
                     coco_gen_dir, coco_prompts_csv_path, device_str)

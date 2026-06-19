@@ -193,6 +193,7 @@ def main() -> int:
         feature=args.fid_feature,
         max_real=args.max_real,
         max_fake=args.max_fake,
+        coco_prompts_csv=coco_prompts_out,
     )
     clip_score = compute_clip_score_coco(coco_gen_dir, coco_prompts_out, device)
 
