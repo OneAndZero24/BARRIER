@@ -7,7 +7,7 @@
 
 wandb:
   project: "intact-flux"
-  entity: null
+  entity: "oneandzero24"
   group: "nsfw-erasure-10k"
   tags: ["flux", "nsfw", "intact", "coco10k"]
 
