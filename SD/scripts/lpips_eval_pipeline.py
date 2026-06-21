@@ -152,10 +152,9 @@ if __name__ == '__main__':
     regular_scale  = un_cfg.get('regular_scale', 1e-3)
     num_samples            = un_cfg.get('num_samples', 1)
     ddim_steps             = un_cfg.get('ddim_steps', 50)
-    epochs                 = un_cfg.get('epochs', 3)
+    epochs                 = un_cfg.get('epochs', 100)
     lr                     = un_cfg.get('lr', 1e-5)
     use_intact             = un_cfg.get('intact', True)
-    inner_iters            = un_cfg.get('inner_iterations', 250)
     eval_prompts_sample    = un_cfg.get('eval_prompts_per_artist', None)
 
     sd_ckpt        = path_cfg.get('sd_ckpt', 'models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt')
@@ -182,7 +181,6 @@ if __name__ == '__main__':
             'technique': technique,
             'emb_computing': emb_computing,
             'epochs': epochs,
-            'inner_iterations': inner_iters,
             'lr': lr,
             'regular_scale': regular_scale,
             'use_intact': use_intact,
@@ -191,6 +189,19 @@ if __name__ == '__main__':
     )
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # ---- override with sweep hyperparameters --------------------------------
+    # W&B sweep passes params with dot notation (e.g. unlearn.epochs, intact.lambda_interval).
+    # Read them from run.config and apply overrides.
+    if run.config.get('unlearn.epochs') is not None:
+        epochs = run.config['unlearn.epochs']
+    if run.config.get('unlearn.lr') is not None:
+        lr = run.config['unlearn.lr']
+    if run.config.get('unlearn.regular_scale') is not None:
+        regular_scale = run.config['unlearn.regular_scale']
+    if run.config.get('intact.lambda_interval') is not None:
+        int_cfg = dict(int_cfg)
+        int_cfg['lambda_interval'] = run.config['intact.lambda_interval']
     loss_fn = lpips.LPIPS(net='alex')
     loss_fn.to(device)
 
@@ -325,31 +336,27 @@ if __name__ == '__main__':
             pipe.unet.train()
 
             for epoch in tqdm(range(epochs), desc=f'Epoch ({artist})'):
-                prog_bar = tqdm(total=inner_iters * len(old_texts), desc=f'Steps ep {epoch}', leave=False)
-                for step in range(inner_iters):
-                    for i_idx in range(len(old_texts)):
-                        bc = old_texts[i_idx]
-                        bn = new_texts[i_idx]
-                        id_c = tokenizer(bc, padding='max_length', max_length=tokenizer.model_max_length,
-                                         truncation=True, return_tensors='pt').input_ids.to(device)
-                        id_n = tokenizer(bn, padding='max_length', max_length=tokenizer.model_max_length,
-                                         truncation=True, return_tensors='pt').input_ids.to(device)
-                        with torch.no_grad():
-                            inp_emb = pipe_copy.text_encoder(id_c)[0]
-                            new_emb = pipe_copy.text_encoder(id_n)[0]
-                        optimizer.zero_grad()
-                        z = torch.randn((1,4,64,64), device=device)
-                        noise = torch.randn_like(z)
-                        t_ = torch.randint(0,1000,(1,),device=device).long()
-                        z_noisy = pipe.scheduler.add_noise(z, noise, t_)
-                        with torch.no_grad():
-                            tgt = pipe_copy.unet(z_noisy, t_, encoder_hidden_states=new_emb).sample
-                        pred = pipe.unet(z_noisy, t_, encoder_hidden_states=inp_emb).sample
-                        loss = criteria(pred, tgt) + protect.compute_protection_loss(pipe.unet, device)
-                        loss.backward()
-                        optimizer.step()
-                        prog_bar.update(1)
-                prog_bar.close()
+                for i_idx in range(len(old_texts)):
+                    bc = old_texts[i_idx]
+                    bn = new_texts[i_idx]
+                    id_c = tokenizer(bc, padding='max_length', max_length=tokenizer.model_max_length,
+                                     truncation=True, return_tensors='pt').input_ids.to(device)
+                    id_n = tokenizer(bn, padding='max_length', max_length=tokenizer.model_max_length,
+                                     truncation=True, return_tensors='pt').input_ids.to(device)
+                    with torch.no_grad():
+                        inp_emb = pipe_copy.text_encoder(id_c)[0]
+                        new_emb = pipe_copy.text_encoder(id_n)[0]
+                    optimizer.zero_grad()
+                    z = torch.randn((1,4,64,64), device=device)
+                    noise = torch.randn_like(z)
+                    t_ = torch.randint(0,1000,(1,),device=device).long()
+                    z_noisy = pipe.scheduler.add_noise(z, noise, t_)
+                    with torch.no_grad():
+                        tgt = pipe_copy.unet(z_noisy, t_, encoder_hidden_states=new_emb).sample
+                    pred = pipe.unet(z_noisy, t_, encoder_hidden_states=inp_emb).sample
+                    loss = criteria(pred, tgt) + protect.compute_protection_loss(pipe.unet, device)
+                    loss.backward()
+                    optimizer.step()
                 torch.save(pipe.unet.state_dict(), f'{run_path}/epoch_{epoch}.pt')
 
         else:
@@ -402,6 +409,10 @@ if __name__ == '__main__':
             _rnd.seed(seed)
             erased_matched = _rnd.sample(erased_matched, eval_prompts_sample)
         unerased_matched = [f for f in all_files if f not in erased_matched]
+        if eval_prompts_sample is not None and len(unerased_matched) > eval_prompts_sample:
+            import random as _rnd2
+            _rnd2.seed(seed)
+            unerased_matched = _rnd2.sample(unerased_matched, eval_prompts_sample)
 
         lpips_e = compute_lpips_between_dirs(f'{run_path}/before', erased_dir, loss_fn, filter_files=erased_matched)
         lpips_u = compute_lpips_between_dirs(f'{run_path}/before', erased_dir, loss_fn, filter_files=unerased_matched)
@@ -421,7 +432,7 @@ if __name__ == '__main__':
             'hyperparams/epochs': epochs,
             'hyperparams/regular_scale': regular_scale,
             'time/total_sec': total_time,
-        }, step=epochs)
+        })
 
         e_rows = [[fn, f'{v:.6f}'] for fn,v in lpips_e.items()]
         u_rows = [[fn, f'{v:.6f}'] for fn,v in lpips_u.items()]
@@ -466,10 +477,9 @@ if __name__ == '__main__':
             'use_intact': use_intact,
         })
 
-    # ---- summary table -----------------------------------------------------
-    summary_table = wandb.Table(data=results_rows, columns=list(results_rows[0].keys()))
+    # ---- summary --------------------------------------------------------
     mean_d = np.mean([r['LPIPS_d'] for r in results_rows])
-    run.log({'summary_lpips': summary_table, 'mean_LPIPS_d': mean_d})
+    run.log({'mean_LPIPS_d': mean_d})
     run.summary['mean_LPIPS_d'] = mean_d
     run.finish()
     # Clean up temporary wandb directory to avoid leftover files
