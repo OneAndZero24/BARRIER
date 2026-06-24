@@ -35,6 +35,10 @@ parameters:
     min: 1.0e-3
     max: 1.0
 
+  intact.k:
+    distribution: int_uniform
+    min: 16
+    max: 128
 
 
 command:

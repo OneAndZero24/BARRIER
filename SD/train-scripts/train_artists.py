@@ -6,6 +6,7 @@ rece_path = root / 'SD' / 'rece'
 sys.path.insert(0, str(root))
 sys.path.insert(0, str(rece_path))
 
+import logging
 import torch
 import random
 import pandas as pd
@@ -13,6 +14,8 @@ import argparse
 import os
 from functools import reduce
 import operator
+
+log = logging.getLogger(__name__)
 import time
 import tqdm
 import json
@@ -38,6 +41,32 @@ from erase_methods import edit_model_adversarial  # type: ignore
 from execs import generate_images, compute_nudity_rate  # type: ignore
 from utils.embedding_calculation import close_form_emb, close_form_emb_regzero  # type: ignore
 from InTAct.intact import UnlearnIntervalProtection
+
+def resolve_intact_targets(intact_cfg: dict) -> list[str]:
+    """Resolve InTAct target layers from config.
+
+    If ``target_blocks`` and ``target_layers`` are both present, expand them to
+    fully-qualified SD UNet target names (e.g. ``output_blocks.4.1.transformer_blocks.0.attn2.to_q``).
+    Otherwise fall back to explicit ``targets`` (default: [to_q, to_k, to_v]).
+    """
+    import re
+    pattern = re.compile(r"^output_blocks\.(\d+)\.1\.transformer_blocks\.0\.(.+)$")
+
+    target_blocks = intact_cfg.get("target_blocks")
+    target_layers = intact_cfg.get("target_layers")
+
+    if target_blocks is not None and target_layers is not None:
+        return [
+            f"output_blocks.{block}.1.transformer_blocks.0.{layer}"
+            for block in target_blocks
+            for layer in target_layers
+        ]
+
+    targets = intact_cfg.get("targets", ["to_q", "to_k", "to_v"])
+    if isinstance(targets, str):
+        targets = [t.strip() for t in targets.split(",") if t.strip()]
+    return targets
+
 
 # Helper to load Stable Diffusion pipeline from either a diffusers directory or a .ckpt file + config
 def load_sd_pipeline(ckpt_path: str, config_path: Optional[str], device: str):
@@ -151,7 +180,9 @@ if __name__ == '__main__':
     parser.add_argument('--intact', help='whether to use intact unlearning', action='store_true')
     parser.add_argument('--lambda_interval', help='InTAct protection loss weight', type=float, default=1.0)
     parser.add_argument('--lr', help='learning rate for intact fine-tuning', type=float, default=1e-5)
-    parser.add_argument('--targets', help='target layer patterns for protection', type=str, nargs="+", default=['to_q', 'to_k', 'to_v'])
+    parser.add_argument('--targets', help='explicit target layer patterns (overrides target_blocks/target_layers)', type=str, nargs="+", default=None)
+    parser.add_argument('--target_blocks', help='SD UNet output block indices to protect', type=int, nargs="+", default=None)
+    parser.add_argument('--target_layers', help='layer names within each block (e.g. attn2.to_q)', type=str, nargs="+", default=None)
     parser.add_argument('--lower_percentile', help='lower percentile for bounds', type=float, default=0.05)
     parser.add_argument('--upper_percentile', help='upper percentile for bounds', type=float, default=0.95)
     parser.add_argument('--reduced_dim', help='reduced dimension for PCA', type=int, default=32)
@@ -349,22 +380,37 @@ if __name__ == '__main__':
         remain_prompts = retain_texts
         
         def generate_synthetic_batches(prompts, n_samples=50):
+            """Generate (noisy_latent, text_emb) tuples using the diffusion scheduler.
+            This mirrors the distribution seen at training time: random clean latent + 
+            noise added at a random timestep via the same scheduler used in training."""
             batches = []
             for _ in range(n_samples):
                 prompt = random.choice(prompts)
                 id_prompt = tokenizer(prompt, padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt").input_ids.to(device)
                 with torch.no_grad():
                     emb = ldm_stable_copy.text_encoder(id_prompt)[0]
-                z = torch.randn((1, 4, 64, 64)).to(device)
-                batches.append((z, emb))
+                clean_z = torch.randn((1, 4, 64, 64), device=device)
+                noise = torch.randn_like(clean_z)
+                t = torch.randint(0, 1000, (1,), device=device).long()
+                z_noisy = ldm_stable.scheduler.add_noise(clean_z, noise, t)
+                batches.append((z_noisy, emb))
             return batches
-
+        
         forget_batches = generate_synthetic_batches(forget_prompts, n_samples=50)
         remain_batches = generate_synthetic_batches(remain_prompts, n_samples=50) if args.use_actual_bounds else None
 
+        # Resolve targets from block/layer config or explicit targets
+        intact_cfg = {
+            'targets': args.targets,
+            'target_blocks': getattr(args, 'target_blocks', None),
+            'target_layers': getattr(args, 'target_layers', None),
+        }
+        resolved_targets = resolve_intact_targets(intact_cfg)
+        log.info(f"Resolved InTAct targets: {resolved_targets[:4]}... (total {len(resolved_targets)})")
+
         # Create protection instance
         protection = UnlearnIntervalProtection(
-            targets=args.targets,
+            targets=resolved_targets,
             lambda_interval=args.lambda_interval,
             lower_percentile=args.lower_percentile,
             upper_percentile=args.upper_percentile,
@@ -434,9 +480,9 @@ if __name__ == '__main__':
                 total_loss.backward()
                 optimizer.step()
                 
-            # Generate intermediate images & save checkpoint
-            generate_images(ldm_stable, dev_df, f'{save_path}/epoch_{epoch}', ddim_steps=ddim_steps, num_samples=num_samples)
             torch.save(ldm_stable.unet.state_dict(), f'{save_path}/epoch_{epoch}.pt')
+            if epoch == epochs - 1:
+                generate_images(ldm_stable, dev_df, f'{save_path}/final', ddim_steps=ddim_steps, num_samples=num_samples)
             
     else:
         for epoch in tqdm.tqdm(range(epochs), desc='Epoch'):
@@ -470,8 +516,9 @@ if __name__ == '__main__':
                     raise NotImplementedError
                 adv_emb_list.append(adv_embedding[0])   # squeeze the batch dimension
             ldm_stable = edit_model_adversarial(ldm_stable, adv_emb_list, new_emb_list, retain_texts, technique=technique, preserve_scale=preserve_scale, erase_scale=erase_scale, lamb=lamb)
-            generate_images(ldm_stable, dev_df, f'{save_path}/epoch_{epoch}', ddim_steps=ddim_steps, num_samples=num_samples)
             torch.save(ldm_stable.unet.state_dict(), f'{save_path}/epoch_{epoch}.pt')
+            if epoch == epochs - 1:
+                generate_images(ldm_stable, dev_df, f'{save_path}/final', ddim_steps=ddim_steps, num_samples=num_samples)
 
     end = time.time()
     print(f'Running time: {end-start}')
