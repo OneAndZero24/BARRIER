@@ -200,9 +200,8 @@ def build_train_cmd(cfg, artist, sweep_overrides):
 
     bool_flags = ['use_actual_bounds', 'normalize_protection']
     for key in bool_flags:
-        cli_name = key.replace('_', '-')
         if int_cfg.get(key, True):
-            cmd.append(f'--{cli_name}')
+            cmd.append(f'--{key}')
 
     # Target blocks (from YAML or sweep, never overridden by k)
     tb = sweep_overrides.get('intact.target_blocks', int_cfg.get('target_blocks'))
