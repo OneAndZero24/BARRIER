@@ -45,8 +45,7 @@ unlearn:
   intact: true
 
 intact:
-  target_blocks: [2, 4, 6, 8, 10]
-  target_layers: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
   lambda_interval: 2.0
   lower_percentile: 0.05
   upper_percentile: 0.95

@@ -45,24 +45,17 @@ from InTAct.intact import UnlearnIntervalProtection
 def resolve_intact_targets(intact_cfg: dict) -> list[str]:
     """Resolve InTAct target layers from config.
 
-    If ``target_blocks`` and ``target_layers`` are both present, expand them to
-    fully-qualified SD UNet target names (e.g. ``output_blocks.4.1.transformer_blocks.0.attn2.to_q``).
-    Otherwise fall back to explicit ``targets`` (default: [to_q, to_k, to_v]).
+    Uses layer names as substring patterns (e.g. ``attn2.to_q``) that
+    match against all blocks in the UNet via ``_find_target_layers``.
+    Falls back to explicit ``targets`` (default: [to_q, to_k, to_v]).
     """
-    import re
-    pattern = re.compile(r"^output_blocks\.(\d+)\.1\.transformer_blocks\.0\.(.+)$")
-
-    target_blocks = intact_cfg.get("target_blocks")
     target_layers = intact_cfg.get("target_layers")
+    if target_layers is not None:
+        return target_layers
 
-    if target_blocks is not None and target_layers is not None:
-        return [
-            f"output_blocks.{block}.1.transformer_blocks.0.{layer}"
-            for block in target_blocks
-            for layer in target_layers
-        ]
-
-    targets = intact_cfg.get("targets", ["to_q", "to_k", "to_v"])
+    targets = intact_cfg.get("targets")
+    if targets is None:
+        targets = ["to_q", "to_k", "to_v"]
     if isinstance(targets, str):
         targets = [t.strip() for t in targets.split(",") if t.strip()]
     return targets
