@@ -17,8 +17,8 @@ metric:
 parameters:
   unlearn.epochs:
     distribution: int_uniform
-    min: 20
-    max: 150
+    min: 3
+    max: 15
 
   unlearn.regular_scale:
     distribution: log_uniform_values
