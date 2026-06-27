@@ -325,7 +325,7 @@ if __name__ == '__main__':
         # Find the index of --save_path in the command and replace the value after it.
         for i, elem in enumerate(cmd):
             if elem == '--save_path':
-                cmd[i + 1] = os.path.dirname(run_path)
+                cmd[i + 1] = save_root
 
         # Also append a custom tag to the sub-command's output paths by setting env var
         env_override = os.environ.copy()

@@ -473,7 +473,6 @@ if __name__ == '__main__':
                 total_loss.backward()
                 optimizer.step()
                 
-            torch.save(ldm_stable.unet.state_dict(), f'{save_path}/epoch_{epoch}.pt')
             if epoch == epochs - 1:
                 generate_images(ldm_stable, dev_df, f'{save_path}/final', ddim_steps=ddim_steps, num_samples=num_samples)
             
@@ -509,7 +508,6 @@ if __name__ == '__main__':
                     raise NotImplementedError
                 adv_emb_list.append(adv_embedding[0])   # squeeze the batch dimension
             ldm_stable = edit_model_adversarial(ldm_stable, adv_emb_list, new_emb_list, retain_texts, technique=technique, preserve_scale=preserve_scale, erase_scale=erase_scale, lamb=lamb)
-            torch.save(ldm_stable.unet.state_dict(), f'{save_path}/epoch_{epoch}.pt')
             if epoch == epochs - 1:
                 generate_images(ldm_stable, dev_df, f'{save_path}/final', ddim_steps=ddim_steps, num_samples=num_samples)
 
