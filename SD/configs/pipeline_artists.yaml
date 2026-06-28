@@ -46,10 +46,10 @@ unlearn:
 
 intact:
   targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
-  lambda_interval: 2.0
+  lambda_interval: 0.05
   lower_percentile: 0.05
   upper_percentile: 0.95
   reduced_dim: 64
-  infinity_scale: 18.0
+  infinity_scale: 8.0
   use_actual_bounds: true
   normalize_protection: true

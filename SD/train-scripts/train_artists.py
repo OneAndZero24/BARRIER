@@ -389,8 +389,8 @@ if __name__ == '__main__':
                 batches.append((z_noisy, emb))
             return batches
         
-        forget_batches = generate_synthetic_batches(forget_prompts, n_samples=50)
-        remain_batches = generate_synthetic_batches(remain_prompts, n_samples=50) if args.use_actual_bounds else None
+        forget_batches = generate_synthetic_batches(forget_prompts, n_samples=500)
+        remain_batches = generate_synthetic_batches(remain_prompts, n_samples=500) if args.use_actual_bounds else None
 
         # Resolve targets from block/layer config or explicit targets
         intact_cfg = {

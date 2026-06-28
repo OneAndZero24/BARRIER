@@ -191,12 +191,15 @@ def build_train_cmd(cfg, artist, sweep_overrides):
     for flag, key in [
         ('--lower_percentile', 'lower_percentile'),
         ('--upper_percentile', 'upper_percentile'),
-        ('--reduced_dim', 'reduced_dim'),
         ('--infinity_scale', 'infinity_scale'),
     ]:
         val = int_cfg.get(key)
         if val is not None:
             cmd += [flag, str(val)]
+
+    reduced_dim = sweep_overrides.get('intact.reduced_dim', int_cfg.get('reduced_dim'))
+    if reduced_dim is not None:
+        cmd += ['--reduced_dim', str(int(reduced_dim))]
 
     bool_flags = ['use_actual_bounds', 'normalize_protection']
     for key in bool_flags:
@@ -295,6 +298,8 @@ if __name__ == '__main__':
         sweep_params['intact.lambda_interval'] = run.config['intact.lambda_interval']
     if run.config.get('intact.k') is not None:
         sweep_params['intact.k'] = int(run.config['intact.k'])
+    if run.config.get('intact.reduced_dim') is not None:
+        sweep_params['intact.reduced_dim'] = int(run.config['intact.reduced_dim'])
 
     effective_epochs = sweep_params.get('unlearn.epochs', epochs_yaml)
     effective_lr = sweep_params.get('unlearn.lr', lr_yaml)

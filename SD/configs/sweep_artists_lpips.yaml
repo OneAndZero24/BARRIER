@@ -20,11 +20,6 @@ parameters:
     min: 3
     max: 15
 
-  unlearn.regular_scale:
-    distribution: log_uniform_values
-    min: 1.0e-4
-    max: 3.0e-3
-
   unlearn.lr:
     distribution: log_uniform_values
     min: 5.0e-6
@@ -32,13 +27,11 @@ parameters:
 
   intact.lambda_interval:
     distribution: log_uniform_values
-    min: 1.0e-3
-    max: 1.0
+    min: 1.0e-4
+    max: 5.0e-1
 
-  intact.k:
-    distribution: int_uniform
-    min: 16
-    max: 128
+  intact.reduced_dim:
+    values: [16, 32, 64, 128, 256]
 
 
 command:
