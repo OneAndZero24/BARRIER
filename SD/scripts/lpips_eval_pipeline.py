@@ -52,7 +52,7 @@ def get_args():
     parser.add_argument('--config', type=str, default=None,
                         help='path to config YAML')
     parser.add_argument('--wandb-run-name', type=str, default=None)
-    return parser.parse_args()
+    return parser.parse_known_args()[0]
 
 
 def merge_wandb_config(args, config):
@@ -288,17 +288,31 @@ if __name__ == '__main__':
 
     # ---- override with sweep hyperparameters --------------------------------
     sweep_params = {}
-    if run.config.get('unlearn.epochs') is not None:
+    unlearn_sweep = run.config.get('unlearn', {})
+    intact_sweep = run.config.get('intact', {})
+    if isinstance(unlearn_sweep, dict) and 'epochs' in unlearn_sweep:
+        sweep_params['unlearn.epochs'] = unlearn_sweep['epochs']
+    elif run.config.get('unlearn.epochs') is not None:
         sweep_params['unlearn.epochs'] = run.config['unlearn.epochs']
-    if run.config.get('unlearn.lr') is not None:
+    if isinstance(unlearn_sweep, dict) and 'lr' in unlearn_sweep:
+        sweep_params['unlearn.lr'] = unlearn_sweep['lr']
+    elif run.config.get('unlearn.lr') is not None:
         sweep_params['unlearn.lr'] = run.config['unlearn.lr']
-    if run.config.get('unlearn.regular_scale') is not None:
+    if isinstance(unlearn_sweep, dict) and 'regular_scale' in unlearn_sweep:
+        sweep_params['unlearn.regular_scale'] = unlearn_sweep['regular_scale']
+    elif run.config.get('unlearn.regular_scale') is not None:
         sweep_params['unlearn.regular_scale'] = run.config['unlearn.regular_scale']
-    if run.config.get('intact.lambda_interval') is not None:
+    if isinstance(intact_sweep, dict) and 'lambda_interval' in intact_sweep:
+        sweep_params['intact.lambda_interval'] = intact_sweep['lambda_interval']
+    elif run.config.get('intact.lambda_interval') is not None:
         sweep_params['intact.lambda_interval'] = run.config['intact.lambda_interval']
-    if run.config.get('intact.k') is not None:
+    if isinstance(intact_sweep, dict) and 'k' in intact_sweep:
+        sweep_params['intact.k'] = int(intact_sweep['k'])
+    elif run.config.get('intact.k') is not None:
         sweep_params['intact.k'] = int(run.config['intact.k'])
-    if run.config.get('intact.reduced_dim') is not None:
+    if isinstance(intact_sweep, dict) and 'reduced_dim' in intact_sweep:
+        sweep_params['intact.reduced_dim'] = int(intact_sweep['reduced_dim'])
+    elif run.config.get('intact.reduced_dim') is not None:
         sweep_params['intact.reduced_dim'] = int(run.config['intact.reduced_dim'])
 
     effective_epochs = sweep_params.get('unlearn.epochs', epochs_yaml)
