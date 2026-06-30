@@ -288,36 +288,37 @@ if __name__ == '__main__':
 
     # ---- override with sweep hyperparameters --------------------------------
     sweep_params = {}
-    unlearn_sweep = run.config.get('unlearn', {})
-    intact_sweep = run.config.get('intact', {})
-    if isinstance(unlearn_sweep, dict) and 'epochs' in unlearn_sweep:
-        sweep_params['unlearn.epochs'] = unlearn_sweep['epochs']
-    elif run.config.get('unlearn.epochs') is not None:
-        sweep_params['unlearn.epochs'] = run.config['unlearn.epochs']
-    if isinstance(unlearn_sweep, dict) and 'lr' in unlearn_sweep:
-        sweep_params['unlearn.lr'] = unlearn_sweep['lr']
-    elif run.config.get('unlearn.lr') is not None:
-        sweep_params['unlearn.lr'] = run.config['unlearn.lr']
-    if isinstance(unlearn_sweep, dict) and 'regular_scale' in unlearn_sweep:
-        sweep_params['unlearn.regular_scale'] = unlearn_sweep['regular_scale']
-    elif run.config.get('unlearn.regular_scale') is not None:
-        sweep_params['unlearn.regular_scale'] = run.config['unlearn.regular_scale']
-    if isinstance(intact_sweep, dict) and 'lambda_interval' in intact_sweep:
-        sweep_params['intact.lambda_interval'] = intact_sweep['lambda_interval']
-    elif run.config.get('intact.lambda_interval') is not None:
-        sweep_params['intact.lambda_interval'] = run.config['intact.lambda_interval']
-    if isinstance(intact_sweep, dict) and 'k' in intact_sweep:
-        sweep_params['intact.k'] = int(intact_sweep['k'])
-    elif run.config.get('intact.k') is not None:
-        sweep_params['intact.k'] = int(run.config['intact.k'])
-    if isinstance(intact_sweep, dict) and 'reduced_dim' in intact_sweep:
-        sweep_params['intact.reduced_dim'] = int(intact_sweep['reduced_dim'])
-    elif run.config.get('intact.reduced_dim') is not None:
-        sweep_params['intact.reduced_dim'] = int(run.config['intact.reduced_dim'])
+    for key_base, sweep_key, cast in [
+        ('epochs',         'unlearn.epochs',         lambda v: v),
+        ('lr',             'unlearn.lr',             lambda v: v),
+        ('regular_scale',  'unlearn.regular_scale',  lambda v: v),
+        ('lambda_interval','intact.lambda_interval', lambda v: v),
+        ('k',              'intact.k',               lambda v: int(v)),
+        ('reduced_dim',    'intact.reduced_dim',     lambda v: int(v)),
+    ]:
+        nested_val = run.config.get(sweep_key.split('.')[0], {})
+        if isinstance(nested_val, dict) and key_base in nested_val:
+            sweep_params[sweep_key] = cast(nested_val[key_base])
+        elif run.config.get(sweep_key) is not None:
+            sweep_params[sweep_key] = cast(run.config[sweep_key])
 
     effective_epochs = sweep_params.get('unlearn.epochs', epochs_yaml)
     effective_lr = sweep_params.get('unlearn.lr', lr_yaml)
     effective_regular_scale = sweep_params.get('unlearn.regular_scale', regular_scale_yaml)
+    effective_lambda_interval = sweep_params.get('intact.lambda_interval', int_cfg.get('lambda_interval', 'N/A'))
+    effective_reduced_dim = sweep_params.get('intact.reduced_dim', int_cfg.get('reduced_dim', 'N/A'))
+    effective_k = sweep_params.get('intact.k', int_cfg.get('k', 'N/A'))
+
+    print('=' * 72)
+    print('SWEEP HYPERPARAMETERS')
+    print(f'  unlearn.epochs         = {effective_epochs}            (yaml fallback={epochs_yaml})')
+    print(f'  unlearn.lr             = {effective_lr:.2e}         (yaml fallback={lr_yaml:.2e})')
+    print(f'  unlearn.regular_scale  = {effective_regular_scale}  (yaml fallback={regular_scale_yaml})')
+    print(f'  intact.lambda_interval = {effective_lambda_interval} (yaml fallback={int_cfg.get("lambda_interval", "N/A")})')
+    print(f'  intact.reduced_dim     = {effective_reduced_dim}    (yaml fallback={int_cfg.get("reduced_dim", "N/A")})')
+    print(f'  intact.k               = {effective_k}              (yaml fallback={int_cfg.get("k", "N/A")})')
+    print(f'  sweep_params raw       = {sweep_params}')
+    print('=' * 72)
 
     loss_fn = lpips.LPIPS(net='alex')
     loss_fn.to(device)
