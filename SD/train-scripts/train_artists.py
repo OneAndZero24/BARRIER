@@ -212,6 +212,21 @@ if __name__ == '__main__':
         raise ValueError("--concepts is required (either via CLI or config file)")
     if args.concept_type is None:
         raise ValueError("--concept_type is required (either via CLI or config file)")
+
+    print('=' * 72)
+    print('TRAIN SCRIPT — EFFECTIVE HYPERPARAMETERS')
+    print(f'  epochs          = {args.epochs}')
+    print(f'  lr              = {args.lr}')
+    print(f'  lambda_interval = {getattr(args, "lambda_interval", "N/A")}')
+    print(f'  reduced_dim     = {getattr(args, "reduced_dim", "N/A")}')
+    print(f'  regular_scale   = {args.regular_scale}')
+    print(f'  intact          = {args.intact}')
+    print(f'  technique       = {args.technique}')
+    print(f'  seed            = {args.seed}')
+    print(f'  concepts        = {args.concepts}')
+    print(f'  concept_type    = {args.concept_type}')
+    print('=' * 72)
+
     seed_shuffle=123
     setup_seed(seed_shuffle)
 

@@ -341,13 +341,12 @@ if __name__ == '__main__':
         cmd = build_train_cmd(cfg, artist, sweep_params)
 
         # Override save_path for this artist so that train_artists.py writes into our slot
-        # The --save_path flag was already set; we need to point to our run_path.
-        # Find the index of --save_path in the command and replace the value after it.
         for i, elem in enumerate(cmd):
             if elem == '--save_path':
                 cmd[i + 1] = save_root
 
-        # Also append a custom tag to the sub-command's output paths by setting env var
+        print(f'  CMD: {" ".join(cmd)}')
+
         env_override = os.environ.copy()
         cwd = str(Path(__file__).resolve().parents[1])
 
