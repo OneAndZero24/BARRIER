@@ -340,10 +340,13 @@ if __name__ == '__main__':
         # --- Build and run training command ---------------------------------
         cmd = build_train_cmd(cfg, artist, sweep_params)
 
-        # Override save_path for this artist so that train_artists.py writes into our slot
+        # Isolate this sweep run's results in a unique subdirectory to prevent
+        # cross-contamination between concurrent sweep runs sharing save_root.
+        run_tag = f'sweep_{run.id}'
+        run_save_root = os.path.join(save_root, run_tag)
         for i, elem in enumerate(cmd):
             if elem == '--save_path':
-                cmd[i + 1] = save_root
+                cmd[i + 1] = run_save_root
 
         print(f'  CMD: {" ".join(cmd)}')
 
@@ -364,22 +367,19 @@ if __name__ == '__main__':
             print(proc.stdout[-2000:] if len(proc.stdout) > 2000 else proc.stdout)
             continue
 
-        # Find the latest train output dir containing both "before" and "final".
-        # train_artists.py writes to: save_path/{concept_type}/intact/...
-        trainer_base = str(Path(save_root) / concept_type / 'intact')
+        # Find results under this run's isolated directory.
+        # train_artists.py writes to: {run_save_root}/{concept_type}/intact/{print_text}/...
+        trainer_base = str(Path(run_save_root) / concept_type / 'intact')
+        candidates = []
         if os.path.isdir(trainer_base):
-            candidates = []
             for d in Path(trainer_base).rglob('*'):
                 if (d / 'before').is_dir() and (d / 'final').is_dir():
                     candidates.append(d)
-            if not candidates:
-                print(f'Could not locate train output for {artist} under {trainer_base}')
-                continue
-            # Pick the most recently modified
-            train_result_dir = str(max(candidates, key=lambda p: p.stat().st_mtime))
-        else:
-            print(f'Trainer base dir missing: {trainer_base}')
+
+        if not candidates:
+            print(f'Could not locate train output for {artist} under {trainer_base}')
             continue
+        train_result_dir = str(max(candidates, key=lambda p: p.stat().st_mtime))
 
         # Ensure baseline images exist (generate once from fresh model if needed)
         before_dir = os.path.join(train_result_dir, 'before')
