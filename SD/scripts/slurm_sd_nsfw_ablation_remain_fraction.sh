@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 # ============================================================================
 # SLURM Array Job – SD NSFW Remain-Set Bounds Fraction Ablation
 # ============================================================================
@@ -12,22 +12,54 @@
 # Total: 5 fractions x 3 seeds = 15 jobs
 #
 # HOW TO USE:
+#   cd SD
 #   sbatch scripts/slurm_sd_nsfw_ablation_remain_fraction.sh
 # ============================================================================
 
 #SBATCH --job-name=sd-nsfw-abl-rf
-#SBATCH --qos=big
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
-#SBATCH --partition=dgxh100
+#SBATCH --time=48:00:00
+#SBATCH --partition=plgrid-gpu-gh200
 #SBATCH --array=0-14
 
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate ldm
-export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
-cd $HOME/InTAct-Unl/SD
-export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
+set -euo pipefail
+
+# ---- Environment ----
+ml ML-bundle/25.10
+source "$HOME/sd_venv/bin/activate"
+cd "$HOME/InTAct-Unl/SD"
+export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
+
+HF_TOKEN_FILE="${HF_TOKEN_FILE:-/net/home/plgrid/plgmiksa/.cache/huggingface/token}"
+if [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ] && [ -r "$HF_TOKEN_FILE" ]; then
+    HUGGINGFACE_HUB_TOKEN="$(tr -d '\r\n' < "$HF_TOKEN_FILE")"
+    export HUGGINGFACE_HUB_TOKEN
+fi
+if [ -z "${HF_TOKEN:-}" ] && [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
+    export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
+fi
+
+if [ -n "${SCRATCH:-}" ]; then
+    CACHE_BASE="$SCRATCH/.cache"
+else
+    CACHE_BASE="$HOME/.cache/intact"
+fi
+export CACHE_ROOT="$CACHE_BASE"
+export HF_HOME="$CACHE_ROOT/huggingface"
+export TORCH_HOME="$CACHE_ROOT/torch"
+export XDG_CACHE_HOME="$CACHE_ROOT"
+export WANDB_DIR="$CACHE_ROOT/wandb"
+export TMPDIR="$CACHE_ROOT/tmp"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+mkdir -p "$TMPDIR" "$WANDB_DIR"
+
+RESULTS_BASE="${SCRATCH:-$HOME}/intact/SD/ablation"
+mkdir -p "$RESULTS_BASE"
+
+echo "Starting remain-fraction ablation on $(hostname)"
+echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-none}"
 
 # ============================================================================
 # Grid: 5 fractions x 3 seeds = 15 jobs
@@ -52,7 +84,7 @@ echo "  bounds_remain_fraction=${FRACTION} (${FRAC_PCT}%)  seed=${SEED}"
 echo "============================================"
 
 TMPCONFIG="/tmp/sd_nsfw_abl_rf_${SLURM_ARRAY_JOB_ID}_${IDX}.yaml"
-METRICS_OUT="/shared/results/common/miksa/intact/SD/ablation/remain_frac_${FRAC_PCT}_seed_${SEED}/metrics.json"
+METRICS_OUT="${RESULTS_BASE}/remain_frac_${FRAC_PCT}_seed_${SEED}/metrics.json"
 
 mkdir -p "$(dirname "${METRICS_OUT}")"
 
@@ -72,11 +104,15 @@ cfg["intact"]["lambda_interval"] = 10.0
 cfg["intact"]["reduced_dim"]     = 64
 cfg["intact"]["use_actual_bounds"] = True
 
+suffix = f"remain_frac_${FRAC_PCT}_seed_${SEED}"
+cfg["paths"]["output_dir"]      = os.path.join("${RESULTS_BASE}", suffix)
+cfg["paths"]["model_save_dir"]  = os.path.join("${RESULTS_BASE}", suffix, "models")
+cfg["paths"]["logs_dir"]        = os.path.join("${RESULTS_BASE}", suffix, "logs")
+cfg["paths"]["nsfw_data"]       = "$HOME/data/nsfw"
+cfg["paths"]["not_nsfw_data"]   = "$HOME/data/not-nsfw"
+
 cfg["wandb"]["tags"].append("remain_fraction_ablation")
 cfg["wandb"]["group"] = "nsfw-abl-remain-fraction"
-
-suffix = f"remain_frac_${FRAC_PCT}_seed_${SEED}"
-cfg["paths"]["output_dir"] = os.path.join(cfg["paths"]["output_dir"], suffix)
 
 with open("${TMPCONFIG}", "w") as f:
     yaml.dump(cfg, f, default_flow_style=False)
