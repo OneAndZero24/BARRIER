@@ -283,6 +283,8 @@ def run_unlearn_nsfw(cfg, device_str):
             infinity_scale=ic.get("infinity_scale", 20.0),
             use_actual_bounds=ic.get("use_actual_bounds", False),
             normalize_protection=ic.get("normalize_protection", True),
+            bounds_forget_fraction=float(ic.get("bounds_forget_fraction", 1.0)),
+            bounds_remain_fraction=float(ic.get("bounds_remain_fraction", 1.0)),
             image_size=uc.get("image_size", 512),
             nsfw_data_path=cfg["paths"].get("nsfw_data", "data/nsfw"),
             not_nsfw_data_path=cfg["paths"].get("not_nsfw_data", "data/not-nsfw"),

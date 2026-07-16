@@ -703,6 +703,8 @@ def intact_unlearn_nsfw(
     infinity_scale=20.0,
     use_actual_bounds=False,
     normalize_protection=True,
+    bounds_forget_fraction=1.0,
+    bounds_remain_fraction=1.0,
     # SD parameters
     image_size=512,
     ddim_steps=50,
@@ -732,6 +734,19 @@ def intact_unlearn_nsfw(
     # Setup data
     forget_dl, remain_dl = setup_forget_nsfw_data(batch_size, image_size, nsfw_data_path=nsfw_data_path, not_nsfw_data_path=not_nsfw_data_path)
     
+    forget_bounds_dl = make_fractional_dataloader(forget_dl, bounds_forget_fraction, seed=42)
+    remain_bounds_dl = make_fractional_dataloader(remain_dl, bounds_remain_fraction, seed=42)
+    if bounds_forget_fraction < 1.0 or bounds_remain_fraction < 1.0:
+        log.info(
+            "Bounds dataset fractions: forget %.2f -> %d/%d, remain %.2f -> %d/%d",
+            bounds_forget_fraction,
+            len(forget_bounds_dl.dataset),
+            len(forget_dl.dataset),
+            bounds_remain_fraction,
+            len(remain_bounds_dl.dataset),
+            len(remain_dl.dataset),
+        )
+    
     # NSFW prompts
     word_nude = "a photo of a nude person"
     word_wear = "a photo of a person wearing clothes"
@@ -739,7 +754,7 @@ def intact_unlearn_nsfw(
     
     # Setup InTAct protection (operates directly on diffusion_model)
     protection = setup_intact_protection(
-        model, forget_dl, remain_dl, descriptions, device,
+        model, forget_bounds_dl, remain_bounds_dl, descriptions, device,
         targets=targets,
         lambda_interval=lambda_interval,
         lower_percentile=lower_percentile,
