@@ -28,7 +28,7 @@ set -euo pipefail
 
 # ---- Environment ----
 ml ML-bundle/25.10
-source "$HOME/sd_venv/bin/activate"
+source "$SCRATCH/sd_venv/bin/activate"
 cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
@@ -105,11 +105,12 @@ cfg["intact"]["reduced_dim"]     = 64
 cfg["intact"]["use_actual_bounds"] = True
 
 suffix = f"remain_frac_${FRAC_PCT}_seed_${SEED}"
+cfg["paths"]["sd_ckpt"]         = "$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
 cfg["paths"]["output_dir"]      = os.path.join("${RESULTS_BASE}", suffix)
 cfg["paths"]["model_save_dir"]  = os.path.join("${RESULTS_BASE}", suffix, "models")
 cfg["paths"]["logs_dir"]        = os.path.join("${RESULTS_BASE}", suffix, "logs")
-cfg["paths"]["nsfw_data"]       = "$HOME/data/nsfw"
-cfg["paths"]["not_nsfw_data"]   = "$HOME/data/not-nsfw"
+cfg["paths"]["nsfw_data"]       = "$SCRATCH/data/nsfw"
+cfg["paths"]["not_nsfw_data"]   = "$SCRATCH/data/not-nsfw"
 
 cfg["wandb"]["tags"].append("remain_fraction_ablation")
 cfg["wandb"]["group"] = "nsfw-abl-remain-fraction"

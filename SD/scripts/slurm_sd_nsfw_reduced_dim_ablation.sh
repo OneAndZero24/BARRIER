@@ -25,7 +25,7 @@ set -euo pipefail
 
 # ---- Environment ----
 ml ML-bundle/25.10
-source "$HOME/sd_venv/bin/activate"
+source "$SCRATCH/sd_venv/bin/activate"
 cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
@@ -102,11 +102,12 @@ cfg["unlearn"]["epochs"] = 5
 cfg["intact"]["lambda_interval"] = 10.0
 
 # Override paths for Helios
+cfg["paths"]["sd_ckpt"]         = "$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
 cfg["paths"]["output_dir"]      = "${RESULTS_BASE}/reduced_dim_${DIM}_seed_${SEED}"
 cfg["paths"]["model_save_dir"]  = "${RESULTS_BASE}/reduced_dim_${DIM}_seed_${SEED}/models"
 cfg["paths"]["logs_dir"]        = "${RESULTS_BASE}/reduced_dim_${DIM}_seed_${SEED}/logs"
-cfg["paths"]["nsfw_data"]       = "$HOME/data/nsfw"
-cfg["paths"]["not_nsfw_data"]   = "$HOME/data/not-nsfw"
+cfg["paths"]["nsfw_data"]       = "$SCRATCH/data/nsfw"
+cfg["paths"]["not_nsfw_data"]   = "$SCRATCH/data/not-nsfw"
 
 # Tag the wandb run
 cfg["wandb"]["tags"].append("reduced_dim_ablation")
