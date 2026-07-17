@@ -39,7 +39,10 @@ from ldm.util import (
     mean_flat,
 )
 from omegaconf import ListConfig
-from pytorch_lightning.utilities.distributed import rank_zero_only
+try:
+    from pytorch_lightning.utilities.rank_zero import rank_zero_only
+except ImportError:
+    from pytorch_lightning.utilities.distributed import rank_zero_only
 from torch.optim.lr_scheduler import LambdaLR
 from torchvision.utils import make_grid
 from tqdm import tqdm
