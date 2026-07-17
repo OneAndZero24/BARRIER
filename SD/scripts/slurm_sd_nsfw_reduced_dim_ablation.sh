@@ -27,7 +27,7 @@ set -euo pipefail
 ml ML-bundle/25.10
 source "$SCRATCH/sd_venv/bin/activate"
 cd "$HOME/InTAct-Unl/SD"
-export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
+export PYTHONPATH="$HOME/InTAct-Unl/taming-transformers:$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
 # Hugging Face token
 HF_TOKEN_FILE="${HF_TOKEN_FILE:-/net/home/plgrid/plgmiksa/.cache/huggingface/token}"
