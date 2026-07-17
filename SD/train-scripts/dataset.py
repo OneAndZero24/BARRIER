@@ -106,7 +106,7 @@ def setup_model(config, ckpt, device):
     if isinstance(config, (str, Path)):
         config = OmegaConf.load(config)
 
-    pl_sd = torch.load(ckpt, map_location="cpu")
+    pl_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
     global_step = pl_sd["global_step"]
     sd = pl_sd["state_dict"]
     model = instantiate_from_config(config.model)
