@@ -19,7 +19,7 @@
 #SBATCH --job-name=sd-nsfw-abl-ff
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64GB
+#SBATCH --mem=128GB
 #SBATCH --time=48:00:00
 #SBATCH --partition=plgrid-gpu-gh200
 #SBATCH --array=0-14
