@@ -1338,25 +1338,45 @@ def main():
     skip_i2p = eval_cfg.get("skip_i2p", False)
 
     # =========================================================================
+    # Compute model name early (needed for skip detection)
+    # =========================================================================
+    model_name = cfg.get("pipeline", {}).get("model_name") or get_model_name(cfg)
+    log.info(f"Model name: {model_name}")
+
+    # ---- Skip/resume logic: check for existing checkpoint & images ----
+    model_save_dir = cfg["paths"].get("model_save_dir", "models")
+    ckpt_path = os.path.join(model_save_dir, model_name, f"{model_name}.pt")
+    output_dir = cfg["paths"].get("output_dir", "./evaluation")
+    images_dir = os.path.join(output_dir, "generated", model_name)
+
+    ckpt_exists = os.path.exists(ckpt_path)
+    images_exist = images_dir and os.path.isdir(images_dir) and len(os.listdir(images_dir)) > 0
+
+    if ckpt_exists:
+        log.info(f"Model checkpoint found at {ckpt_path} — skipping unlearning")
+    if images_exist:
+        log.info(f"Images already exist at {images_dir} — skipping generation")
+    # ------------------------------------------------------------------------
+
+    # =========================================================================
     # Step 1: Unlearn
     # =========================================================================
     if not eval_only and not pregenerated_path:
-        log.info(f"=== Step 1: Unlearning ({setting}) ===")
-        if setting == "sd":
-            run_unlearn_class(cfg, device_str)
-        elif setting == "sd_nsfw":
-            run_unlearn_nsfw(cfg, device_str)
+        if ckpt_exists:
+            log.info("Skipping Step 1: Unlearning (model checkpoint exists)")
         else:
-            raise ValueError(f"Unknown setting: {setting}")
+            log.info(f"=== Step 1: Unlearning ({setting}) ===")
+            if setting == "sd":
+                run_unlearn_class(cfg, device_str)
+            elif setting == "sd_nsfw":
+                run_unlearn_nsfw(cfg, device_str)
+            else:
+                raise ValueError(f"Unknown setting: {setting}")
     else:
         if eval_only:
             log.info("Skipping unlearning (eval-only mode)")
         else:
             log.info("Skipping unlearning (pre-generated images provided)")
-
-    # Allow explicit model_name override (useful in eval-only mode)
-    model_name = cfg.get("pipeline", {}).get("model_name") or get_model_name(cfg)
-    log.info(f"Model name: {model_name}")
 
     # =========================================================================
     # Step 2: Generate I2P images (or use pre-generated)
@@ -1373,6 +1393,9 @@ def main():
     elif pregenerated_path and os.path.isdir(pregenerated_path):
         log.info(f"=== Step 2: Using pre-generated I2P images from {pregenerated_path} ===")
         images_dir = pregenerated_path
+    elif images_exist:
+        log.info("=== Step 2: Skipping I2P generation (images already exist) ===")
+        # images_dir was already set to the expected path above
     else:
         log.info("=== Step 2: Generating images ===")
         images_dir = generate_images(cfg, model_name, device_str)

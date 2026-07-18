@@ -85,7 +85,7 @@ def generate_images(
         )
         from omegaconf import OmegaConf
         
-        checkpoint = torch.load(base_model_path, map_location="cpu")
+        checkpoint = torch.load(base_model_path, map_location="cpu", weights_only=False)
         if "state_dict" in checkpoint:
             checkpoint = checkpoint["state_dict"]
         
@@ -147,7 +147,7 @@ def generate_images(
                     f"  model_name={model_name}, model_dir={model_dir}\n"
                     f"  Check that the unlearning step saved the model to the expected location."
                 )
-            unet.load_state_dict(torch.load(model_path, map_location="cpu"))
+            unet.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=False))
             print("Successfully loaded fine-tuned UNet")
         except FileNotFoundError:
             raise  # Don't swallow missing-model errors
