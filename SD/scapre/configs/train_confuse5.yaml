@@ -1,0 +1,32 @@
+# BARRIER/InTAct training on ImageNet-Confuse5
+# Produces a diffusers UNet checkpoint for ScaPre-compatible evaluation.
+
+benchmark: confuse5
+
+paths:
+  imagenet_root: "/datasets/ImageNet"
+  ckpt_path: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  config_path: "configs/stable-diffusion/v1-intact.yaml"
+  diffusers_config_path: "diffusers_unet_config.json"
+  model_save_dir: "models"
+  output_dir: "results/confuse5"
+
+unlearn:
+  base_method: "rl"
+  alpha: 0.0
+  lr: 5.0e-6
+  epochs: 5
+  batch_size: 8
+  image_size: 512
+  device: "0"
+
+intact:
+  targets: ["to_q", "to_k", "to_v"]
+  lambda_interval: 4.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32
+  infinity_scale: 18.0
+  use_actual_bounds: true
+  normalize_protection: true
+  bounds_fraction: 0.5
