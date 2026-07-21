@@ -1,42 +1,59 @@
-#!/bin/bash
+#!/bin/bash -l
 # ============================================================================
 # SLURM Array Job – BARRIER Grid Search on ImageNet-Confuse5
 # ============================================================================
-# Grid over 24 hyperparameter combos (4 lambdas x 2 epochs x 3 LRs).
-# Each array job: train BARRIER on all 10 Confuse5 concepts,
-# then evaluate using ScaPre protocol (Table 4).
+# Grid over 24 hyperparameter combos: 4 lambdas x 2 epochs x 3 LRs.
+# Each job: train → evaluate using ScaPre protocol (Table 4).
 #
 # Usage:
-#   sbatch SD/scapre/scripts/slurm_grid_confuse5.sh
+#   cd SD
+#   sbatch scapre/scripts/slurm_grid_confuse5.sh
 # ============================================================================
 
-#SBATCH --job-name=barrier-grid-c5
-#SBATCH --qos=big
+#SBATCH --job-name=bar-g-c5
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=128GB
-#SBATCH --time=24:00:00
-#SBATCH --partition=dgxh100
+#SBATCH --time=48:00:00
+#SBATCH --partition=plgrid-gpu-gh200
 #SBATCH --array=0-23
 
 set -euo pipefail
 
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate ldm
-export CACHE_ROOT=/shared/results/common/miksa/intact/SD/.cache
-export RESULTS_ROOT=/shared/results/common/miksa/intact/SD
+# ---- Environment ----
+ml ML-bundle/25.10
+source "$SCRATCH/sd_venv/bin/activate"
 cd "$HOME/InTAct-Unl/SD"
-export PYTHONPATH="$HOME/InTAct-Unl:${PYTHONPATH:-}"
+export PYTHONPATH="$HOME/InTAct-Unl/taming-transformers:$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
+HF_TOKEN_FILE="${HF_TOKEN_FILE:-/net/home/plgrid/plgmiksa/.cache/huggingface/token}"
+if [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ] && [ -r "$HF_TOKEN_FILE" ]; then
+    HUGGINGFACE_HUB_TOKEN="$(tr -d '\r\n' < "$HF_TOKEN_FILE")"
+    export HUGGINGFACE_HUB_TOKEN
+fi
+if [ -z "${HF_TOKEN:-}" ] && [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
+    export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
+fi
+
+if [ -n "${SCRATCH:-}" ]; then
+    CACHE_BASE="$SCRATCH/.cache"
+else
+    CACHE_BASE="$HOME/.cache/intact"
+fi
+export CACHE_ROOT="$CACHE_BASE"
 export HF_HOME="$CACHE_ROOT/huggingface"
 export TORCH_HOME="$CACHE_ROOT/torch"
+export XDG_CACHE_HOME="$CACHE_ROOT"
 export WANDB_DIR="$CACHE_ROOT/wandb"
 export TMPDIR="$CACHE_ROOT/tmp"
-export CLIP_CACHE_DIR="$CACHE_ROOT/clip"
-mkdir -p "$CACHE_ROOT" "$RESULTS_ROOT"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+mkdir -p "$TMPDIR" "$WANDB_DIR"
+
+RESULTS_BASE="${SCRATCH:-$HOME}/intact/SD/scapre"
+mkdir -p "$RESULTS_BASE"
 
 # ============================================================================
-# Grid dimensions: 4 lambdas  x  2 epochs  x  3 LRs  =  24 combos
+# Grid: 4 lambdas x 2 epochs x 3 LRs = 24 combos
 # ============================================================================
 GRID_LAMBDAS=(0.5 1.0 5.0 10.0)
 GRID_EPOCHS=(3 5)
@@ -54,7 +71,7 @@ if (( TASK_ID >= NUM_COMBOS )); then
 fi
 
 TMP_IDX=${TASK_ID}
-LR_IDX=$(( TMP_IDX % NUM_LRS ));  TMP_IDX=$(( TMP_IDX / NUM_LRS ))
+LR_IDX=$(( TMP_IDX % NUM_LRS ));    TMP_IDX=$(( TMP_IDX / NUM_LRS ))
 EPOCH_IDX=$(( TMP_IDX % NUM_EPOCHS )); TMP_IDX=$(( TMP_IDX / NUM_EPOCHS ))
 LAMBDA_IDX=${TMP_IDX}
 
@@ -63,7 +80,7 @@ EPOCH=${GRID_EPOCHS[$EPOCH_IDX]}
 LR=${GRID_LRS[$LR_IDX]}
 
 echo "============================================"
-echo "Confuse5 Grid – combo ${TASK_ID}"
+echo "Confuse5 Grid – combo ${TASK_ID} on $(hostname)"
 echo "  lambda=${LAMBDA}  epochs=${EPOCH}  lr=${LR}"
 echo "============================================"
 
@@ -72,7 +89,10 @@ MODEL_NAME="barrier-c5-lam${LAMBDA}-ep${EPOCH}-lr${LR}"
 
 python scapre/train.py \
     --benchmark confuse5 \
-    --imagenet_root /datasets/ImageNet \
+    --imagenet_root "$SCRATCH/data/ImageNet" \
+    --ckpt_path "$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt" \
+    --config_path configs/stable-diffusion/v1-intact.yaml \
+    --diffusers_config_path diffusers_unet_config.json \
     --base_method rl \
     --lr "$LR" \
     --epochs "$EPOCH" \
@@ -83,11 +103,11 @@ python scapre/train.py \
     --infinity_scale 18.0 \
     --use_actual_bounds \
     --bounds_fraction 0.5 \
-    --model_save_dir "${RESULTS_ROOT}/models/scapre-c5-grid"
+    --model_save_dir "$RESULTS_BASE/grid-models"
 
-CKPT=$(find "${RESULTS_ROOT}/models/scapre-c5-grid/${MODEL_NAME}" -name "diffusers-*.pt" 2>/dev/null | head -1)
+CKPT=$(ls "$RESULTS_BASE/grid-models/$MODEL_NAME"/diffusers-*.pt 2>/dev/null | head -1)
 if [ -z "$CKPT" ]; then
-    echo "ERROR: No diffusers checkpoint found"
+    echo "ERROR: No checkpoint found for $MODEL_NAME"
     exit 1
 fi
 echo "Checkpoint: $CKPT"
@@ -96,9 +116,9 @@ echo "Checkpoint: $CKPT"
 python scapre/evaluate.py \
     --benchmark confuse5 \
     --ckpt_name "$CKPT" \
-    --output_dir "${RESULTS_ROOT}/results/scapre-c5-grid/${MODEL_NAME}" \
+    --output_dir "$RESULTS_BASE/grid-results/$MODEL_NAME" \
     --coco_prompts_source scapre/datasets/coco_30k.csv \
     --coco_max_images 5000 \
     --max_prompts_per_concept 100
 
-echo "Confuse5 grid combo ${TASK_ID} complete."
+echo "Confuse5 grid combo ${TASK_ID} (${MODEL_NAME}) done."
