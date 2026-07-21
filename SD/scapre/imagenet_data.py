@@ -122,6 +122,21 @@ class ImageNetClassSubset(Dataset):
         return self.full_ds[self.indices[idx]]
 
 
+def ensure_imagenet(imagenet_root: str):
+    """
+    Download ImageNet-1K via torchvision if train/ dir doesn't exist or is empty.
+    """
+    train_dir = os.path.join(imagenet_root, "train")
+    if os.path.isdir(train_dir) and any(os.scandir(train_dir)):
+        print(f"ImageNet-1K found at {imagenet_root}")
+        return
+
+    print(f"ImageNet-1K not found at {imagenet_root}. Downloading (~150GB, no progress bar)...")
+    from torchvision.datasets import ImageNet
+    ImageNet(root=imagenet_root, split="train", download=True)
+    print("ImageNet-1K download complete.")
+
+
 def make_forget_remain_dataloaders(
     imagenet_root: str,
     forget_concepts: List[str],
@@ -140,17 +155,7 @@ def make_forget_remain_dataloaders(
     train_dir_path = Path(train_dir)
 
     if not train_dir_path.exists() or not any(train_dir_path.iterdir()):
-        raise FileNotFoundError(
-            f"ImageNet-1K not found at {imagenet_root}\n"
-            f"  Expected: {train_dir}/\n"
-            f"  To download ImageNet-1K:\n"
-            f"    mkdir -p {imagenet_root}\n"
-            f"    export HF_HUB_ENABLE_HF_TRANSFER=1\n"
-            f"    huggingface-cli download ILSVRC/imagenet-1k "
-            f"--repo-type dataset --local-dir {imagenet_root}\n"
-            f"  Or symlink an existing copy:\n"
-            f"    ln -s /path/to/imagenet {imagenet_root}"
-        )
+        ensure_imagenet(imagenet_root)
 
     transform = get_transform(image_size)
     name_to_idx, categories = build_imagenet_class_index(imagenet_root)
