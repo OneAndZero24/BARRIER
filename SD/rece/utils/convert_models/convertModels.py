@@ -201,6 +201,16 @@ def assign_to_checkpoint(
 
 
 def conv_attn_to_linear(checkpoint):
+    _ATTN_RENAME = {
+        "query.weight": "to_q.weight",
+        "query.bias": "to_q.bias",
+        "key.weight": "to_k.weight",
+        "key.bias": "to_k.bias",
+        "value.weight": "to_v.weight",
+        "value.bias": "to_v.bias",
+        "proj_attn.weight": "to_out.0.weight",
+        "proj_attn.bias": "to_out.0.bias",
+    }
     keys = list(checkpoint.keys())
     attn_keys = ["query.weight", "key.weight", "value.weight"]
     for key in keys:
@@ -210,6 +220,10 @@ def conv_attn_to_linear(checkpoint):
         elif "proj_attn.weight" in key:
             if checkpoint[key].ndim > 2:
                 checkpoint[key] = checkpoint[key][:, :, 0]
+    for old_suffix, new_suffix in _ATTN_RENAME.items():
+        for key in list(checkpoint.keys()):
+            if key.endswith(old_suffix):
+                checkpoint[key.replace(old_suffix, new_suffix)] = checkpoint.pop(key)
 
 
 def create_unet_diffusers_config(original_config, image_size: int):
