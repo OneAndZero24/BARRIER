@@ -732,7 +732,7 @@ def _load_coco_captions(n=10000, seed=42, coco_ann_path=None):
         log.info("Loading MS-COCO captions from HuggingFace …")
         ds = load_dataset(
             "sayakpaul/coco-30-val-2014",
-            split="test",
+            split="train",
         )
         idxs = rng.choice(len(ds), min(n, len(ds)), replace=False)
         pairs = []
