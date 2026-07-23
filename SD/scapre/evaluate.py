@@ -36,7 +36,7 @@ Usage:
 import json
 import os
 import sys
-from argparse import ArgumentParser
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 import numpy as np
@@ -428,7 +428,7 @@ def _generate_coco_images(pipe, coco_prompts_source: str, output_dir: Path, gpu:
 
 def parse_args():
     p = ArgumentParser(description=__doc__,
-                       formatter_class=ArgumentParser.RawDescriptionHelpFormatter)
+                        formatter_class=RawDescriptionHelpFormatter)
     p.add_argument("--benchmark", type=str, required=True,
                    choices=["diversi50", "confuse5"],
                    help="Which benchmark to evaluate.")
