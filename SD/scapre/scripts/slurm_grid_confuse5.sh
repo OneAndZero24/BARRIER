@@ -103,7 +103,8 @@ python scapre/train.py \
     --infinity_scale 18.0 \
     --use_actual_bounds \
     --bounds_fraction 0.5 \
-    --model_save_dir "$RESULTS_BASE/grid-models"
+    --model_save_dir "$RESULTS_BASE/grid-models" \
+    --model_name "$MODEL_NAME"
 
 CKPT=$(ls "$RESULTS_BASE/grid-models/$MODEL_NAME"/diffusers-*.pt 2>/dev/null | head -1)
 if [ -z "$CKPT" ]; then

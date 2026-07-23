@@ -841,11 +841,12 @@ def convert_ldm_clip_checkpoint(checkpoint):
 
     for key in keys:
         if key.startswith("cond_stage_model.transformer"):
-            text_model_dict[key[len("cond_stage_model.transformer.") :]] = checkpoint[
-                key
-            ]
+            hf_key = key[len("cond_stage_model.transformer.") :]
+            # Drop position_ids — newer Diffusers generates it internally.
+            if hf_key != "text_model.embeddings.position_ids":
+                text_model_dict[hf_key] = checkpoint[key]
 
-    text_model.load_state_dict(text_model_dict)
+    text_model.load_state_dict(text_model_dict, strict=False)
 
     return text_model
 

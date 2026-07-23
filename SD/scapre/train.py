@@ -32,6 +32,7 @@ SD_DIR = SCRIPT_DIR.parent
 
 sys.path.insert(0, str(SD_DIR / "train-scripts"))
 sys.path.insert(0, str(SD_DIR.parent))  # For InTAct
+sys.path.insert(0, str(SD_DIR))         # For LDM
 
 from imagenet_data import (
     DIVERSI50_CONCEPTS,
@@ -98,6 +99,8 @@ def parse_args():
                    default="diffusers_unet_config.json")
     p.add_argument("--device", type=str, default="0")
     p.add_argument("--model_save_dir", type=str, default="models")
+    p.add_argument("--model_name", type=str, default=None,
+                   help="Override auto-generated model name (used for checkpoint save dir)")
 
     return p.parse_args()
 
@@ -254,7 +257,7 @@ def train_imagenet_intact(args):
     model.train()
 
     tgt_tag = compact_target_tag(args.targets)
-    name = f"compvis-intact-{args.base_method}_imagenet_{benchmark}-targets_{tgt_tag}-lambda_{args.lambda_interval}-epochs_{args.epochs}-lr_{args.lr}"
+    name = args.model_name or f"compvis-intact-{args.base_method}_imagenet_{benchmark}-targets_{tgt_tag}-lambda_{args.lambda_interval}-epochs_{args.epochs}-lr_{args.lr}"
 
     # Setup pseudo-prompts for RL
     import random
