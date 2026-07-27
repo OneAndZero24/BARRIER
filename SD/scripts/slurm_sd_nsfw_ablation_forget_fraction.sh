@@ -58,6 +58,19 @@ mkdir -p "$TMPDIR" "$WANDB_DIR"
 RESULTS_BASE="${SCRATCH:-$HOME}/intact/SD/ablation"
 mkdir -p "$RESULTS_BASE"
 
+cleanup() {
+    local rc=$?
+    echo "=== CLEANUP (exit code $rc) ==="
+    rm -f "${TMPCONFIG:-/dev/null}" 2>/dev/null || true
+    if [ -n "${PERJOB_DIR:-}" ] && [ -d "${PERJOB_DIR}" ]; then
+        find "${PERJOB_DIR}" -mindepth 1 -maxdepth 1 -not -name 'metrics.json' \
+            -exec rm -rf {} + 2>/dev/null || true
+        echo "Cleaned per-job dir: ${PERJOB_DIR}"
+    fi
+    exit $rc
+}
+trap cleanup EXIT
+
 echo "Starting forget-fraction ablation on $(hostname)"
 echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-none}"
 
@@ -85,8 +98,9 @@ echo "============================================"
 
 TMPCONFIG="/tmp/sd_nsfw_abl_ff_${SLURM_ARRAY_JOB_ID}_${IDX}.yaml"
 METRICS_OUT="${RESULTS_BASE}/forget_frac_${FRAC_PCT}_seed_${SEED}/metrics.json"
+PERJOB_DIR="$(dirname "${METRICS_OUT}")"
 
-mkdir -p "$(dirname "${METRICS_OUT}")"
+mkdir -p "$PERJOB_DIR"
 
 python - <<PYEOF
 import yaml, os

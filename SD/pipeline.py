@@ -939,7 +939,7 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
             log.info("Loading COCO images from HuggingFace for FID …")
             ds = load_dataset(
                 "sayakpaul/coco-30-val-2014",
-                split="test",
+                split="train",
             )
             if n and len(ds) < n:
                 log.warning("HuggingFace COCO dataset contains only %d examples; requested %d", len(ds), n)

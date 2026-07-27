@@ -52,6 +52,20 @@ mkdir -p "$TMPDIR" "$WANDB_DIR"
 RESULTS_BASE="${SCRATCH:-$HOME}/intact/SD/scapre"
 mkdir -p "$RESULTS_BASE"
 
+cleanup() {
+    local rc=$?
+    echo "=== CLEANUP (exit code $rc) ==="
+    if [ -n "${MODEL_NAME:-}" ]; then
+        rm -rf "${RESULTS_BASE}/grid-models/${MODEL_NAME}" 2>/dev/null || true
+        find "${RESULTS_BASE}/grid-results/${MODEL_NAME}" \
+            -type d \( -name 'diversi50' -o -name 'confuse5' -o -name 'coco' \) \
+            -exec rm -rf {} + 2>/dev/null || true
+        echo "Cleaned model and generated images for: ${MODEL_NAME}"
+    fi
+    exit $rc
+}
+trap cleanup EXIT
+
 # ============================================================================
 # Grid: 4 lambdas x 2 epochs x 3 LRs = 24 combos
 # ============================================================================
