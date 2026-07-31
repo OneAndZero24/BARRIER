@@ -664,7 +664,11 @@ class Diffusion(object):
             reduced_dim=getattr(config.training, 'reduced_dim', 32),
             infinity_scale=getattr(config.training, 'infinity_scale', 20.0),
             use_actual_bounds=getattr(config.training, 'use_actual_bounds', False),
-            normalize_protection=getattr(config.training, 'normalize_protection', True)
+            normalize_protection=getattr(config.training, 'normalize_protection', True),
+            skip_svd=getattr(config.training, 'skip_svd', False),
+            skip_interval=getattr(config.training, 'skip_interval', False),
+            remove_top_directions=getattr(config.training, 'remove_top_directions', False),
+            decomp_method=getattr(config.training, 'decomp_method', 'svd'),
         )
         
         logging.info("Setting up InTAct protection...")

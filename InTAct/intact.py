@@ -63,6 +63,22 @@ class UnlearnIntervalProtection:
         infinity_scale: float = 20.0,
         use_actual_bounds: bool = False,
         normalize_protection: bool = True,  # Normalize protection loss by number of layers
+
+        # --- Ablation / experiment flags ------------------------------------
+        # skip_svd:   no SVD at all — protect on raw activation space (per-dim
+        #             quantile intervals, no dimensionality reduction).
+        # skip_interval:  keep SVD but skip U_forget interval protection
+        #             (only penalise U_residual + mu drift).
+        # remove_top_directions:  compute SVD, discard top-k U_forget entirely
+        #             (empty), keep only U_residual + mu.  No intervals.
+        #             Conceptually: "remove top-k subspace, keep the rest".
+        # decomp_method:  "svd" (torch.linalg.svd) or "pca" (torch.linalg.eigh
+        #             on the covariance matrix).  Only meaningful when
+        #             skip_svd=False and remove_top_directions=False.
+        skip_svd: bool = False,
+        skip_interval: bool = False,
+        remove_top_directions: bool = False,
+        decomp_method: str = "svd",
     ):
         self.targets = targets
         self.lambda_interval = lambda_interval
@@ -72,6 +88,18 @@ class UnlearnIntervalProtection:
         self.infinity_scale = infinity_scale
         self.use_actual_bounds = use_actual_bounds
         self.normalize_protection = normalize_protection
+
+        self.skip_svd = skip_svd
+        self.skip_interval = skip_interval
+        self.remove_top_directions = remove_top_directions
+        self.decomp_method = decomp_method.lower()
+        if self.decomp_method not in ("svd", "pca"):
+            raise ValueError(f"decomp_method must be 'svd' or 'pca', got '{decomp_method}'")
+        # Precedence: skip_svd > remove_top_directions > skip_interval
+        if self.skip_svd and (self.skip_interval or self.remove_top_directions):
+            log.warning("skip_svd=True overrides skip_interval/remove_top_directions.")
+        if self.remove_top_directions and self.skip_interval:
+            log.warning("remove_top_directions=True overrides skip_interval.")
 
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}  # Only target layer parameters
@@ -135,20 +163,69 @@ class UnlearnIntervalProtection:
                 )
                 acts_gpu = torch.nan_to_num(acts_gpu, nan=0.0, posinf=0.0, neginf=0.0)
             
-            # Centered SVD
             mu = acts_gpu.mean(dim=0)
             Xc = acts_gpu - mu
-            _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
-            
-            k = min(self.reduced_dim, Vh.size(0))
-            U_forget = Vh[:k] 
-            U_residual = Vh[k:]
-            S_residual = S[k:]
 
-            # Define the Forget Box in centered PCA space
-            Z_forget = Xc @ U_forget.T
-            z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)
-            z_max = torch.quantile(Z_forget, self.upper_percentile, dim=0)
+            if self.skip_svd:
+                if self.decomp_method == "pca":
+                    decomp_tag = "pca"
+                else:
+                    decomp_tag = "svd"
+
+                z_min = torch.quantile(Xc, self.lower_percentile, dim=0)
+                z_max = torch.quantile(Xc, self.upper_percentile, dim=0)
+
+                U_forget = torch.eye(mu.size(0), device=mu.device, dtype=mu.dtype)
+                U_residual = torch.empty(0, mu.size(0), device=mu.device, dtype=mu.dtype)
+                S_residual = torch.empty(0, device=mu.device, dtype=mu.dtype)
+                Z_forget = Xc  # raw centred data — not used further
+
+                inf_low = z_min - self.infinity_scale
+                inf_high = z_max + self.infinity_scale
+            elif self.decomp_method == "pca":
+                decomp_tag = "pca"
+                C = (Xc.T @ Xc) / max(Xc.size(0) - 1, 1)
+                eigenvalues, V = torch.linalg.eigh(C)
+                eigenvalues = eigenvalues.flip(0)
+                V = V.T.flip(0)
+
+                k = min(self.reduced_dim, V.size(0))
+                U_forget = V[:k]
+                U_residual = V[k:]
+                S_residual = eigenvalues[k:].sqrt()
+
+                Z_forget = Xc @ U_forget.T
+                z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)
+                z_max = torch.quantile(Z_forget, self.upper_percentile, dim=0)
+
+                inf_low = z_min - self.infinity_scale
+                inf_high = z_max + self.infinity_scale
+            else:
+                decomp_tag = "svd"
+                _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
+
+                k = min(self.reduced_dim, Vh.size(0))
+                U_forget = Vh[:k]
+                U_residual = Vh[k:]
+                S_residual = S[k:]
+
+                Z_forget = Xc @ U_forget.T
+                z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)
+                z_max = torch.quantile(Z_forget, self.upper_percentile, dim=0)
+
+                inf_low = z_min - self.infinity_scale
+                inf_high = z_max + self.infinity_scale
+
+            # --- Post-processing: remove top-k SVD directions if requested ---
+            # Discards U_forget (empty) and its intervals; only U_residual + mu
+            # remain.  The loss will skip all interval terms.
+            if self.remove_top_directions and not self.skip_svd:
+                U_forget = torch.empty(0, mu.size(0), device=mu.device, dtype=mu.dtype)
+                z_min = torch.empty(0, device=mu.device, dtype=mu.dtype)
+                z_max = torch.empty(0, device=mu.device, dtype=mu.dtype)
+                inf_low = torch.empty(0, device=mu.device, dtype=mu.dtype)
+                inf_high = torch.empty(0, device=mu.device, dtype=mu.dtype)
+                decomp_tag = decomp_tag + "-rmtop"
             
             # Store PCA components for remain data projection
             pca_components[layer_name] = {
@@ -156,25 +233,18 @@ class UnlearnIntervalProtection:
                 'U_forget': U_forget,
                 'layer_type': layer_type
             }
-            
+
             # Free GPU memory
             del acts_gpu, Xc
-            
-            # Calculate actual bounds from remain+forget if requested
-            if self.use_actual_bounds and remain_dataloader is not None:
-                # Start with forget data bounds
+
+            # Override inf_low/inf_high with actual data range if requested
+            if (self.use_actual_bounds and remain_dataloader is not None
+                    and not self.skip_svd and not self.remove_top_directions):
                 combined_min = Z_forget.min(dim=0)[0]
                 combined_max = Z_forget.max(dim=0)[0]
-                del Z_forget
-                
-                # Will collect and project remain data on-the-fly
-                inf_low = combined_min  # Temporary, will update after remain collection
+                inf_low = combined_min
                 inf_high = combined_max
-            else:
-                # Use scaled bounds (original behavior)
-                inf_low = z_min - self.infinity_scale
-                inf_high = z_max + self.infinity_scale
-                del Z_forget
+            del Z_forget
 
             # Store PCA info (will update inf_low/inf_high after remain collection if needed)
             pca_entry = {
@@ -187,7 +257,8 @@ class UnlearnIntervalProtection:
                 "z_max": z_max.detach().cpu(),
                 "inf_low": inf_low.detach().cpu(),
                 "inf_high": inf_high.detach().cpu(),
-                "layer_type": layer_type
+                "layer_type": layer_type,
+                "decomp_tag": decomp_tag,
             }
             self.pca_info.append(pca_entry)
         
@@ -279,123 +350,141 @@ class UnlearnIntervalProtection:
     def compute_protection_loss(self, model: nn.Module, device) -> torch.Tensor:
         total_loss = torch.tensor(0.0, device=device)
         if not self.pca_info: return total_loss
-        
+
         num_layers = 0
+        # Three mutually-exclusive interval modes:
+        #   skip_svd          → raw-dim intervals  (z_min has same dim as delta_W)
+        #   skip_interval or remove_top_directions  → NO intervals at all
+        #   otherwise         → projected intervals (U_forget-based)
+        # When skip_svd is True it takes precedence: raw intervals are used
+        # regardless of skip_interval / remove_top_directions.
+        _use_raw_intervals = self.skip_svd
+        _no_intervals = (not self.skip_svd) and (self.skip_interval or self.remove_top_directions)
 
         for info in self.pca_info:
             layer_name = info["layer_name"]
             target_layer = self.target_layers.get(layer_name)
-            if target_layer is None: 
+            if target_layer is None:
                 log.warning(f"Target layer {layer_name} not found, skipping protection loss computation.")
                 continue
 
             target_dtype = target_layer.weight.dtype if target_layer.weight is not None else torch.float32
-            
+
             mu = info["mu"].to(device=device, dtype=target_dtype)
             Uf = info["U_forget"].to(device=device, dtype=target_dtype)
             Ur = info["U_residual"].to(device=device, dtype=target_dtype)
             Sr = info["S_residual"].to(device=device, dtype=target_dtype)
-            z_min, z_max = info["z_min"].to(device=device, dtype=target_dtype), info["z_max"].to(device=device, dtype=target_dtype)
+            z_min = info["z_min"].to(device=device, dtype=target_dtype)
+            z_max = info["z_max"].to(device=device, dtype=target_dtype)
             inf_low = info["inf_low"].to(device=device, dtype=target_dtype)
             inf_high = info["inf_high"].to(device=device, dtype=target_dtype)
 
             w_name = self.param_to_name[target_layer.weight]
             b_name = self.param_to_name[target_layer.bias] if target_layer.bias is not None else None
-            
-            # Move snapshots to GPU only when needed for computation
+
             delta_W_raw = target_layer.weight - self.params_snapshot[w_name].to(device=device, dtype=target_dtype)
             delta_b = (target_layer.bias - self.params_snapshot[b_name].to(device=device, dtype=target_dtype)) if b_name else None
-            
+
             if isinstance(target_layer, nn.Conv2d):
+                C_out, C_in, kH, kW = delta_W_raw.shape
                 mu_spatial = mu.view(1, -1, 1, 1)
-                
+
                 num_layers += 1
                 layer_loss = torch.tensor(0.0, device=device, dtype=target_dtype)
-                
+
                 mean_response = torch.nn.functional.conv2d(
-                    mu_spatial, delta_W_raw, 
+                    mu_spatial, delta_W_raw,
                     bias=delta_b,
-                    stride=target_layer.stride, 
+                    stride=target_layer.stride,
                     padding=target_layer.padding,
                     dilation=target_layer.dilation,
-                    groups=target_layer.groups
+                    groups=target_layer.groups,
                 )
                 layer_loss = layer_loss + mean_response.pow(2).mean()
 
                 if Ur.size(0) > 0:
                     Ur_spatial = Ur.view(Ur.size(0), -1, 1, 1)
-                    
                     residual_responses = torch.nn.functional.conv2d(
                         Ur_spatial, delta_W_raw,
                         stride=target_layer.stride,
                         padding=target_layer.padding,
                         dilation=target_layer.dilation,
-                        groups=target_layer.groups
+                        groups=target_layer.groups,
                     )
-                    
                     weighted_responses = residual_responses * Sr.view(-1, 1, 1, 1)
-                    # Normalize by number of activations (output elements)
                     num_activations = weighted_responses.numel()
                     layer_loss = layer_loss + torch.norm(weighted_responses, p='fro').pow(2) / num_activations
 
-                Uf_spatial = Uf.view(Uf.size(0), -1, 1, 1)
-                
-                forget_responses = torch.nn.functional.conv2d(
-                    Uf_spatial, delta_W_raw,
-                    stride=target_layer.stride,
-                    padding=target_layer.padding,
-                    dilation=target_layer.dilation,
-                    groups=target_layer.groups
-                )
-                
-                delta_f = forget_responses.view(Uf.size(0), -1).T
-                
-                dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+                # --- Interval protection ---
+                if not _no_intervals:
+                    if _use_raw_intervals:
+                        delta_W_flat = delta_W_raw.permute(0, 2, 3, 1).reshape(C_out, C_in * kH * kW)
+                        delta_f = delta_W_flat
+                        _z_min = z_min.repeat_interleave(kH * kW)
+                        _z_max = z_max.repeat_interleave(kH * kW)
+                        _inf_low = inf_low.repeat_interleave(kH * kW)
+                        _inf_high = inf_high.repeat_interleave(kH * kW)
+                    else:
+                        Uf_spatial = Uf.view(Uf.size(0), -1, 1, 1)
+                        forget_responses = torch.nn.functional.conv2d(
+                            Uf_spatial, delta_W_raw,
+                            stride=target_layer.stride,
+                            padding=target_layer.padding,
+                            dilation=target_layer.dilation,
+                            groups=target_layer.groups,
+                        )
+                        delta_f = forget_responses.view(Uf.size(0), -1).T
+                        _z_min, _z_max = z_min, z_max
+                        _inf_low, _inf_high = inf_low, inf_high
 
-                drift_low_1 = dWp @ inf_low - dWn @ z_min
-                drift_low_2 = dWp @ z_min - dWn @ inf_low
-                
-                drift_high_1 = dWp @ z_max - dWn @ inf_high
-                drift_high_2 = dWp @ inf_high - dWn @ z_max
+                    dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+                    drift_low_1 = dWp @ _inf_low - dWn @ _z_min
+                    drift_low_2 = dWp @ _z_min - dWn @ _inf_low
+                    drift_high_1 = dWp @ _z_max - dWn @ _inf_high
+                    drift_high_2 = dWp @ _inf_high - dWn @ _z_max
+                    layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
+                    layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
 
-                layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
-                layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
-                
             elif isinstance(target_layer, nn.Linear):
                 delta_W = delta_W_raw
                 num_layers += 1
                 layer_loss = torch.tensor(0.0, device=device, dtype=target_dtype)
 
                 db = delta_b if delta_b is not None else torch.tensor(0.0, device=device, dtype=target_dtype)
-                
+
                 global_shift = torch.matmul(delta_W, mu) + db
                 layer_loss = layer_loss + global_shift.pow(2).mean()
 
                 if Ur.size(0) > 0:
                     interference = delta_W @ Ur.T
                     weighted_interference = interference * Sr.unsqueeze(0)
-                    # Normalize by number of activations (output elements)
                     num_activations = weighted_interference.numel()
                     layer_loss = layer_loss + torch.norm(weighted_interference, p='fro').pow(2) / num_activations
 
-                delta_f = delta_W @ Uf.T
-                dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+                # --- Interval protection ---
+                if not _no_intervals:
+                    if _use_raw_intervals:
+                        delta_f = delta_W
+                        _z_min, _z_max = z_min, z_max
+                        _inf_low, _inf_high = inf_low, inf_high
+                    else:
+                        delta_f = delta_W @ Uf.T
+                        _z_min, _z_max = z_min, z_max
+                        _inf_low, _inf_high = inf_low, inf_high
 
-                drift_low_1 = dWp @ inf_low - dWn @ z_min
-                drift_low_2 = dWp @ z_min - dWn @ inf_low
-                
-                drift_high_1 = dWp @ z_max - dWn @ inf_high
-                drift_high_2 = dWp @ inf_high - dWn @ z_max
-
-                layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
-                layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+                    dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+                    drift_low_1 = dWp @ _inf_low - dWn @ _z_min
+                    drift_low_2 = dWp @ _z_min - dWn @ _inf_low
+                    drift_high_1 = dWp @ _z_max - dWn @ _inf_high
+                    drift_high_2 = dWp @ _inf_high - dWn @ _z_max
+                    layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
+                    layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
             else:
                 log.warning(f"Unknown layer type {type(target_layer)} for {layer_name}, skipping")
                 continue
-            
+
             total_loss = total_loss + layer_loss
 
-        # Normalize by number of layers if requested
         if self.normalize_protection and num_layers > 0:
             total_loss = total_loss / num_layers
 
