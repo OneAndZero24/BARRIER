@@ -697,6 +697,11 @@ class Diffusion(object):
             ema_helper = EMAHelper(mu=config.model.ema_rate)
             ema_helper.register(model)
         
+        ref_model = copy.deepcopy(model.module if hasattr(model, 'module') else model)
+        ref_model.eval()
+        for p in ref_model.parameters():
+            p.requires_grad_(False)
+
         model.train()
         start = time.time()
         for step in range(config.training.n_iters):
@@ -730,6 +735,14 @@ class Diffusion(object):
                 )
                 pseudo = model(forget_x_noisy, t.float(), pseudo_c, mode="train").detach()
                 forget_loss = criteria(pseudo, output)
+            elif args.method == "kl":
+                # KL Divergence: maximize MSE from frozen original model predictions
+                a = (1 - b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                forget_x_noisy = forget_x * a.sqrt() + e * (1.0 - a).sqrt()
+                with torch.no_grad():
+                    ref_output = ref_model(forget_x_noisy, t.float(), forget_c, mode="train")
+                output = model(forget_x_noisy, t.float(), forget_c, mode="train")
+                forget_loss = -criteria(output, ref_output)
             else:
                 # Default: Gradient Ascent
                 forget_loss = -loss_registry_conditional[config.model.type](
