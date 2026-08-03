@@ -122,19 +122,49 @@ class ImageNetClassSubset(Dataset):
         return self.full_ds[self.indices[idx]]
 
 
+IMAGENET_URL = "https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_train.tar"
+
+
 def ensure_imagenet(imagenet_root: str):
     """
-    Download ImageNet-1K via torchvision if train/ dir doesn't exist or is empty.
+    Download and extract ImageNet-1K train split into:
+        {imagenet_root}/train/n01440764/*.JPEG
+        {imagenet_root}/train/n02123045/*.JPEG
     """
+    import subprocess
+    import tarfile
+
     train_dir = os.path.join(imagenet_root, "train")
     if os.path.isdir(train_dir) and any(os.scandir(train_dir)):
         print(f"ImageNet-1K found at {imagenet_root}")
         return
 
-    print(f"ImageNet-1K not found at {imagenet_root}. Downloading (~150GB, no progress bar)...")
-    from torchvision.datasets import ImageNet
-    ImageNet(root=imagenet_root, split="train", download=True)
-    print("ImageNet-1K download complete.")
+    tar_path = os.path.join(imagenet_root, "ILSVRC2012_img_train.tar")
+    os.makedirs(imagenet_root, exist_ok=True)
+
+    if not os.path.exists(tar_path):
+        print(f"Downloading ImageNet-1K from {IMAGENET_URL} (~138GB)...")
+        subprocess.check_call(
+            ["wget", "-c", "-O", tar_path, IMAGENET_URL],
+        )
+
+    print("Extracting main archive...")
+    with tarfile.open(tar_path) as tf:
+        tf.extractall(path=train_dir, filter="data")
+
+    print("Unpacking class tarballs (this may take a while)...")
+    for fname in sorted(os.listdir(train_dir)):
+        fpath = os.path.join(train_dir, fname)
+        if fname.endswith(".tar"):
+            class_dir = fname[:-4]
+            os.makedirs(os.path.join(train_dir, class_dir), exist_ok=True)
+            with tarfile.open(fpath) as tf:
+                tf.extractall(path=os.path.join(train_dir, class_dir), filter="data")
+            os.remove(fpath)
+
+    os.remove(tar_path)
+    n_classes = sum(1 for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d)))
+    print(f"ImageNet-1K is ready ({n_classes} classes).")
 
 
 def make_forget_remain_dataloaders(
