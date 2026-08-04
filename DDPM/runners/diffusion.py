@@ -698,6 +698,7 @@ class Diffusion(object):
             ema_helper.register(model)
         
         ref_model = copy.deepcopy(model.module if hasattr(model, 'module') else model)
+        ref_model = ref_model.to(self.device)
         ref_model.eval()
         for p in ref_model.parameters():
             p.requires_grad_(False)

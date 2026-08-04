@@ -368,7 +368,10 @@ class UnlearnIntervalProtection:
                 log.warning(f"Target layer {layer_name} not found, skipping protection loss computation.")
                 continue
 
-            target_dtype = target_layer.weight.dtype if target_layer.weight is not None else torch.float32
+            target_weight = getattr(target_layer, 'weight', None)
+            if target_weight is None:
+                continue
+            target_dtype = target_weight.dtype
 
             mu = info["mu"].to(device=device, dtype=target_dtype)
             Uf = info["U_forget"].to(device=device, dtype=target_dtype)
@@ -379,11 +382,12 @@ class UnlearnIntervalProtection:
             inf_low = info["inf_low"].to(device=device, dtype=target_dtype)
             inf_high = info["inf_high"].to(device=device, dtype=target_dtype)
 
-            w_name = self.param_to_name[target_layer.weight]
-            b_name = self.param_to_name[target_layer.bias] if target_layer.bias is not None else None
+            w_name = self.param_to_name[target_weight]
+            target_bias = getattr(target_layer, 'bias', None)
+            b_name = self.param_to_name[target_bias] if target_bias is not None else None
 
-            delta_W_raw = target_layer.weight - self.params_snapshot[w_name].to(device=device, dtype=target_dtype)
-            delta_b = (target_layer.bias - self.params_snapshot[b_name].to(device=device, dtype=target_dtype)) if b_name else None
+            delta_W_raw = target_weight - self.params_snapshot[w_name].to(device=device, dtype=target_dtype)
+            delta_b = (target_bias - self.params_snapshot[b_name].to(device=device, dtype=target_dtype)) if b_name else None
 
             if isinstance(target_layer, nn.Conv2d):
                 C_out, C_in, kH, kW = delta_W_raw.shape

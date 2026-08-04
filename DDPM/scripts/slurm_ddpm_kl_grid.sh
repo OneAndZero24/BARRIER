@@ -87,7 +87,7 @@ cfg["intact"]["targets"] = [
     "attn.0.q", "attn.0.k", "attn.0.v",
     "attn_1.q", "attn_1.k", "attn_1.v",
     "attn.1.q", "attn.1.k", "attn.1.v",
-    "classes_emb", "cemb.dense.0", "cemb.dense.1", "null_classes_emb",
+    "cemb.dense.0", "cemb.dense.1",
 ]
 
 cfg.setdefault("evaluate", {}).setdefault("fid", {})["n_samples_per_class"] = 5000
