@@ -697,7 +697,10 @@ class Diffusion(object):
             ema_helper = EMAHelper(mu=config.model.ema_rate)
             ema_helper.register(model)
         
-        ref_model = copy.deepcopy(model.module if hasattr(model, 'module') else model)
+        base_model = model.module if hasattr(model, 'module') else model
+        ref_model = Conditional_Model(self.config)
+        ref_sd = {k: v.clone().cpu() for k, v in base_model.state_dict().items()}
+        ref_model.load_state_dict(ref_sd)
         ref_model = ref_model.to(self.device)
         ref_model.eval()
         for p in ref_model.parameters():
