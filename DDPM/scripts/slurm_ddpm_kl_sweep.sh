@@ -19,7 +19,7 @@ set -euo pipefail
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate salun-ddpm
 cd $HOME/InTAct-Unl/DDPM
-export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
+export PYTHONPATH=${PYTHONPATH:-}:/home/miksa/InTAct-Unl/
 
 # Redirect caches to avoid home quota issues
 export HF_HOME="/shared/results/common/miksa/.cache/huggingface"
