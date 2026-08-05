@@ -697,16 +697,14 @@ class Diffusion(object):
             ema_helper = EMAHelper(mu=config.model.ema_rate)
             ema_helper.register(model)
         
-        base_model = model.module if hasattr(model, 'module') else model
         ref_model = Conditional_Model(config)
         ckpt_state = torch.load(
             os.path.join(args.ckpt_folder, "ckpts/ckpt.pth"),
-            map_location=self.device,
+            map_location='cpu',
         )
         ckpt_raw = ckpt_state[0]
         if any(k.startswith('module.') for k in ckpt_raw.keys()):
             ckpt_raw = {k.replace('module.', '', 1): v for k, v in ckpt_raw.items()}
-        ref_model = Conditional_Model(config)
         ref_model.load_state_dict(ckpt_raw, strict=True)
         ref_model = ref_model.to(self.device)
         ref_model.eval()
@@ -720,6 +718,7 @@ class Diffusion(object):
             forget_x, forget_c = next(D_forget_iter)
             n = forget_x.size(0)
             forget_x = forget_x.to(self.device)
+            forget_c = forget_c.to(self.device)
             forget_x = data_transform(self.config, forget_x)
             e = torch.randn_like(forget_x)
             b = self.betas
