@@ -429,7 +429,10 @@ def compute_fid_sd(class_to_forget, images_dir, image_size=512, max_real=None, m
     spec.loader.exec_module(eval_dataset)
     setup_fid_data = eval_dataset.setup_fid_data
     
-    from torchmetrics.image.fid import FID
+    try:
+        from torchmetrics.image.fid import FID
+    except ImportError:
+        from torchmetrics.image import FrechetInceptionDistance as FID
 
     fid = FID(feature=64)
     real_set, fake_set = setup_fid_data(class_to_forget, images_dir, image_size)
@@ -857,8 +860,11 @@ def compute_fid_coco(generated_images_dir, coco_images_dir=None,
     try:
         from torchmetrics.image.fid import FID
     except ImportError:
-        log.warning("torchmetrics not installed, cannot compute FID")
-        return None
+        try:
+            from torchmetrics.image import FrechetInceptionDistance as FID
+        except ImportError:
+            log.warning("torchmetrics not installed, cannot compute FID")
+            return None
 
     transform = _fid_transform(image_size)
     fid = FID(feature=feature)
@@ -1130,7 +1136,10 @@ def compute_fid_nsfw(probe_images_dir, not_nsfw_data_path, image_size=512,
 
     Images are processed **in batches** to keep memory usage bounded.
     """
-    from torchmetrics.image.fid import FID
+    try:
+        from torchmetrics.image.fid import FID
+    except ImportError:
+        from torchmetrics.image import FrechetInceptionDistance as FID
 
     transform = _fid_transform(image_size)
     fid = FID(feature=64)
