@@ -698,11 +698,13 @@ class Diffusion(object):
             ema_helper.register(model)
         
         base_model = model.module if hasattr(model, 'module') else model
-        import io
-        buf = io.BytesIO()
-        torch.save(base_model, buf)
-        buf.seek(0)
-        ref_model = torch.load(buf, map_location=self.device)
+        ref_model = Conditional_Model(config)
+        ckpt_state = torch.load(
+            os.path.join(args.ckpt_folder, "ckpts/ckpt.pth"),
+            map_location=self.device,
+        )
+        ref_model.load_state_dict(ckpt_state[0], strict=True)
+        ref_model = ref_model.to(self.device)
         ref_model.eval()
         for p in ref_model.parameters():
             p.requires_grad_(False)
