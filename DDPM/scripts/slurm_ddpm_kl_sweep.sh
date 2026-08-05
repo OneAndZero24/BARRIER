@@ -29,6 +29,15 @@ export WANDB_DIR="/shared/results/common/miksa/.cache/wandb"
 
 echo "Starting KL bayesian sweep (50 runs) on $(hostname)"
 
-wandb agent $(wandb sweep configs/sweep_kl_bayes.yaml 2>/dev/null | grep -o 'wandb agent .*') --count 50
+SWEEP_OUT=$(wandb sweep configs/sweep_kl_bayes.yaml 2>&1)
+echo "$SWEEP_OUT"
+SWEEP_ID=$(echo "$SWEEP_OUT" | grep -oP 'wandb agent \K\S+')
+if [ -z "$SWEEP_ID" ]; then
+    echo "ERROR: could not parse sweep ID"
+    exit 1
+fi
+echo "Sweep ID: $SWEEP_ID"
+
+wandb agent "$SWEEP_ID" --count 50
 
 echo "KL sweep done."
