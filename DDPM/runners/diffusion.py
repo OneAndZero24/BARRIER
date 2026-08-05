@@ -703,7 +703,11 @@ class Diffusion(object):
             os.path.join(args.ckpt_folder, "ckpts/ckpt.pth"),
             map_location=self.device,
         )
-        ref_model.load_state_dict(ckpt_state[0], strict=True)
+        ckpt_raw = ckpt_state[0]
+        if any(k.startswith('module.') for k in ckpt_raw.keys()):
+            ckpt_raw = {k.replace('module.', '', 1): v for k, v in ckpt_raw.items()}
+        ref_model = Conditional_Model(config)
+        ref_model.load_state_dict(ckpt_raw, strict=True)
         ref_model = ref_model.to(self.device)
         ref_model.eval()
         for p in ref_model.parameters():
