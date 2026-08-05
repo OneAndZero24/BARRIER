@@ -641,6 +641,7 @@ class Diffusion(object):
         )
         D_forget_iter = cycle(D_forget_loader)
         
+        D_remain_iter = cycle(D_remain_loader)
         mask = torch.load(args.mask_path) if args.mask_path else None
         
         model = Conditional_Model(config)
@@ -714,6 +715,20 @@ class Diffusion(object):
         model.train()
         start = time.time()
         for step in range(config.training.n_iters):
+            b = self.betas
+
+            # === REMAIN STAGE ===
+            remain_x, remain_c = next(D_remain_iter)
+            n_r = remain_x.size(0)
+            remain_x = remain_x.to(self.device)
+            remain_x = data_transform(self.config, remain_x)
+            e_r = torch.randn_like(remain_x)
+            t_r = torch.randint(low=0, high=self.num_timesteps, size=(n_r // 2 + 1,)).to(self.device)
+            t_r = torch.cat([t_r, self.num_timesteps - t_r - 1], dim=0)[:n_r]
+            remain_loss = loss_registry_conditional[config.model.type](
+                model, remain_x, t_r, remain_c, e_r, b
+            )
+
             # === FORGET STAGE ===
             forget_x, forget_c = next(D_forget_iter)
             n = forget_x.size(0)
@@ -721,7 +736,6 @@ class Diffusion(object):
             forget_c = forget_c.to(self.device)
             forget_x = data_transform(self.config, forget_x)
             e = torch.randn_like(forget_x)
-            b = self.betas
             
             t = torch.randint(low=0, high=self.num_timesteps, size=(n // 2 + 1,)).to(self.device)
             t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
@@ -763,13 +777,14 @@ class Diffusion(object):
             protection_loss = protection.compute_protection_loss(model, self.device)
             
             # === COMBINED LOSS ===
-            loss = forget_loss + protection_loss
+            loss = forget_loss + args.alpha * remain_loss + protection_loss
             
             # Logging
             if (step + 1) % self.config.training.log_freq == 0:
                 end = time.time()
                 logging.info(
                     f"step: {step}, forget_loss: {forget_loss.item():.4f}, "
+                    f"remain_loss: {remain_loss.item():.4f}, "
                     f"protection_loss: {protection_loss.item():.4f}, "
                     f"total_loss: {loss.item():.4f}, time: {end-start:.2f}s"
                 )
