@@ -118,6 +118,11 @@ cfg["intact"]["lambda_interval"] = 10.0
 cfg["intact"]["reduced_dim"]     = 64
 cfg["intact"]["use_actual_bounds"] = True
 
+# Restrict to block 2 only
+cfg["intact"]["target_blocks"] = [2]
+cfg["intact"]["target_layers"] = ["attn2.to_q", "attn2.to_k", "attn2.to_v"]
+cfg["intact"].pop("targets", None)
+
 suffix = f"remain_frac_${FRAC_PCT}_seed_${SEED}"
 cfg["paths"]["sd_ckpt"]         = "$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
 cfg["paths"]["output_dir"]      = os.path.join("${RESULTS_BASE}", suffix)
