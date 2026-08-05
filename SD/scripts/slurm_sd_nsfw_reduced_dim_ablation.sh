@@ -4,7 +4,7 @@
 # ============================================================================
 # Varies: reduced_dim in {8, 16, 32, 64, 128}, seed in {42, 1, 2}
 # Fixed:  lambda=10.0, lr=5e-6, epochs=5, Adam, base_method=nsfw,
-#         targets=[attn2.to_q, attn2.to_k, attn2.to_v]
+#         block 2 only, layers=[attn2.to_q, attn2.to_k, attn2.to_v]
 #
 # Outputs per job: metrics JSON via --metrics-out
 #
@@ -115,6 +115,11 @@ cfg["unlearn"]["lr"]     = 5e-6
 cfg["unlearn"]["epochs"] = 5
 cfg["intact"]["lambda_interval"] = 10.0
 
+# Restrict to block 2 only (remove broad targets, use target_blocks + target_layers)
+cfg["intact"]["target_blocks"] = [2]
+cfg["intact"]["target_layers"] = ["attn2.to_q", "attn2.to_k", "attn2.to_v"]
+cfg["intact"].pop("targets", None)
+
 # Override paths for Helios
 cfg["paths"]["sd_ckpt"]         = "$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
 cfg["paths"]["output_dir"]      = "${RESULTS_BASE}/reduced_dim_${DIM}_seed_${SEED}"
@@ -124,8 +129,8 @@ cfg["paths"]["nsfw_data"]       = "$SCRATCH/data/nsfw"
 cfg["paths"]["not_nsfw_data"]   = "$SCRATCH/data/not-nsfw"
 
 # Tag the wandb run
-cfg["wandb"]["tags"].append("reduced_dim_ablation")
-cfg["wandb"]["group"] = "nsfw-abl-reduced-dim"
+cfg["wandb"]["tags"].append("reduced_dim_ablation_blk2")
+cfg["wandb"]["group"] = "nsfw-abl-reduced-dim-blk2"
 
 with open("${TMPCONFIG}", "w") as f:
     yaml.dump(cfg, f, default_flow_style=False)

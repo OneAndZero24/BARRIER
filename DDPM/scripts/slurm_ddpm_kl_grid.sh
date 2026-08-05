@@ -2,8 +2,15 @@
 # ============================================================================
 # SLURM Array Job – DDPM CIFAR-10 InTAct KL Div Grid (KL Divergence)
 # ============================================================================
-# Grid over lambda_interval values.  Fixed: lr=1e-4, n_iters=3000, reduced_dim=32,
-# targets: Self-attn QKV + class_embed.
+# Full hyperparameter sweep:
+#   lr              in {5e-5, 1e-4, 5e-4, 1e-3}
+#   n_iters         in {1000, 3000, 5000}
+#   lambda_interval in {0.5, 1.0, 5.0, 10.0, 50.0}
+#   reduced_dim     in {16, 32, 64, 128}
+#
+# Total: 4 × 3 × 5 × 4 = 240 jobs
+# Fixed:  method=kl, targets=QKV+cemb, use_actual_bounds=true,
+#         lower=0.05, upper=0.95, inf_scale=20.0, norm_prot=true
 #
 # Usage:
 #   cd DDPM
@@ -16,7 +23,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --partition=dgxa100
-#SBATCH --array=0-4
+#SBATCH --array=0-239
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -26,27 +33,45 @@ export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 
 # ---- Fixed setup ----
 FORGET_CLASS=0
-LR=1e-4
-NITERS=3000
 METHOD="kl"
 USE_ACTUAL_BOUNDS=true
-REDUCED_DIM=32
 NORMALIZE_PROTECTION=true
 INF_SCALE=20.0
 LOWER=0.05
 UPPER=0.95
 
-# ---- Grid: lambda_interval sweep ----
-LAMBDAS=(0.5 1.0 5.0 10.0 50.0)
+# ---- Grid axes ----
+LRS=(5e-5 1e-4 5e-4 1e-3)       # 4
+NITERS_VALS=(1000 3000 5000)      # 3
+LAMBDAS=(0.5 1.0 5.0 10.0 50.0)  # 5
+REDUCED_DIMS=(16 32 64 128)       # 4
 
+# ---- Index mapping: IDX = lidx*(3*5*4) + nidx*(5*4) + lamidx*4 + didx ----
 IDX=${SLURM_ARRAY_TASK_ID}
-LAMBDA=${LAMBDAS[$IDX]}
+
+N_NITERS=3
+N_LAMBDA=5
+N_RDIM=4
+STRIDE_NITERS=$(( N_NITERS * N_LAMBDA * N_RDIM ))   # 60
+STRIDE_LAMBDA=$(( N_LAMBDA * N_RDIM ))               # 20
+STRIDE_RDIM=$(( N_RDIM ))                            # 4
+
+LIDX=$(( IDX / STRIDE_NITERS ))
+R1=$(( IDX % STRIDE_NITERS ))
+NIDX=$(( R1 / STRIDE_LAMBDA ))
+R2=$(( R1 % STRIDE_LAMBDA ))
+LAMIDX=$(( R2 / STRIDE_RDIM ))
+DIDX=$(( R2 % STRIDE_RDIM ))
+
+LR=${LRS[$LIDX]}
+NITERS=${NITERS_VALS[$NIDX]}
+LAMBDA=${LAMBDAS[$LAMIDX]}
+REDUCED_DIM=${REDUCED_DIMS[$DIDX]}
 
 echo "============================================"
-echo "DDPM KL Div Grid – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
-echo "  forget_class=${FORGET_CLASS}  lr=${LR}  n_iters=${NITERS}  lambda=${LAMBDA}"
-echo "  method=${METHOD}  reduced_dim=${REDUCED_DIM}"
-echo "  targets: Self-attn QKV + class_embed"
+echo "DDPM KL Grid – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
+echo "  lr=${LR}  n_iters=${NITERS}  lambda=${LAMBDA}  reduced_dim=${REDUCED_DIM}"
+echo "  method=${METHOD}  forget_class=${FORGET_CLASS}"
 echo "============================================"
 
 TMPCONFIG="/tmp/ddpm_kl_grid_${SLURM_ARRAY_JOB_ID}_${IDX}.yaml"
@@ -95,13 +120,13 @@ cfg["evaluate"]["n_samples_per_class"] = 500
 cfg["evaluate"].setdefault("classifier", {})["n_samples_per_class"] = 500
 
 cfg.setdefault("wandb", {})
-cfg["wandb"]["group"] = "cifar10-kl-qkv-cemb-grid"
+cfg["wandb"]["group"] = "cifar10-kl-qkv-cemb-fullsweep"
 cfg["wandb"]["tags"] = list(cfg["wandb"].get("tags", [])) + [
-    "kl", "ablation", "qkv-classemb-grid",
-    f"lambda_{lam}", "lr_1e-4", "iters_3000",
+    "kl", "fullsweep", "qkv-classemb",
+    f"lr_{lr}", f"niters_{niters}", f"lambda_{lam}", f"rdim_{reduced_dim}",
 ]
 
-suffix = f"kl_qkv_cemb_lam{lam}_lr{lr}_ni{niters}"
+suffix = f"kl_lr{lr}_ni{niters}_lam{lam}_rdim{reduced_dim}"
 cfg["paths"]["output_dir"] = os.path.join(cfg["paths"]["output_dir"], suffix)
 cfg["paths"]["checkpoint_dir"] = os.path.join(cfg["paths"]["checkpoint_dir"], suffix)
 
@@ -113,4 +138,4 @@ PYEOF
 
 python pipeline.py --config "${TMPCONFIG}"
 
-echo "KL Div grid job ${IDX} (lambda=${LAMBDA}) complete."
+echo "KL grid job ${IDX} (lr=${LR}, n_iters=${NITERS}, lambda=${LAMBDA}, rdim=${REDUCED_DIM}) complete."

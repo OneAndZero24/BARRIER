@@ -1,0 +1,55 @@
+# ============================================================================
+# wandb bayesian sweep – DDPM CIFAR-10 InTAct GA only  (50 runs)
+# ============================================================================
+# Usage:
+#   cd DDPM
+#   wandb agent $(wandb sweep configs/sweep_ga_bayes.yaml 2>/dev/null | grep -o 'wandb agent .*') --count 50
+# ============================================================================
+
+program: pipeline.py
+method: bayes
+entity: oneandzero24
+project: intact-ddpm
+name: ga-bayes-50
+
+metric:
+  name: UA
+  goal: maximize
+
+early_terminate:
+  type: hyperband
+  min_iter: 10
+  eta: 3
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config
+  - configs/pipeline.yaml
+
+parameters:
+  unlearn.method:
+    value: "ga"
+
+  unlearn.lr:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 1e-2
+
+  unlearn.n_iters:
+    values: [1000, 1500, 2000, 3000, 5000]
+
+  unlearn.batch_size:
+    values: [64, 128, 256]
+
+  intact.lambda_interval:
+    distribution: log_uniform_values
+    min: 0.05
+    max: 100.0
+
+  intact.reduced_dim:
+    values: [8, 16, 32, 64, 128]
+
+  intact.normalize_protection:
+    values: [true, false]

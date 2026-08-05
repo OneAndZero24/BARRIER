@@ -1,0 +1,77 @@
+# ============================================================================
+# wandb bayesian sweep – DDPM CIFAR-10 InTAct (KL + GA)
+# ============================================================================
+# Sweeps all key intact hyperparams. Capped at 50 runs.
+#
+# Usage:
+#   cd DDPM
+#   wandb sweep configs/sweep_klga_bayes.yaml
+#   wandb agent <sweep-id> --count 50
+# ============================================================================
+
+program: pipeline.py
+method: bayes
+entity: oneandzero24
+project: intact-ddpm
+name: klga-bayes-50
+
+metric:
+  name: UA
+  goal: maximize
+
+early_terminate:
+  type: hyperband
+  min_iter: 10
+  eta: 3
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config
+  - configs/pipeline.yaml
+
+parameters:
+  unlearn.method:
+    values: ["kl", "ga"]
+
+  unlearn.lr:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 1e-2
+
+  unlearn.n_iters:
+    values: [1000, 1500, 2000, 3000, 5000]
+
+  unlearn.batch_size:
+    values: [64, 128, 256]
+
+  intact.lambda_interval:
+    distribution: log_uniform_values
+    min: 0.05
+    max: 100.0
+
+  intact.reduced_dim:
+    values: [8, 16, 32, 64, 128]
+
+  intact.lower_percentile:
+    distribution: uniform
+    min: 0.01
+    max: 0.20
+
+  intact.upper_percentile:
+    values: [0.80, 0.85, 0.90, 0.95, 0.99]
+
+  intact.infinity_scale:
+    distribution: log_uniform_values
+    min: 1.0
+    max: 1000.0
+
+  intact.use_actual_bounds:
+    values: [true, false]
+
+  intact.normalize_protection:
+    values: [true, false]
+
+  intact.decomp_method:
+    values: ["svd", "pca"]
