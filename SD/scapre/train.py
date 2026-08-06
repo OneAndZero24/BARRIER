@@ -268,13 +268,15 @@ def train_imagenet_intact(args):
 
     from tqdm import tqdm
     for epoch in range(args.epochs):
+        forget_dl_iter = iter(forget_dl)
+        remain_dl_iter = iter(remain_dl)
         with tqdm(total=len(forget_dl), desc=f"Epoch {epoch}") as pbar:
             for i in range(len(forget_dl)):
                 optimizer.zero_grad()
 
                 try:
-                    forget_images, forget_labels = next(iter(forget_dl))
-                    remain_images, remain_labels = next(iter(remain_dl))
+                    forget_images, forget_labels = next(forget_dl_iter)
+                    remain_images, remain_labels = next(remain_dl_iter)
                 except StopIteration:
                     forget_dl_iter = iter(forget_dl)
                     remain_dl_iter = iter(remain_dl)
