@@ -122,69 +122,25 @@ class ImageNetClassSubset(Dataset):
         return self.full_ds[self.indices[idx]]
 
 
-IMAGENET_URL = "https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_train.tar"
-
-
 def ensure_imagenet(imagenet_root: str):
     """
-    Download and extract ImageNet-1K train split into:
+    Verify ImageNet-1K train split exists at:
         {imagenet_root}/train/n01440764/*.JPEG
         {imagenet_root}/train/n02123045/*.JPEG
     """
-    import subprocess
-    import tarfile
-
     train_dir = os.path.join(imagenet_root, "train")
-    has_class_dirs = os.path.isdir(train_dir) and any(
+    if os.path.isdir(train_dir) and any(
         os.path.isdir(os.path.join(train_dir, e.name))
         for e in os.scandir(train_dir)
-    )
-    if has_class_dirs:
-        print(f"ImageNet-1K found at {imagenet_root}")
+    ):
+        print(f"ImageNet-1K found at {train_dir}")
         return
 
-    tar_path = os.path.join(imagenet_root, "ILSVRC2012_img_train.tar")
-    os.makedirs(imagenet_root, exist_ok=True)
-
-    if os.path.exists(tar_path) and os.path.getsize(tar_path) == 0:
-        print("Existing tar archive is empty, re-downloading...")
-        os.remove(tar_path)
-
-    if not os.path.exists(tar_path):
-        print(f"Downloading ImageNet-1K from {IMAGENET_URL} (~138GB)...")
-        subprocess.check_call(
-            ["wget", "-c", "-O", tar_path, IMAGENET_URL],
-        )
-
-    if os.path.getsize(tar_path) == 0:
-        raise RuntimeError(
-            f"Downloaded tar archive is empty ({tar_path}). "
-            f"ImageNet requires manual download from {IMAGENET_URL} with an account."
-        )
-
-    # Check if main archive was already extracted (class .tar files exist in train/)
-    class_tars = [f for f in os.listdir(train_dir)
-                  if f.endswith(".tar") and os.path.isfile(os.path.join(train_dir, f))]
-    if len(class_tars) < 50:
-        print("Extracting main archive...")
-        with tarfile.open(tar_path) as tf:
-            tf.extractall(path=train_dir, filter="data")
-    else:
-        print(f"Main archive already extracted ({len(class_tars)} class tarballs found).")
-
-    print("Unpacking class tarballs (this may take a while)...")
-    for fname in sorted(os.listdir(train_dir)):
-        fpath = os.path.join(train_dir, fname)
-        if fname.endswith(".tar"):
-            class_dir = fname[:-4]
-            os.makedirs(os.path.join(train_dir, class_dir), exist_ok=True)
-            with tarfile.open(fpath) as tf:
-                tf.extractall(path=os.path.join(train_dir, class_dir), filter="data")
-            os.remove(fpath)
-
-    os.remove(tar_path)
-    n_classes = sum(1 for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d)))
-    print(f"ImageNet-1K is ready ({n_classes} classes).")
+    raise FileNotFoundError(
+        f"ImageNet-1K not found at {train_dir}. "
+        f"Copy it from the HPC with:\n"
+        f"  cp -r /net/storage/pr3/datasets/AI/imagenet/data/train {train_dir}"
+    )
 
 
 def make_forget_remain_dataloaders(
