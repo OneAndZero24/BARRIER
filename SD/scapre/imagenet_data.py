@@ -135,12 +135,20 @@ def ensure_imagenet(imagenet_root: str):
     import tarfile
 
     train_dir = os.path.join(imagenet_root, "train")
-    if os.path.isdir(train_dir) and any(os.scandir(train_dir)):
+    has_class_dirs = os.path.isdir(train_dir) and any(
+        os.path.isdir(os.path.join(train_dir, e.name))
+        for e in os.scandir(train_dir)
+    )
+    if has_class_dirs:
         print(f"ImageNet-1K found at {imagenet_root}")
         return
 
     tar_path = os.path.join(imagenet_root, "ILSVRC2012_img_train.tar")
     os.makedirs(imagenet_root, exist_ok=True)
+
+    if os.path.exists(tar_path) and os.path.getsize(tar_path) == 0:
+        print("Existing tar archive is empty, re-downloading...")
+        os.remove(tar_path)
 
     if not os.path.exists(tar_path):
         print(f"Downloading ImageNet-1K from {IMAGENET_URL} (~138GB)...")
@@ -148,9 +156,21 @@ def ensure_imagenet(imagenet_root: str):
             ["wget", "-c", "-O", tar_path, IMAGENET_URL],
         )
 
-    print("Extracting main archive...")
-    with tarfile.open(tar_path) as tf:
-        tf.extractall(path=train_dir, filter="data")
+    if os.path.getsize(tar_path) == 0:
+        raise RuntimeError(
+            f"Downloaded tar archive is empty ({tar_path}). "
+            f"ImageNet requires manual download from {IMAGENET_URL} with an account."
+        )
+
+    # Check if main archive was already extracted (class .tar files exist in train/)
+    class_tars = [f for f in os.listdir(train_dir)
+                  if f.endswith(".tar") and os.path.isfile(os.path.join(train_dir, f))]
+    if len(class_tars) < 50:
+        print("Extracting main archive...")
+        with tarfile.open(tar_path) as tf:
+            tf.extractall(path=train_dir, filter="data")
+    else:
+        print(f"Main archive already extracted ({len(class_tars)} class tarballs found).")
 
     print("Unpacking class tarballs (this may take a while)...")
     for fname in sorted(os.listdir(train_dir)):
