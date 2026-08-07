@@ -8,7 +8,7 @@
 #   lambda_interval in {0.5, 1.0, 5.0, 10.0, 50.0}
 #   reduced_dim     in {16, 32, 64, 128}
 #
-# Total: 4 × 3 × 5 × 4 = 240 jobs
+# Total: 4 × 1 × 5 × 2 = 40 jobs
 # Fixed:  method=kl, targets=QKV+cemb, use_actual_bounds=true,
 #         lower=0.05, upper=0.95, inf_scale=20.0, norm_prot=true
 #
@@ -23,7 +23,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --partition=dgxa100
-#SBATCH --array=0-239
+#SBATCH --array=0-39
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -42,19 +42,19 @@ UPPER=0.95
 
 # ---- Grid axes ----
 LRS=(5e-5 1e-4 5e-4 1e-3)       # 4
-NITERS_VALS=(1000 3000 5000)      # 3
-LAMBDAS=(0.5 1.0 5.0 10.0 50.0)  # 5
-REDUCED_DIMS=(16 32 64 128)       # 4
+NITERS_VALS=(3000)                # 1
+LAMBDAS=(0.1 0.5 1.0 5.0 10.0)  # 5
+REDUCED_DIMS=(8 32)               # 2
 
-# ---- Index mapping: IDX = lidx*(3*5*4) + nidx*(5*4) + lamidx*4 + didx ----
+# ---- Index mapping: IDX = lidx*(1*5*2) + nidx*(5*2) + lamidx*2 + didx ----
 IDX=${SLURM_ARRAY_TASK_ID}
 
-N_NITERS=3
+N_NITERS=1
 N_LAMBDA=5
-N_RDIM=4
-STRIDE_NITERS=$(( N_NITERS * N_LAMBDA * N_RDIM ))   # 60
-STRIDE_LAMBDA=$(( N_LAMBDA * N_RDIM ))               # 20
-STRIDE_RDIM=$(( N_RDIM ))                            # 4
+N_RDIM=2
+STRIDE_NITERS=$(( N_NITERS * N_LAMBDA * N_RDIM ))   # 10
+STRIDE_LAMBDA=$(( N_LAMBDA * N_RDIM ))               # 10
+STRIDE_RDIM=$(( N_RDIM ))                            # 2
 
 LIDX=$(( IDX / STRIDE_NITERS ))
 R1=$(( IDX % STRIDE_NITERS ))
