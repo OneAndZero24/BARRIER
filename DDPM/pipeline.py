@@ -464,8 +464,8 @@ def main():
             log.warning(f"Skipping TA: class_samples_dir missing")
 
     # 3d: Composite score — weighted UA + TA (for sweep optimization)
-    metrics["score"] = 2.0 * metrics.get("UA", 0.0) + metrics.get("TA", 0.0)
-    log.info(f"  composite score (2*UA+TA) = {metrics['score']:.4f}")
+    metrics["score"] = 10.0 * metrics.get("UA", 0.0) + metrics.get("TA", 0.0)
+    log.info(f"  composite score (10*UA+TA) = {metrics['score']:.4f}")
 
     # =========================================================================
     # Step 4: Log to wandb

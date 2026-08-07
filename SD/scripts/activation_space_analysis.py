@@ -260,7 +260,7 @@ def plot_zone_breakdown(summary, out_dir):
             vals = []
             for l in layers:
                 counts = summary[l][key][zone]
-                total = sum(summary[l][key][z] for z in ZONE_NAMES)
+                total = sum(sum(summary[l][key][z]) for z in ZONE_NAMES)
                 vals.append(sum(counts) / max(total, 1))
             ax.barh(short, vals, left=bottom, color=zone_colors[zone],
                     label=zone.replace("_", " "), height=0.7)
