@@ -27,19 +27,19 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
-#SBATCH --time=24:00:00
-#SBATCH --partition=plgrid-gpu-gh200
+#SBATCH --partition=dgxh100
+#SBATCH --qos=big
 
 set -euo pipefail
 
 # ---- Environment ----
-ml ML-bundle/25.10
-source "$SCRATCH/sd_venv/bin/activate"
+source /home/miksa/miniconda3/etc/profile.d/conda.sh
+conda activate ldm
 cd "$HOME/InTAct-Unl/SD"
 export PYTHONPATH="$HOME/InTAct-Unl/taming-transformers:$HOME/InTAct-Unl:${PYTHONPATH:-}"
 
 # Hugging Face token
-HF_TOKEN_FILE="${HF_TOKEN_FILE:-/net/home/plgrid/plgmiksa/.cache/huggingface/token}"
+HF_TOKEN_FILE="${HF_TOKEN_FILE:-/shared/results/common/miksa/.cache/huggingface/token}"
 if [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ] && [ -r "$HF_TOKEN_FILE" ]; then
     HUGGINGFACE_HUB_TOKEN="$(tr -d '\r\n' < "$HF_TOKEN_FILE")"
     export HUGGINGFACE_HUB_TOKEN
@@ -48,12 +48,7 @@ if [ -z "${HF_TOKEN:-}" ] && [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
     export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
 fi
 
-# Cache (SCRATCH-aware with home fallback)
-if [ -n "${SCRATCH:-}" ]; then
-    CACHE_BASE="$SCRATCH/.cache"
-else
-    CACHE_BASE="$HOME/.cache/intact"
-fi
+CACHE_BASE="/shared/results/common/miksa/.cache"
 export CACHE_ROOT="$CACHE_BASE"
 export HF_HOME="$CACHE_ROOT/huggingface"
 export TORCH_HOME="$CACHE_ROOT/torch"
@@ -68,7 +63,7 @@ mkdir -p "$TMPDIR" "$WANDB_DIR"
 # ============================================================================
 DEVICE=0
 CONFIG_PATH="configs/stable-diffusion/v1-intact.yaml"
-CKPT_PATH="$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+CKPT_PATH="$HOME/InTAct-Unl/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
 IMAGE_SIZE=512
 BATCH_SIZE=4
 
@@ -85,13 +80,12 @@ SVD_BATCHES=50
 FORGET_BATCHES=50
 REMAIN_BATCHES=50
 
-# Data paths (on SCRATCH)
-NSFW_DATA_PATH="$SCRATCH/data/nsfw"
-NOT_NSFW_DATA_PATH="$SCRATCH/data/not-nsfw"
+NSFW_DATA_PATH="/shared/results/common/miksa/intact/SD/data/nsfw"
+NOT_NSFW_DATA_PATH="/shared/results/common/miksa/intact/SD/data/not-nsfw"
 
-# Output directory (timestamped under SCRATCH results)
+# Output directory
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-RESULTS_BASE="${SCRATCH:-$HOME}/intact/SD/activation_space"
+RESULTS_BASE="/shared/results/common/miksa/intact/SD/activation_space"
 OUT_DIR="${RESULTS_BASE}/${TIMESTAMP}"
 mkdir -p "$OUT_DIR"
 
