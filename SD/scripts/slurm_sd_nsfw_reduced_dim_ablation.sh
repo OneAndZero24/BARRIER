@@ -3,7 +3,7 @@
 # SLURM Array Job – SD NSFW reduced_dim Ablation Study (5 dims × 3 seeds = 15)
 # ============================================================================
 # Varies: reduced_dim in {8, 16, 32, 64, 128}, seed in {42, 1, 2}
-# Fixed:  lambda=10.0, lr=5e-6, epochs=5, Adam, base_method=nsfw,
+# Fixed:  lambda=0.5, lr=5e-6, epochs=3, Adam, base_method=nsfw,
 #         block 2 only, layers=[attn2.to_q, attn2.to_k, attn2.to_v]
 #
 # Outputs per job: metrics JSON via --metrics-out
@@ -112,8 +112,8 @@ cfg["pipeline"]["seed"]         = int("${SEED}")
 
 # Fix remaining hyperparams
 cfg["unlearn"]["lr"]     = 5e-6
-cfg["unlearn"]["epochs"] = 5
-cfg["intact"]["lambda_interval"] = 10.0
+cfg["unlearn"]["epochs"] = 3
+cfg["intact"]["lambda_interval"] = 0.5
 
 # Target all cross-attention QKV layers (matches known-working combo19 config)
 # No block restriction - targets are already correct from the base config

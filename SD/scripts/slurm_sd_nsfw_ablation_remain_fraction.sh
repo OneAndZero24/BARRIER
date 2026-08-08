@@ -5,7 +5,7 @@
 # Varies: bounds_remain_fraction in {0.10, 0.25, 0.50, 0.75, 1.0}
 #         seed in {42, 1, 2}
 # Fixed:  bounds_forget_fraction = 1.0
-#         lambda=10.0, lr=5e-6, epochs=5, Adam, base_method=nsfw,
+#         lambda=0.5, lr=5e-6, epochs=3, Adam, base_method=nsfw,
 #         reduced_dim=64, targets=[attn2.to_q, attn2.to_k, attn2.to_v]
 #         use_actual_bounds=true, transf. block 2 (cross-attn QKV)
 #
@@ -113,8 +113,8 @@ cfg["intact"]["bounds_remain_fraction"]  = float("${FRACTION}")
 cfg["pipeline"]["seed"]                  = int("${SEED}")
 
 cfg["unlearn"]["lr"]     = 5e-6
-cfg["unlearn"]["epochs"] = 5
-cfg["intact"]["lambda_interval"] = 10.0
+cfg["unlearn"]["epochs"] = 3
+cfg["intact"]["lambda_interval"] = 0.5
 cfg["intact"]["reduced_dim"]     = 64
 cfg["intact"]["use_actual_bounds"] = True
 
