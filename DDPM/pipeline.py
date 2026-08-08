@@ -419,7 +419,55 @@ def main():
         ref_dir = cfg["paths"].get("ref_dataset_dir")
         if ref_dir is None:
             ref_dir = f"{dataset_name}_without_label_{label_to_forget}"
-        if os.path.exists(ref_dir) and os.path.exists(fid_sample_dir):
+
+        if not os.path.exists(ref_dir):
+            log.info(f"FID reference directory missing, generating: {ref_dir}")
+            os.makedirs(ref_dir, exist_ok=True)
+            import torchvision.transforms as _T
+            if dataset_name == "cifar10":
+                ds = torchvision.datasets.CIFAR10(
+                    root=cfg["data"].get("data_path", "../data"),
+                    train=True,
+                    download=True,
+                    transform=_T.ToTensor(),
+                )
+                targets = ds.targets
+            elif dataset_name == "stl10":
+                ds = torchvision.datasets.STL10(
+                    root=cfg["data"].get("data_path", "../data"),
+                    split="train",
+                    download=True,
+                    transform=_T.Compose([_T.Resize(64), _T.ToTensor()]),
+                )
+                targets = ds.labels
+            else:
+                raise ValueError(f"Unknown dataset: {dataset_name}")
+            idx = [i for i, t in enumerate(targets) if t != label_to_forget]
+            n_per_class = 500 if dataset_name == "cifar10" else 100
+            subsets = []
+            for cls_idx in range(n_classes):
+                if cls_idx == label_to_forget:
+                    continue
+                class_idx = [i for i in idx if targets[i] == cls_idx][:n_per_class]
+                subsets.append(torch.utils.data.Subset(ds, class_idx))
+            sub = torch.utils.data.ConcatDataset(subsets)
+            loader = torch.utils.data.DataLoader(sub, batch_size=1000, shuffle=False)
+            img_id = 0
+            for x_batch, _ in loader:
+                for x_ in x_batch:
+                    import time as _t
+                    for attempt in range(5):
+                        try:
+                            torchvision.utils.save_image(x_, os.path.join(ref_dir, f"{img_id}.png"), normalize=True)
+                            break
+                        except OSError:
+                            if attempt == 4:
+                                raise
+                            _t.sleep(2 ** attempt)
+                    img_id += 1
+            log.info(f"Saved {img_id} reference images to {ref_dir}")
+
+        if os.path.exists(fid_sample_dir):
             log.info(f"Computing FID (TF evaluator): {ref_dir} vs {fid_sample_dir}")
             fid_metrics = compute_fid_reference(ref_dir, fid_sample_dir)
             metrics["FID"] = fid_metrics.pop("fid")
@@ -427,9 +475,7 @@ def main():
             for k, v in {**{"FID": metrics["FID"]}, **fid_metrics}.items():
                 log.info(f"  {k} = {v:.4f}")
         else:
-            log.warning(f"Skipping FID: ref_dir={ref_dir} exists={os.path.exists(ref_dir)}"
-                        f"  samples exist={os.path.exists(fid_sample_dir)}")
-            log.warning("Run save_base_dataset.py first to create reference images.")
+            log.warning(f"FID samples not found at {fid_sample_dir}; skipping FID")
 
     # 3b: UA — Unlearning Accuracy (1 - acc on forgotten class)
     if eval_cfg.get("classifier", {}).get("enabled", True):

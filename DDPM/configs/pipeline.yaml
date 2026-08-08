@@ -28,6 +28,7 @@ model_config: "configs/cifar10_intact.yml"
 data:
   dataset: "CIFAR10"
   n_classes: 10
+  data_path: "../data"
 
 # ---- pipeline ----
 pipeline:

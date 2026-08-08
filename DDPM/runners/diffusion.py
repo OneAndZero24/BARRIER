@@ -28,6 +28,17 @@ from torchvision.datasets import ImageFolder
 from InTAct.intact import UnlearnIntervalProtection, ddpm_forward_fn
 
 
+def save_image_retry(tensor, fp, **kwargs):
+    import time as _time
+    for attempt in range(5):
+        try:
+            return tvu.save_image(tensor, fp, **kwargs)
+        except OSError:
+            if attempt == 4:
+                raise
+            _time.sleep(2 ** attempt)
+
+
 def torch2hwcuint8(x, clip=False):
     if clip:
         x = torch.clamp(x, -1, 1)
@@ -958,7 +969,7 @@ class Diffusion(object):
                     x = inverse_data_transform(config, x)
 
                     for k in range(n):
-                        tvu.save_image(
+                        save_image_retry(
                             x[k],
                             os.path.join(sample_dir, str(c[k].item()), f"{img_id}.png"),
                             normalize=True,
@@ -1006,7 +1017,7 @@ class Diffusion(object):
                 x = inverse_data_transform(config, x)
 
                 for k in range(n):
-                    tvu.save_image(
+                    save_image_retry(
                         x[k], os.path.join(sample_dir, f"{img_id}.png"), normalize=True
                     )
                     img_id += 1
@@ -1059,7 +1070,7 @@ class Diffusion(object):
                     x = inverse_data_transform(config, x)
 
                     for k in range(n):
-                        tvu.save_image(
+                        save_image_retry(
                             x[k],
                             os.path.join(sample_dir, f"{img_id}.png"),
                             normalize=True,
