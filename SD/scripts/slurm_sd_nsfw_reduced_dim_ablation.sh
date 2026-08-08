@@ -115,10 +115,8 @@ cfg["unlearn"]["lr"]     = 5e-6
 cfg["unlearn"]["epochs"] = 5
 cfg["intact"]["lambda_interval"] = 10.0
 
-# Restrict to block 2 only (remove broad targets, use target_blocks + target_layers)
-cfg["intact"]["target_blocks"] = [2]
-cfg["intact"]["target_layers"] = ["attn2.to_q", "attn2.to_k", "attn2.to_v"]
-cfg["intact"].pop("targets", None)
+# Target all cross-attention QKV layers (matches known-working combo19 config)
+# No block restriction - targets are already correct from the base config
 
 # Override paths for Helios
 cfg["paths"]["sd_ckpt"]         = "$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"

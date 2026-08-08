@@ -118,10 +118,8 @@ cfg["intact"]["lambda_interval"] = 10.0
 cfg["intact"]["reduced_dim"]     = 64
 cfg["intact"]["use_actual_bounds"] = True
 
-# Restrict to block 2 only
-cfg["intact"]["target_blocks"] = [2]
-cfg["intact"]["target_layers"] = ["attn2.to_q", "attn2.to_k", "attn2.to_v"]
-cfg["intact"].pop("targets", None)
+# Target all cross-attention QKV layers (matches known-working combo19 config)
+# No block restriction - targets are already correct from the base config
 
 suffix = f"forget_frac_${FRAC_PCT}_seed_${SEED}"
 cfg["paths"]["sd_ckpt"]         = "$SCRATCH/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"

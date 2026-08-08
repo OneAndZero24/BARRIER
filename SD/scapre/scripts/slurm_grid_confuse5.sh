@@ -111,7 +111,7 @@ python scapre/train.py \
     --lr "$LR" \
     --epochs "$EPOCH" \
     --batch_size 8 \
-    --targets to_q to_k to_v \
+    --targets output_blocks.6.1.transformer_blocks.0.attn2.to_q output_blocks.6.1.transformer_blocks.0.attn2.to_k output_blocks.6.1.transformer_blocks.0.attn2.to_v output_blocks.8.1.transformer_blocks.0.attn2.to_q output_blocks.8.1.transformer_blocks.0.attn2.to_k output_blocks.8.1.transformer_blocks.0.attn2.to_v \
     --lambda_interval "$LAMBDA" \
     --reduced_dim 32 \
     --infinity_scale 18.0 \
