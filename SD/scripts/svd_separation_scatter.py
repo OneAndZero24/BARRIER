@@ -427,6 +427,8 @@ def main():
                         help="Use remain data to compute actual bounds (default: True)")
     parser.add_argument("--no_actual_bounds", dest="use_actual_bounds", action="store_false",
                         help="Use forget-only bounds")
+    parser.add_argument("--top_k_1d", type=int, default=10,
+                        help="Number of best 1D dims to search for 2D pairs")
     parser.add_argument("--n_bins_2d", type=int, default=50,
                         help="Number of bins per axis for 2D IoU histogram")
 

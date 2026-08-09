@@ -11,7 +11,7 @@
 #SBATCH --qos=big
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64GB
+#SBATCH --mem=128GB
 #SBATCH --partition=dgxa100
 
 set -euo pipefail
