@@ -22,7 +22,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
-#SBATCH --partition=dgxa100
+#SBATCH --partition=rtx4090
 #SBATCH --qos=quick
 
 set -euo pipefail
