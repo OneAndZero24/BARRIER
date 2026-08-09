@@ -229,6 +229,8 @@ def compute_zone_fractions_pair(fproj_2d, rproj_2d, z_min_2d, z_max_2d, inf_low_
 
     f_zones = classify_2d(fproj_2d, z_min_2d, z_max_2d, inf_low_2d, inf_high_2d)
     r_zones = classify_2d(rproj_2d, z_min_2d, z_max_2d, inf_low_2d, inf_high_2d)
+    f_zones["margin"] = f_zones["neg_inf"] + f_zones["pos_inf"]
+    r_zones["margin"] = r_zones["neg_inf"] + r_zones["pos_inf"]
     return {"forget": f_zones, "remain": r_zones}
 
 
@@ -261,23 +263,39 @@ def compute_all_zone_fractions(forget_proj, remain_proj, pca_info, best_dims):
 
 
 def print_zone_summary(best_dims):
-    """Print a clean table of zone occupancy per layer."""
-    header = f"{'Layer':<45s} {'Data':>7s} {'inside_box':>10s} {'neg_inf':>8s} {'pos_inf':>8s} {'outside':>8s}"
+    """Print a clean table of zone occupancy per layer + mean across layers."""
+    header = f"{'Layer':<45s} {'Data':>7s} {'inside_box':>10s} {'margin':>8s} {'outside':>8s}"
     sep = "-" * len(header)
     log.info("\n" + sep)
     log.info(header)
     log.info(sep)
+
+    f_ins, f_mar, f_out = [], [], []
+    r_ins, r_mar, r_out = [], [], []
+
     for best in best_dims:
         name = best["layer_name"][-44:]
         zones = best.get("zone_occupancy", {})
         for key in ["forget", "remain"]:
             z = zones.get(key, {})
+            m = z.get("margin", z.get("neg_inf", 0) + z.get("pos_inf", 0))
+            o = z.get("outside", 0)
+            ins = z.get("inside_box", 0)
             log.info(
                 f"{name:<45s} {key:>7s} "
-                f"{z.get('inside_box', 0):>10.2%} {z.get('neg_inf', 0):>8.2%} "
-                f"{z.get('pos_inf', 0):>8.2%} {z.get('outside', 0):>8.2%}"
+                f"{ins:>10.2%} {m:>8.2%} "
+                f"{o:>8.2%}"
             )
+            if key == "forget":
+                f_ins.append(ins); f_mar.append(m); f_out.append(o)
+            else:
+                r_ins.append(ins); r_mar.append(m); r_out.append(o)
         log.info(sep)
+
+    log.info(f"{'MEAN (n=' + str(len(best_dims)) + ' layers)':<45s} {'':>7s} {'':>10s} {'':>8s} {'':>8s}")
+    log.info(f"{'':<45s} {'Forget':>7s} {np.mean(f_ins):>10.1%} {np.mean(f_mar):>8.1%} {np.mean(f_out):>8.1%}")
+    log.info(f"{'':<45s} {'Remain':>7s} {np.mean(r_ins):>10.1%} {np.mean(r_mar):>8.1%} {np.mean(r_out):>8.1%}")
+    log.info(sep)
 
 
 # ---------------------------------------------------------------------------
@@ -285,13 +303,12 @@ def print_zone_summary(best_dims):
 # ---------------------------------------------------------------------------
 
 def plot_separation_scatters(forget_proj, remain_proj, pca_info, best_dims, out_dir):
-    """One scatter per layer using the two most-separated SVD dimensions."""
+    """One scatter per layer using the two most-separated SVD dimensions — zoomed only, no titles."""
     for entry, best in zip(pca_info, best_dims):
         name = entry["layer_name"]
         fproj = forget_proj[name]
         rproj = remain_proj[name]
         di, dj = best["dim_a"], best["dim_b"]
-        iou = best["iou_2d"]
 
         f = fproj[:, [di, dj]].numpy()
         r = rproj[:, [di, dj]].numpy()
@@ -307,35 +324,10 @@ def plot_separation_scatters(forget_proj, remain_proj, pca_info, best_dims, out_
         inf_low = fproj.min(dim=0)[0]
         inf_high = fproj.max(dim=0)[0]
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        fig, ax = plt.subplots(figsize=(7, 6))
 
-        # --- left: full scatter ---
-        ax = axes[0]
-        ax.scatter(f[:, 0], f[:, 1], s=2, alpha=0.35, color="#d62728", label="Forget (NSFW)")
-        ax.scatter(r[:, 0], r[:, 1], s=2, alpha=0.35, color="#1f77b4", label="Remain (SFW)")
-        inner = Rectangle(
-            (z_min[di].item(), z_min[dj].item()),
-            z_max[di].item() - z_min[di].item(),
-            z_max[dj].item() - z_min[dj].item(),
-            fill=False, edgecolor="darkorange", lw=1.5, ls="--",
-        )
-        outer = Rectangle(
-            (inf_low[di].item(), inf_low[dj].item()),
-            inf_high[di].item() - inf_low[di].item(),
-            inf_high[dj].item() - inf_low[dj].item(),
-            fill=False, edgecolor="gray", lw=1.0, ls=":",
-        )
-        ax.add_patch(inner)
-        ax.add_patch(outer)
-        ax.legend(loc="upper right", fontsize=7)
-        ax.set_xlabel(f"SVD dim {di + 1}")
-        ax.set_ylabel(f"SVD dim {dj + 1}")
-        ax.set_title(f"Full projection — dims ({di + 1}, {dj + 1})")
-
-        # --- right: zoomed ---
-        ax = axes[1]
-        ax.scatter(f[:, 0], f[:, 1], s=3, alpha=0.45, color="#d62728", label="Forget (NSFW)")
-        ax.scatter(r[:, 0], r[:, 1], s=3, alpha=0.45, color="#1f77b4", label="Remain (SFW)")
+        ax.scatter(f[:, 0], f[:, 1], s=5, alpha=0.45, color="black", label="Forget (NSFW)")
+        ax.scatter(r[:, 0], r[:, 1], s=5, alpha=0.45, color="#1f77b4", label="Remain (SFW)")
         ax.add_patch(Rectangle(
             (z_min[di].item(), z_min[dj].item()),
             z_max[di].item() - z_min[di].item(),
@@ -348,33 +340,15 @@ def plot_separation_scatters(forget_proj, remain_proj, pca_info, best_dims, out_
             inf_high[dj].item() - inf_low[dj].item(),
             fill=False, edgecolor="gray", lw=1.0, ls=":",
         ))
-        ax.legend(loc="upper right", fontsize=7)
-        ax.set_xlabel(f"SVD dim {di + 1}")
-        ax.set_ylabel(f"SVD dim {dj + 1}")
+        ax.legend(loc="upper right", fontsize=8, markerscale=2)
 
-        # Zoom to inf bounds
         pad_x = (inf_high[di].item() - inf_low[di].item()) * 0.15
         pad_y = (inf_high[dj].item() - inf_low[dj].item()) * 0.15
         ax.set_xlim(inf_low[di].item() - pad_x, inf_high[di].item() + pad_x)
         ax.set_ylim(inf_low[dj].item() - pad_y, inf_high[dj].item() + pad_y)
-        ax.set_title(f"Zoomed — dims ({di + 1}, {dj + 1})")
+        ax.set_xlabel(f"SVD dim {di + 1}")
+        ax.set_ylabel(f"SVD dim {dj + 1}")
 
-        short = name[-50:]
-        z_forget = best.get("zone_occupancy", {}).get("forget", {})
-        z_remain = best.get("zone_occupancy", {}).get("remain", {})
-        fig.suptitle(
-            f"{short}\nBest separation: dims ({di + 1}, {dj + 1})  |  "
-            f"IoU_2d = {iou:.4f}  (lower = more separated)\n"
-            f"Forget: inside={z_forget.get('inside_box',0):.1%}  "
-            f"neg={z_forget.get('neg_inf',0):.1%}  "
-            f"pos={z_forget.get('pos_inf',0):.1%}  "
-            f"out={z_forget.get('outside',0):.1%}    "
-            f"Remain: inside={z_remain.get('inside_box',0):.1%}  "
-            f"neg={z_remain.get('neg_inf',0):.1%}  "
-            f"pos={z_remain.get('pos_inf',0):.1%}  "
-            f"out={z_remain.get('outside',0):.1%}",
-            fontsize=9,
-        )
         plt.tight_layout()
 
         safe_name = name.replace(".", "_").replace("/", "_")[-80:]
@@ -449,8 +423,10 @@ def main():
     parser.add_argument("--remain_batches", type=int, default=50)
     parser.add_argument("--svd_batches", type=int, default=50)
 
-    parser.add_argument("--top_k_1d", type=int, default=10,
-                        help="Number of best 1D dims to search for 2D pairs")
+    parser.add_argument("--use_actual_bounds", action="store_true", default=True,
+                        help="Use remain data to compute actual bounds (default: True)")
+    parser.add_argument("--no_actual_bounds", dest="use_actual_bounds", action="store_false",
+                        help="Use forget-only bounds")
     parser.add_argument("--n_bins_2d", type=int, default=50,
                         help="Number of bins per axis for 2D IoU histogram")
 
@@ -497,7 +473,7 @@ def main():
         upper_percentile=args.upper_percentile,
         reduced_dim=args.reduced_dim,
         infinity_scale=20.0,
-        use_actual_bounds=False,
+        use_actual_bounds=args.use_actual_bounds,
     )
 
     word_nude = "a photo of a nude person"
@@ -511,7 +487,7 @@ def main():
         model.model.diffusion_model,
         forget_svd_dl,
         device,
-        remain_dataloader=None,
+        remain_dataloader=remain_collect_dl if args.use_actual_bounds else None,
         forward_fn=forward_fn,
         betas=model.betas.to(device) if hasattr(model, "betas") else None,
         num_timesteps=model.num_timesteps if hasattr(model, "num_timesteps") else 1000,
@@ -583,6 +559,14 @@ def main():
     print_zone_summary(best_dims)
 
     # Save to JSON
+    f_ins = [b["zone_occupancy"]["forget"]["inside_box"] for b in best_dims]
+    f_mar = [b["zone_occupancy"]["forget"]["margin"] for b in best_dims]
+    f_out = [b["zone_occupancy"]["forget"]["outside"] for b in best_dims]
+    r_ins = [b["zone_occupancy"]["remain"]["inside_box"] for b in best_dims]
+    r_mar = [b["zone_occupancy"]["remain"]["margin"] for b in best_dims]
+    r_out = [b["zone_occupancy"]["remain"]["outside"] for b in best_dims]
+    ious = [b["iou_2d"] for b in best_dims]
+
     json_data = {
         "config": {
             "targets": args.targets,
@@ -591,6 +575,18 @@ def main():
             "upper_percentile": args.upper_percentile,
             "top_k_1d": args.top_k_1d,
             "n_bins_2d": args.n_bins_2d,
+            "use_actual_bounds": args.use_actual_bounds,
+        },
+        "means": {
+            "n_layers": len(best_dims),
+            "forget_inside_box": float(np.mean(f_ins)),
+            "forget_margin": float(np.mean(f_mar)),
+            "forget_outside": float(np.mean(f_out)),
+            "remain_inside_box": float(np.mean(r_ins)),
+            "remain_margin": float(np.mean(r_mar)),
+            "remain_outside": float(np.mean(r_out)),
+            "iou_2d_mean": float(np.mean(ious)),
+            "iou_2d_median": float(np.median(ious)),
         },
         "per_layer": best_dims,
     }

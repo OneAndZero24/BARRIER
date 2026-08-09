@@ -79,6 +79,8 @@ REMAIN_BATCHES=50
 TOP_K_1D=10
 N_BINS_2D=50
 
+USE_ACTUAL_BOUNDS=1  # 1 = true, 0 = false (include remain data in bounds)
+
 NSFW_DATA_PATH="/shared/results/common/miksa/intact/SD/data/nsfw"
 NOT_NSFW_DATA_PATH="/shared/results/common/miksa/intact/SD/data/not-nsfw"
 
@@ -101,6 +103,7 @@ echo "  Reduced dim: ${REDUCED_DIM}"
 echo "  Percentiles: ${LOWER_PERCENTILE} / ${UPPER_PERCENTILE}"
 echo "  Batches:     svd=${SVD_BATCHES}  forget=${FORGET_BATCHES}  remain=${REMAIN_BATCHES}"
 echo "  IoU search:  top_k_1d=${TOP_K_1D}  n_bins_2d=${N_BINS_2D}"
+echo "  Actual bnds: ${USE_ACTUAL_BOUNDS}"
 echo "  CKPT:        ${CKPT_PATH}"
 echo "  Out dir:     ${OUT_DIR}"
 echo "============================================"
@@ -121,6 +124,7 @@ python scripts/svd_separation_scatter.py \
     --remain_batches "${REMAIN_BATCHES}" \
     --top_k_1d "${TOP_K_1D}" \
     --n_bins_2d "${N_BINS_2D}" \
+    $([ "${USE_ACTUAL_BOUNDS}" = "1" ] && echo "--use_actual_bounds" || echo "--no_actual_bounds") \
     --nsfw_data_path "${NSFW_DATA_PATH}" \
     --not_nsfw_data_path "${NOT_NSFW_DATA_PATH}" \
     --out_dir "${OUT_DIR}"
