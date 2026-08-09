@@ -262,6 +262,102 @@ def compute_all_zone_fractions(forget_proj, remain_proj, pca_info, best_dims):
     return best_dims
 
 
+# ---------------------------------------------------------------------------
+# Zone occupancy across ALL SVD dimensions (per-dim, then mean)
+# ---------------------------------------------------------------------------
+
+def compute_all_dim_zone_means(forget_proj, remain_proj, pca_info):
+    """
+    For each layer, compute per-dimension zone classification across ALL SVD
+    dims, then aggregate means across layers.
+    """
+    per_layer_all = []
+    all_f_ins, all_f_mar, all_f_out = [], [], []
+    all_r_ins, all_r_mar, all_r_out = [], [], []
+
+    for entry in pca_info:
+        name = entry["layer_name"]
+        fproj = forget_proj.get(name)
+        rproj = remain_proj.get(name)
+        if fproj is None or rproj is None:
+            continue
+
+        z_min = entry["z_min"]
+        z_max = entry["z_max"]
+        inf_low = fproj.min(dim=0)[0]
+        inf_high = fproj.max(dim=0)[0]
+        k = fproj.size(1)
+
+        f_ins_dims, f_mar_dims, f_out_dims = [], [], []
+        r_ins_dims, r_mar_dims, r_out_dims = [], [], []
+
+        for d in range(k):
+            fd = fproj[:, d]
+            rd = rproj[:, d]
+            il = inf_low[d]; ih = inf_high[d]
+            zmn = z_min[d]; zmx = z_max[d]
+
+            f_in = ((fd >= zmn) & (fd <= zmx)).float().mean().item()
+            f_neg = ((fd >= il) & (fd < zmn)).float().mean().item()
+            f_pos = ((fd > zmx) & (fd <= ih)).float().mean().item()
+            f_out = ((fd < il) | (fd > ih)).float().mean().item()
+
+            r_in = ((rd >= zmn) & (rd <= zmx)).float().mean().item()
+            r_neg = ((rd >= il) & (rd < zmn)).float().mean().item()
+            r_pos = ((rd > zmx) & (rd <= ih)).float().mean().item()
+            r_out = ((rd < il) | (rd > ih)).float().mean().item()
+
+            f_ins_dims.append(f_in)
+            f_mar_dims.append(f_neg + f_pos)
+            f_out_dims.append(f_out)
+            r_ins_dims.append(r_in)
+            r_mar_dims.append(r_neg + r_pos)
+            r_out_dims.append(r_out)
+
+        layer_means = {
+            "layer_name": name,
+            "k_dims": k,
+            "forget_inside": float(np.mean(f_ins_dims)),
+            "forget_margin": float(np.mean(f_mar_dims)),
+            "forget_outside": float(np.mean(f_out_dims)),
+            "remain_inside": float(np.mean(r_ins_dims)),
+            "remain_margin": float(np.mean(r_mar_dims)),
+            "remain_outside": float(np.mean(r_out_dims)),
+        }
+        per_layer_all.append(layer_means)
+
+        all_f_ins.extend(f_ins_dims)
+        all_f_mar.extend(f_mar_dims)
+        all_f_out.extend(f_out_dims)
+        all_r_ins.extend(r_ins_dims)
+        all_r_mar.extend(r_mar_dims)
+        all_r_out.extend(r_out_dims)
+
+    global_means = {
+        "n_layers": len(per_layer_all),
+        "n_dims_total": len(all_f_ins),
+        "forget_inside": float(np.mean(all_f_ins)),
+        "forget_margin": float(np.mean(all_f_mar)),
+        "forget_outside": float(np.mean(all_f_out)),
+        "remain_inside": float(np.mean(all_r_ins)),
+        "remain_margin": float(np.mean(all_r_mar)),
+        "remain_outside": float(np.mean(all_r_out)),
+    }
+
+    log.info("\n" + "=" * 60)
+    log.info("Zone occupancy across ALL %d SVD dims, %d layers:", len(all_f_ins) // len(all_f_mar) if all_f_mar else 0, len(per_layer_all))
+    log.info("                 Forget    Remain")
+    log.info("  inside_box      %5.1f%%    %5.1f%%", global_means["forget_inside"] * 100,
+             global_means["remain_inside"] * 100)
+    log.info("  margin (neg+pos)%5.1f%%    %5.1f%%", global_means["forget_margin"] * 100,
+             global_means["remain_margin"] * 100)
+    log.info("  outside         %5.1f%%    %5.1f%%", global_means["forget_outside"] * 100,
+             global_means["remain_outside"] * 100)
+    log.info("=" * 60)
+
+    return {"global": global_means, "per_layer": per_layer_all}
+
+
 def print_zone_summary(best_dims):
     """Print a clean table of zone occupancy per layer + mean across layers."""
     header = f"{'Layer':<45s} {'Data':>7s} {'inside_box':>10s} {'margin':>8s} {'outside':>8s}"
@@ -560,6 +656,12 @@ def main():
     )
     print_zone_summary(best_dims)
 
+    # ------------------------------------------------------------------
+    # 7. Zone occupancy across ALL SVD dimensions
+    # ------------------------------------------------------------------
+    log.info("Computing zone occupancy across ALL SVD dimensions...")
+    all_dim_means = compute_all_dim_zone_means(forget_proj, remain_proj, protection.pca_info)
+
     # Save to JSON
     f_ins = [b["zone_occupancy"]["forget"]["inside_box"] for b in best_dims]
     f_mar = [b["zone_occupancy"]["forget"]["margin"] for b in best_dims]
@@ -590,6 +692,7 @@ def main():
             "iou_2d_mean": float(np.mean(ious)),
             "iou_2d_median": float(np.median(ious)),
         },
+        "all_dims": all_dim_means,
         "per_layer": best_dims,
     }
     json_path = os.path.join(args.out_dir, "svd_separation.json")
