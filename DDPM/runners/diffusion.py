@@ -7,6 +7,7 @@ import time
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.utils as tvu
 import tqdm
@@ -776,7 +777,9 @@ class Diffusion(object):
                 with torch.no_grad():
                     ref_output = ref_model(forget_x_noisy, t.float(), forget_c, mode="train", cond_drop_prob=0.0)
                 output = model(forget_x_noisy, t.float(), forget_c, mode="train", cond_drop_prob=0.0)
-                forget_loss = -criteria(output, ref_output)
+                ref_probs = F.softmax(ref_output.flatten(1), dim=1)
+                log_probs = F.log_softmax(output.flatten(1), dim=1)
+                forget_loss = -F.kl_div(log_probs, ref_probs, reduction='batchmean')
             else:
                 # Default: Gradient Ascent
                 forget_loss = -loss_registry_conditional[config.model.type](

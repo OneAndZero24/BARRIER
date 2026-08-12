@@ -33,18 +33,18 @@ command:
 
 parameters:
   unlearn.method:
-    value: "ga"
+    value: "rl"
 
   unlearn.lr:
     distribution: log_uniform_values
-    min: 1e-6
-    max: 1e-3
+    min: 1e-5
+    max: 1e-2
 
   unlearn.n_iters:
-    values: [500, 1000, 1500, 2000, 3000, 5000]
+    values: [1000, 2000, 3000, 5000, 7000, 10000]
 
   unlearn.batch_size:
-    values: [16, 32, 64, 128]
+    values: [32, 64]
 
   intact.decomp_method:
     value: "pca"

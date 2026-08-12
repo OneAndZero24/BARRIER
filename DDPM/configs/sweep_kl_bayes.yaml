@@ -34,8 +34,8 @@ parameters:
 
   unlearn.lr:
     distribution: log_uniform_values
-    min: 5e-5
-    max: 5e-3
+    min: 1e-5
+    max: 1e-2
 
   unlearn.n_iters:
     values: [1000, 2000, 3000, 5000, 7000, 10000]
@@ -43,10 +43,13 @@ parameters:
   unlearn.batch_size:
     values: [32, 64, 128]
 
+  unlearn.alpha:
+    values: [0.0, 0.01, 0.1]
+
   intact.lambda_interval:
     distribution: log_uniform_values
-    min: 0.01
-    max: 5.0
+    min: 0.05
+    max: 50.0
 
   intact.reduced_dim:
     values: [8, 16, 32, 64, 128]
