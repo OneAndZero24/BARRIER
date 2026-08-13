@@ -22,6 +22,7 @@ import argparse
 import json
 import logging
 import pathlib
+import uuid
 from datetime import datetime
 
 import numpy as np
@@ -56,12 +57,20 @@ def load_config(path):
 
 def merge_wandb_config(cfg):
     import wandb
-    for key, val in dict(wandb.config).items():
-        parts = key.split(".")
-        d = cfg
-        for p in parts[:-1]:
-            d = d.setdefault(p, {})
-        d[parts[-1]] = val
+    wc = dict(wandb.config)
+    # Pass 1: plain (non-dotted) keys — full nested dicts from the base config
+    for key, val in wc.items():
+        if "." not in key:
+            cfg[key] = val
+    # Pass 2: dotted sweep overrides — must win over plain keys regardless of
+    # wandb config iteration order
+    for key, val in wc.items():
+        if "." in key:
+            parts = key.split(".")
+            d = cfg
+            for p in parts[:-1]:
+                d = d.setdefault(p, {})
+            d[parts[-1]] = val
     return cfg
 
 
@@ -100,13 +109,15 @@ def build_runner_config(cfg):
     # Setup dirs under pipeline output
     output_dir = cfg["paths"].get("output_dir", "./results/pipeline")
     checkpoint_dir = cfg["paths"].get("checkpoint_dir", None)
-    timestamp = datetime.now().strftime("%Y_%m_%d_%H%M%S")
-    config.exp_root_dir = os.path.join(output_dir, timestamp)
+    # Unique per-run suffix: second-resolution timestamps collide when many
+    # wandb agents run concurrently, causing runs to share ckpt/sample dirs.
+    run_id = f"{datetime.now().strftime('%Y_%m_%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    config.exp_root_dir = os.path.join(output_dir, run_id)
     config.log_dir = os.path.join(config.exp_root_dir, "logs")
     
     # Use checkpoint_dir if specified, otherwise default to exp_root_dir/ckpts
     if checkpoint_dir:
-        config.ckpt_dir = os.path.join(checkpoint_dir, timestamp)
+        config.ckpt_dir = os.path.join(checkpoint_dir, run_id)
     else:
         config.ckpt_dir = os.path.join(config.exp_root_dir, "ckpts")
     
