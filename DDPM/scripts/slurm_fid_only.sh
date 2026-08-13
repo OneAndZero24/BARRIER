@@ -1,11 +1,9 @@
 #!/bin/bash
 # ============================================================================
-# SLURM – Train + FID-Only (5000/class) for 3 InTAct Ablations
+# SLURM – Train + FID-Only (5000/class) for 1 InTAct Ablation
 # ============================================================================
-# Trains each checkpoint then computes FID at reference-paper size.
+# Trains checkpoint then computes FID at reference-paper size.
 #   IA NO SVD  – skip_svd=true     (interval bounds only)
-#   SVD NO IA  – skip_interval=true (SVD projection only)
-#   GA         – full InTAct        (SVD + interval bounds)
 #
 # Usage:
 #   cd DDPM
@@ -28,15 +26,15 @@ export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 # ============================================================================
 # Per-run hyperparameters
 # ============================================================================
-LABELS=(          "IA NO SVD"        "SVD NO IA"        "GA"           )
-LRS=(             0.000548648208     0.000001584993     0.000002692845  )
-N_ITERS=(         1000              5000               5000            )
-BATCH_SIZES=(     16                128                32              )
-LAMBDAS=(         28.443470814695    18.905840150293    8.135734556807  )
-REDUCED_DIMS=(    32                16                 32              )
-USE_BOUNDS=(      false             true               true            )
-SKIP_SVD=(        true              false              false           )
-SKIP_INTERVAL=(   false             true               false           )
+LABELS=(          "IA NO SVD"        )
+LRS=(             0.000548648208      )
+N_ITERS=(         1000               )
+BATCH_SIZES=(     16                 )
+LAMBDAS=(         28.443470814695     )
+REDUCED_DIMS=(    32                 )
+USE_BOUNDS=(      false              )
+SKIP_SVD=(        true               )
+SKIP_INTERVAL=(   false              )
 
 # Shared
 MODEL_CONFIG="configs/cifar10_intact.yml"
@@ -55,10 +53,10 @@ echo "Train + FID-Only – Job ${SLURM_JOB_ID}"
 echo "  qos=big  mem=128GB  partition=dgxa100"
 echo "  FID samples/class = ${FID_N_SAMPLES}"
 echo "  Classifier = disabled"
-echo "  3 runs: ${LABELS[*]}"
+echo "  1 run: ${LABELS[*]}"
 echo "============================================"
 
-for IDX in 0 1 2; do
+for IDX in 0; do
     LABEL="${LABELS[$IDX]}"
     LR="${LRS[$IDX]}"
     NIT="${N_ITERS[$IDX]}"
@@ -71,7 +69,7 @@ for IDX in 0 1 2; do
 
     echo ""
     echo "============================================"
-    echo ">>> Run $((IDX+1))/3 : ${LABEL}"
+    echo ">>> Run $((IDX+1))/1 : ${LABEL}"
     echo "    lr=${LR}  n_iters=${NIT}  bs=${BS}"
     echo "    lambda=${LAM}  reduced_dim=${RD}  use_bounds=${UB}"
     echo "    skip_svd=${SS}  skip_interval=${SI}"
@@ -144,5 +142,5 @@ done
 
 echo ""
 echo "============================================"
-echo "All 3 runs complete."
+echo "All runs complete."
 echo "============================================"

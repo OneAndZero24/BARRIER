@@ -184,7 +184,7 @@ class UnlearnIntervalProtection:
                 inf_high = z_max + self.infinity_scale
             elif self.decomp_method == "pca":
                 decomp_tag = "pca"
-                C = (Xc.T @ Xc) / max(Xc.size(0) - 1, 1)
+                C = Xc.T @ Xc
                 eigenvalues, V = torch.linalg.eigh(C)
                 eigenvalues = eigenvalues.flip(0)
                 V = V.T.flip(0)
@@ -192,7 +192,7 @@ class UnlearnIntervalProtection:
                 k = min(self.reduced_dim, V.size(0))
                 U_forget = V[:k]
                 U_residual = V[k:]
-                S_residual = eigenvalues[k:].sqrt()
+                S_residual = eigenvalues[k:].clamp(min=0).sqrt()
 
                 Z_forget = Xc @ U_forget.T
                 z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)

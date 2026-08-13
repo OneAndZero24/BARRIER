@@ -777,8 +777,9 @@ class Diffusion(object):
                 with torch.no_grad():
                     ref_output = ref_model(forget_x_noisy, t.float(), forget_c, mode="train", cond_drop_prob=0.0)
                 output = model(forget_x_noisy, t.float(), forget_c, mode="train", cond_drop_prob=0.0)
-                ref_probs = F.softmax(ref_output.flatten(1), dim=1)
-                log_probs = F.log_softmax(output.flatten(1), dim=1)
+                kl_temp = getattr(config.training, 'kl_temp', 0.1)
+                ref_probs = F.softmax(ref_output.flatten(1) / kl_temp, dim=1)
+                log_probs = F.log_softmax(output.flatten(1) / kl_temp, dim=1)
                 forget_loss = -F.kl_div(log_probs, ref_probs, reduction='batchmean')
             else:
                 # Default: Gradient Ascent

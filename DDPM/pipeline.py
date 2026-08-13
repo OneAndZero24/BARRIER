@@ -78,6 +78,12 @@ def build_runner_config(cfg):
     runner_cfg["training"]["batch_size"] = uc.get("batch_size", runner_cfg["training"].get("batch_size", 128))
     runner_cfg["training"]["n_iters"] = uc.get("n_iters", runner_cfg["training"].get("n_iters", 1500))
 
+    # Generic training overrides (e.g. kl_temp from wandb sweep)
+    tc = cfg.get("training", {})
+    if tc:
+        for k, v in tc.items():
+            runner_cfg["training"][k] = v
+
     # InTAct params
     ic = cfg.get("intact", {})
     if ic:
