@@ -45,7 +45,7 @@ eta: 1.0
 unlearn:
   mode: "intact"                     # intact | saliency_unlearn | forget | retrain | train_esd
   label_to_forget: 0
-  method: "rl"                       # ga | rl (base method for unlearning)
+  method: "rl"                       # ga | rl | kl | esd (base method for unlearning)
   lr: 1.0e-3
   n_iters: 1500
   batch_size: 128

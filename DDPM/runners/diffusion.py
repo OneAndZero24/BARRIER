@@ -583,6 +583,13 @@ class Diffusion(object):
                     )
                     pseudo = model(forget_x, t.float(), pseudo_c, mode="train").detach()
                     forget_loss = criteria(pseudo, output)
+                elif args.method == "esd":
+                    with torch.no_grad():
+                        uncond = model(
+                            forget_x, t.float(), forget_c, mode="train",
+                            cond_drop_prob=1.0,
+                        )
+                    forget_loss = criteria(output, uncond)
 
             loss = forget_loss + args.alpha * remain_loss
 
@@ -781,6 +788,18 @@ class Diffusion(object):
                 ref_probs = F.softmax(ref_output.flatten(1) / kl_temp, dim=1)
                 log_probs = F.log_softmax(output.flatten(1) / kl_temp, dim=1)
                 forget_loss = -F.kl_div(log_probs, ref_probs, reduction='batchmean')
+            elif args.method == "esd":
+                # Match forget-class conditional prediction to the
+                # unconditional (null-class) prediction: min ||eps(x,c_forget) - eps(x,uncond)||^2
+                a = (1 - b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                forget_x_noisy = forget_x * a.sqrt() + e * (1.0 - a).sqrt()
+                output = model(forget_x_noisy, t.float(), forget_c, mode="train", cond_drop_prob=0.0)
+                if getattr(config.training, 'esd_frozen_uncond', False):
+                    uncond = ref_model(forget_x_noisy, t.float(), forget_c, mode="train", cond_drop_prob=1.0)
+                else:
+                    with torch.no_grad():
+                        uncond = model(forget_x_noisy, t.float(), forget_c, mode="train", cond_drop_prob=1.0)
+                forget_loss = criteria(output, uncond)
             else:
                 # Default: Gradient Ascent
                 forget_loss = -loss_registry_conditional[config.model.type](
