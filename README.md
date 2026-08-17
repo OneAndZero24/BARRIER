@@ -291,3 +291,7 @@ BARRIER/
 ## License
 
 MIT License
+
+## Acknowledgements  
+This research was funded by National Science Centre, Poland, 2023/49/B/ST6/01137.
+
