@@ -13,7 +13,7 @@
 #SBATCH --job-name=bar-g-c5
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=128GB
+#SBATCH --mem=256GB
 #SBATCH --time=48:00:00
 #SBATCH --partition=plgrid-gpu-gh200
 #SBATCH --array=0-23
