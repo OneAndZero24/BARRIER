@@ -126,7 +126,7 @@ def plot_metric(
     ax_box.grid(axis="y", alpha=0.3)
 
     means = [g.mean() if len(g) > 0 else np.nan for g in grouped]
-    sems = [g.sem() if len(g) > 0 else 0.0 for g in grouped]
+    sems = [pd.Series(g).sem() if len(g) > 1 else 0.0 for g in grouped]
     ax_bar.bar(
         x_labels, means, yerr=sems, capsize=5, color=colors, edgecolor="black", alpha=0.85,
     )
