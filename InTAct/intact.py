@@ -202,7 +202,22 @@ class UnlearnIntervalProtection:
                 inf_high = z_max + self.infinity_scale
             else:
                 decomp_tag = "svd"
-                _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
+                try:
+                    _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        raise
+                    log.warning(
+                        f"Layer {layer_name}: torch.linalg.svd failed ({e}); "
+                        f"falling back to eigh-based PCA."
+                    )
+                    decomp_tag = "pca"
+                    C = Xc.T @ Xc
+                    eigenvalues, V = torch.linalg.eigh(C)
+                    eigenvalues = eigenvalues.flip(0)
+                    V = V.T.flip(0)
+                    S = eigenvalues.clamp(min=0).sqrt()
+                    Vh = V
 
                 k = min(self.reduced_dim, Vh.size(0))
                 U_forget = Vh[:k]
