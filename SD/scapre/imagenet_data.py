@@ -143,12 +143,40 @@ def ensure_imagenet(imagenet_root: str):
     )
 
 
+def _stratified_subsample(samples, fraction, seed=42):
+    """Deterministic per-class subsample of a list of (full_idx, lbl) tuples.
+
+    Keeps `fraction` of every class (not a naive first-N slice), so the bounds
+    are not biased toward whichever classes appear first in the dataset.  This
+    mirrors `make_fractional_dataloader` used in the SD/DDPM ablations.
+    """
+    if fraction is None or fraction >= 1.0:
+        return samples
+
+    fraction = max(0.0, float(fraction))
+    generator = torch.Generator().manual_seed(seed)
+
+    by_class = {}
+    for full_idx, lbl in samples:
+        by_class.setdefault(lbl, []).append((full_idx, lbl))
+
+    selected = []
+    for lbl in sorted(by_class):
+        items = by_class[lbl]
+        perm = torch.randperm(len(items), generator=generator).tolist()
+        keep = max(1, int(len(items) * fraction))
+        selected.extend(items[i] for i in perm[:keep])
+
+    return selected
+
+
 def make_forget_remain_dataloaders(
     imagenet_root: str,
     forget_concepts: List[str],
     batch_size: int,
     image_size: int = 512,
     bounds_fraction: float = 1.0,
+    seed: int = 42,
 ) -> Tuple[DataLoader, DataLoader, List[str]]:
     """
     Create forget (target concept) and remain (all other ImageNet classes)
@@ -190,8 +218,10 @@ def make_forget_remain_dataloaders(
     f_set = set(forget_indices)
     full_ds = ImageFolder(os.path.join(imagenet_root, "train"), transform=transform)
 
-    f_samples = [(path, lbl) for path, lbl in full_ds.samples if lbl in f_set]
-    r_samples = [(path, lbl) for path, lbl in full_ds.samples if lbl not in f_set]
+    # Store the original index in full_ds so __getitem__ is O(1) (the old
+    # `samples.index(...)` scan made every batch O(N)).
+    f_samples = [(i, lbl) for i, (path, lbl) in enumerate(full_ds.samples) if lbl in f_set]
+    r_samples = [(i, lbl) for i, (path, lbl) in enumerate(full_ds.samples) if lbl not in f_set]
 
     # Map labels to descriptive prompt strings
     descriptions = [""] * 1000
@@ -200,25 +230,22 @@ def make_forget_remain_dataloaders(
 
     class ForgetDS(Dataset):
         def __init__(self, samples, full_dataset):
-            self.samples = samples
+            self.samples = samples  # list of (full_idx, lbl)
             self.full_ds = full_dataset
 
         def __len__(self):
             return len(self.samples)
 
         def __getitem__(self, idx):
-            path, lbl = self.samples[idx]
-            full_idx = full_ds.samples.index((path, lbl))
+            full_idx, _lbl = self.samples[idx]
             return self.full_ds[full_idx]
 
     fds = ForgetDS(f_samples, full_ds)
     rds = ForgetDS(r_samples, full_ds)
 
     if bounds_fraction < 1.0:
-        n_f = max(1, int(len(fds) * bounds_fraction))
-        n_r = max(1, int(len(rds) * bounds_fraction))
-        fds = Subset(fds, list(range(min(n_f, len(fds)))))
-        rds = Subset(rds, list(range(min(n_r, len(rds)))))
+        fds = ForgetDS(_stratified_subsample(f_samples, bounds_fraction, seed=seed), full_ds)
+        rds = ForgetDS(_stratified_subsample(r_samples, bounds_fraction, seed=seed), full_ds)
 
     f_dl = DataLoader(fds, batch_size=batch_size, shuffle=True)
     r_dl = DataLoader(rds, batch_size=batch_size, shuffle=True)
