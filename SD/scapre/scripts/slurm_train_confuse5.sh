@@ -69,6 +69,7 @@ python scapre/train.py \
     --infinity_scale 18.0 \
     --use_actual_bounds \
     --bounds_fraction 0.5 \
+    --bounds_remain_fraction 0.1 \
     --model_save_dir "$RESULTS_BASE/models"
 
 echo "Training complete."

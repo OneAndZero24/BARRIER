@@ -176,6 +176,7 @@ def make_forget_remain_dataloaders(
     batch_size: int,
     image_size: int = 512,
     bounds_fraction: float = 1.0,
+    bounds_remain_fraction: Optional[float] = None,
     seed: int = 42,
 ) -> Tuple[DataLoader, DataLoader, List[str]]:
     """
@@ -245,7 +246,10 @@ def make_forget_remain_dataloaders(
 
     if bounds_fraction < 1.0:
         fds = ForgetDS(_stratified_subsample(f_samples, bounds_fraction, seed=seed), full_ds)
-        rds = ForgetDS(_stratified_subsample(r_samples, bounds_fraction, seed=seed), full_ds)
+
+    remain_frac = bounds_fraction if bounds_remain_fraction is None else bounds_remain_fraction
+    if remain_frac < 1.0:
+        rds = ForgetDS(_stratified_subsample(r_samples, remain_frac, seed=seed), full_ds)
 
     f_dl = DataLoader(fds, batch_size=batch_size, shuffle=True)
     r_dl = DataLoader(rds, batch_size=batch_size, shuffle=True)

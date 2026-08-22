@@ -89,6 +89,8 @@ def parse_args():
     p.add_argument("--use_actual_bounds", action="store_true")
     p.add_argument("--normalize_protection", action="store_true", default=True)
     p.add_argument("--bounds_fraction", type=float, default=1.0)
+    p.add_argument("--bounds_remain_fraction", type=float, default=None,
+                   help="Remain-set bounds fraction (defaults to --bounds_fraction).")
     p.add_argument("--seed", type=int, default=42,
                    help="Seed for the deterministic forget/remain bounds subsample.")
 
@@ -234,6 +236,7 @@ def train_imagenet_intact(args):
     forget_dl, remain_dl, descriptions = make_forget_remain_dataloaders(
         args.imagenet_root, concepts, args.batch_size, args.image_size,
         bounds_fraction=args.bounds_fraction,
+        bounds_remain_fraction=args.bounds_remain_fraction,
         seed=args.seed,
     )
 
