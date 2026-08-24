@@ -13,9 +13,24 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import torch
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms as T
 from torchvision.datasets import ImageFolder
+
+
+def _safe_loader(path):
+    """Load an image, returning a blank RGB image for corrupt/broken files.
+
+    ImageNet contains a handful of truncated JPEGs that make PIL's default
+    loader raise ``OSError: broken data stream``; a single such file must not
+    kill the whole run.
+    """
+    try:
+        with Image.open(path) as img:
+            return img.convert("RGB")
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return Image.new("RGB", (256, 256))
 
 
 def get_transform(image_size: int = 512):
@@ -217,7 +232,7 @@ def make_forget_remain_dataloaders(
         raise ValueError(f"No ImageNet class indices found for concepts: {forget_concepts}")
 
     f_set = set(forget_indices)
-    full_ds = ImageFolder(os.path.join(imagenet_root, "train"), transform=transform)
+    full_ds = ImageFolder(os.path.join(imagenet_root, "train"), transform=transform, loader=_safe_loader)
 
     # Store the original index in full_ds so __getitem__ is O(1) (the old
     # `samples.index(...)` scan made every batch O(N)).
