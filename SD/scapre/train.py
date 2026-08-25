@@ -30,6 +30,7 @@ from omegaconf import OmegaConf
 SCRIPT_DIR = Path(__file__).resolve().parent
 SD_DIR = SCRIPT_DIR.parent
 
+sys.path.insert(0, str(SCRIPT_DIR))      # For scapre.* / imagenet_data
 sys.path.insert(0, str(SD_DIR / "train-scripts"))
 sys.path.insert(0, str(SD_DIR.parent))  # For InTAct
 sys.path.insert(0, str(SD_DIR))         # For LDM
@@ -77,6 +78,9 @@ def parse_args():
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--image_size", type=int, default=512)
+    p.add_argument("--max_steps", type=int, default=None,
+                   help="Early-stop after N total optimizer steps (smoke tests).")
+
 
     # InTAct
     p.add_argument("--targets", type=str, nargs="+",
@@ -272,11 +276,16 @@ def train_imagenet_intact(args):
                          "everyday item", "food photograph", "landscape"]]
 
     from tqdm import tqdm
+    step_count = 0
     for epoch in range(args.epochs):
         forget_dl_iter = iter(forget_dl)
         remain_dl_iter = iter(remain_dl)
         with tqdm(total=len(forget_dl), desc=f"Epoch {epoch}") as pbar:
             for i in range(len(forget_dl)):
+                if args.max_steps is not None and step_count >= args.max_steps:
+                    print(f"Smoke: stopping early after {step_count} steps "
+                          f"(--max_steps={args.max_steps})")
+                    break
                 optimizer.zero_grad()
 
                 try:
@@ -323,6 +332,10 @@ def train_imagenet_intact(args):
                     "total": f"{total_loss.item():.4f}",
                 })
                 pbar.update(1)
+                step_count += 1
+
+            if args.max_steps is not None and step_count >= args.max_steps:
+                break
 
     # --- save ---
     model_dir = Path(args.model_save_dir) / name
