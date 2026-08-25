@@ -346,7 +346,8 @@ def train_imagenet_intact(args):
     print(f"Saved CompVis: {compvis_path}")
 
     savemodelDiffusers(name, args.config_path, args.diffusers_config_path,
-                       device=device, save_dir=args.model_save_dir)
+                       device=device, save_dir=args.model_save_dir,
+                       diffusers_name=f"diffusers-{name}")
     diffusers_path = model_dir / f"diffusers-{name}.pt"
     print(f"Saved Diffusers: {diffusers_path}")
 

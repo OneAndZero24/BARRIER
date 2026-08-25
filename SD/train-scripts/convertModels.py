@@ -1018,7 +1018,7 @@ def convert_open_clip_checkpoint(checkpoint):
     return text_model
 
 
-def savemodelDiffusers(name, compvis_config_file, diffusers_config_file, device="cpu", save_dir="models"):
+def savemodelDiffusers(name, compvis_config_file, diffusers_config_file, device="cpu", save_dir="models", diffusers_name=None):
     checkpoint_path = f"{save_dir}/{name}/{name}.pt"
 
     original_config_file = compvis_config_file
@@ -1029,7 +1029,9 @@ def savemodelDiffusers(name, compvis_config_file, diffusers_config_file, device=
     image_size = 512
     prediction_type = "epsilon"
     extract_ema = False
-    dump_path = f"{save_dir}/{name}/{name.replace('compvis','diffusers')}.pt"
+    if diffusers_name is None:
+        diffusers_name = name.replace("compvis", "diffusers")
+    dump_path = f"{save_dir}/{name}/{diffusers_name}.pt"
     upcast_attention = False
 
     if device is None:

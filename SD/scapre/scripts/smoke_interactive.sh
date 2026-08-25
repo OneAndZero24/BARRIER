@@ -118,10 +118,12 @@ run_stage "Confuse5 train ($SMOKE_STEPS steps)" python scapre/train.py \
     --bounds_fraction 0.01 --bounds_remain_fraction 0.005 \
     --model_name "$C5_NAME"
 
-if [ -f "$SMOKE_MODELS/$C5_NAME/diffusers-$C5_NAME.pt" ]; then
+sleep 5   # let Lustre/NFS flush the checkpoint listing
+C5_CKPT=$(ls "$SMOKE_MODELS/$C5_NAME"/diffusers-*.pt 2>/dev/null | head -1)
+if [ -n "$C5_CKPT" ]; then
     run_stage "Confuse5 eval (${SMOKE_PNG}/concept)" python scapre/evaluate.py \
         --benchmark confuse5 \
-        --ckpt_name "$SMOKE_MODELS/$C5_NAME/diffusers-$C5_NAME.pt" \
+        --ckpt_name "$C5_CKPT" \
         --output_dir "$SMOKE_RESULTS/$C5_NAME" \
         --max_prompts_per_concept "$SMOKE_PNG" \
         --coco_prompts_source "$COCO_CSV" \
@@ -138,10 +140,12 @@ run_stage "Diversi50 train ($SMOKE_STEPS steps)" python scapre/train.py \
     --bounds_fraction 0.01 --bounds_remain_fraction 0.005 \
     --model_name "$DV_NAME"
 
-if [ -f "$SMOKE_MODELS/$DV_NAME/diffusers-$DV_NAME.pt" ]; then
+sleep 5   # let Lustre/NFS flush the checkpoint listing
+DV_CKPT=$(ls "$SMOKE_MODELS/$DV_NAME"/diffusers-*.pt 2>/dev/null | head -1)
+if [ -n "$DV_CKPT" ]; then
     run_stage "Diversi50 eval (${SMOKE_PNG}/concept)" python scapre/evaluate.py \
         --benchmark diversi50 \
-        --ckpt_name "$SMOKE_MODELS/$DV_NAME/diffusers-$DV_NAME.pt" \
+        --ckpt_name "$DV_CKPT" \
         --output_dir "$SMOKE_RESULTS/$DV_NAME" \
         --max_prompts_per_concept "$SMOKE_PNG" \
         --coco_prompts_source "$COCO_CSV" \
