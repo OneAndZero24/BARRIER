@@ -1,11 +1,10 @@
-#!/bin/bash -l
+#!/bin/bash
 # ============================================================================
 # SLURM + wandb sweep - ESC vs InTAct Tiny-ImageNet ViT (cookbook pattern)
 #
-# Fully self-contained: preflights the environment, exports the wandb API key
-# from ~/.netrc, and uses mkdir-lock leader election so the first array task
-# creates the sweep and the rest join it.  Failures are loud and propagate to
-# all tasks (no silent 30-min hangs).
+# Fully self-contained: preflights the environment and uses mkdir-lock leader
+# election so the first array task creates the sweep and the rest join it.
+# Failures are loud and propagate to all tasks (no silent 30-min hangs).
 #
 # Usage - just submit:
 #   sbatch slurm_wandb_sweep.sh
@@ -39,7 +38,7 @@ echo "===== task $TASK_ID on $(hostname) $(date '+%F %T') ====="
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ESC_DIR="${ESC_DIR:-$PWD}"
 CONDA_ENV="${CONDA_ENV:-/shared/results/common/miksa/envs/ESC}"
-CONDA_SH="${CONDA_SH:-$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh}"
+CONDA_SH="${CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}"
 
 SWEEP_YAML="${SWEEP_YAML:-configs/sweep_bayes_intact_tinyimagenet.yaml}"
 SWEEP_NAME="${SWEEP_NAME:-intact-bayes-40}"
