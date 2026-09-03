@@ -1,0 +1,64 @@
+# ============================================================================
+# wandb sweep - InTAct (BARRIER) hyperparameter search, Tiny-ImageNet ViT-B/16
+#
+# Class forgetting (Forget Class = 4, ESC convention), protects the ViT head.
+# Anchor setup: reduced_dim 32, lambda_interval 1, SGD lr 1e-3, 5 epochs.
+# Bayesian optimization on `score` (maximize): 100*(remain_acc - forget_acc).
+#
+# Usage (see slurm_wandb_sweep.sh for SLURM):
+#   cd Classification/ESC
+#   wandb sweep configs/sweep_bayes_intact_tinyimagenet.yaml
+#   wandb agent <sweep-id> --count 40
+# ============================================================================
+program: unlearn_intact.py
+method: bayes
+entity: oneandzero24
+project: esc-intact-tinyimagenet
+name: intact-bayes-40
+
+metric:
+  name: score
+  goal: maximize
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --method
+  - intact
+  - --data_name
+  - tiny_imagenet
+  - --model_name
+  - vit_base_patch16_224
+  - --dataset_dir
+  - /shared/results/common/miksa/ESC/data
+  - --checkpoint_dir
+  - /shared/results/common/miksa/ESC/checkpoints
+  - --forget_class
+  - 4
+  - --batch_size
+  - 64
+  - --intact_targets
+  - head
+  - --evaluation
+  - --wandb
+
+parameters:
+  intact_lambda:
+    distribution: log_uniform_values
+    min: 0.1
+    max: 10.0
+
+  intact_reduced_dim:
+    values: [16, 32, 64]
+
+  intact_base_method:
+    values: [ga, rl]
+
+  unlearn_epochs:
+    values: [3, 5, 10, 20]
+
+  lr:
+    distribution: log_uniform_values
+    min: 1.0e-4
+    max: 3.0e-3

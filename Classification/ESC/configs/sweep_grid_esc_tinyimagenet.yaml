@@ -1,0 +1,46 @@
+# ============================================================================
+# wandb sweep - ESC baseline runs, Tiny-ImageNet ViT-B/16 (grid over p)
+#
+# Same project/metric as the InTAct bayes sweep (esc-intact-tinyimagenet,
+# score = 100*(remain_acc - forget_acc)), so both are comparable in one
+# dashboard. ESC has a single hyperparameter, so a grid is used.
+#
+# Usage:
+#   cd Classification/ESC
+#   wandb sweep configs/sweep_grid_esc_tinyimagenet.yaml
+#   wandb agent <sweep-id> --count 5
+# ============================================================================
+program: unlearn_intact.py
+method: grid
+entity: oneandzero24
+project: esc-intact-tinyimagenet
+name: esc-grid
+
+metric:
+  name: score
+  goal: maximize
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --method
+  - ESC
+  - --data_name
+  - tiny_imagenet
+  - --model_name
+  - vit_base_patch16_224
+  - --dataset_dir
+  - /shared/results/common/miksa/ESC/data
+  - --checkpoint_dir
+  - /shared/results/common/miksa/ESC/checkpoints
+  - --forget_class
+  - 4
+  - --batch_size
+  - 64
+  - --evaluation
+  - --wandb
+
+parameters:
+  p:
+    values: [0.5, 1.0, 1.5, 2.0, 2.5]
