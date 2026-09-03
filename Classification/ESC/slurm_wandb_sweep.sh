@@ -23,8 +23,9 @@
 set -euo pipefail
 
 # ---- environment (edit here or export on submit) ----
-ESC_DIR="${ESC_DIR:-$HOME/BARRIER/Classification/ESC}"
-CONDA_ENV="${CONDA_ENV:-ESC}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ESC_DIR="${ESC_DIR:-$SCRIPT_DIR}"
+CONDA_ENV="${CONDA_ENV:-/shared/results/common/miksa/envs/ESC}"
 CONDA_SH="${CONDA_SH:-$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh}"
 
 # ---- sweep config ----
