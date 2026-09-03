@@ -22,7 +22,7 @@ metric:
 
 command:
   - ${env}
-  - /shared/results/common/miksa/envs/ESC/bin/python
+  - python
   - ${program}
   - --method
   - ESC
@@ -31,7 +31,7 @@ command:
   - --model_name
   - vit_base_patch16_224
   - --dataset_dir
-  - /shared/results/common/miksa/ESC/data
+  - /shared/sets/datasets
   - --checkpoint_dir
   - /shared/results/common/miksa/ESC/checkpoints
   - --forget_class
