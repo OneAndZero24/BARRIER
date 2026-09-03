@@ -33,8 +33,11 @@ echo "===== task $TASK_ID on $(hostname) $(date '+%F %T') ====="
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+# SLURM starts jobs in the submission directory, so $PWD is the project dir.
+# (BASH_SOURCE[0] is NOT reliable on compute nodes - it points at the spooled
+# copy of the script under /var/spool/slurmd/job*.)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ESC_DIR="${ESC_DIR:-$SCRIPT_DIR}"
+ESC_DIR="${ESC_DIR:-$PWD}"
 CONDA_ENV="${CONDA_ENV:-/shared/results/common/miksa/envs/ESC}"
 CONDA_SH="${CONDA_SH:-$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh}"
 
