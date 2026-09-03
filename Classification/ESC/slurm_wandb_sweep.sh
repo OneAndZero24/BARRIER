@@ -21,7 +21,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --qos=big
-#SBATCH --partition=dgxa100
+#SBATCH --partition=dgx
 #SBATCH --time=24:00:00
 #SBATCH --array=0-3
 
