@@ -22,7 +22,7 @@ metric:
 
 command:
   - ${env}
-  - python
+  - /shared/results/common/miksa/envs/ESC/bin/python
   - ${program}
   - --method
   - ESC

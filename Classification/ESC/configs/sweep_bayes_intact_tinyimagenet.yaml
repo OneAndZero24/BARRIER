@@ -22,7 +22,7 @@ metric:
 
 command:
   - ${env}
-  - python
+  - /shared/results/common/miksa/envs/ESC/bin/python
   - ${program}
   - --method
   - intact
@@ -53,7 +53,7 @@ parameters:
     values: [16, 32, 64]
 
   intact_base_method:
-    values: [ga, rl]
+    value: rl
 
   unlearn_epochs:
     values: [3, 5, 10, 20]
