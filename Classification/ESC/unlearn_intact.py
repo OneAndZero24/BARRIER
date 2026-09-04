@@ -54,6 +54,7 @@ def exp_summary(args):
         print(f"InTAct lambda_interval: {args.intact_lambda}")
         print(f"InTAct targets: {args.intact_targets}")
         print(f"InTAct base method: {args.intact_base_method}")
+        print(f"InTAct forget weight: {args.intact_forget_weight}")
     print(f"Data Name: {args.data_name}")
     print(f"Forget Class: {args.forget_class}")
     print(f"Model Name: {args.model_name}")
@@ -160,6 +161,8 @@ def parse_args():
                         help='InTAct: use actual (min/max) bounds instead of scale-based infinity bounds')
     parser.add_argument('--unlearn_epochs', type=int, default=10,
                         help='InTAct unlearning epochs (one epoch per forget-set pass)')
+    parser.add_argument('--intact_forget_weight', type=float, default=1.0,
+                        help='InTAct base-loss weight (aggressiveness of forgetting; protect term stays 1.0)')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (InTAct)')
     parser.add_argument('--weight_decay', type=float, default=5e-4, help='SGD weight decay (InTAct)')
     parser.add_argument('--unfreeze_backbone', action='store_true',
@@ -445,7 +448,7 @@ def main(args):
                     base_loss = -criterion(outputs, y)
 
                 protect_loss = protection.compute_protection_loss(model, device)
-                total_loss = base_loss + protect_loss
+                total_loss = args.intact_forget_weight * base_loss + protect_loss
                 total_loss.backward()
                 optimizer.step()
 

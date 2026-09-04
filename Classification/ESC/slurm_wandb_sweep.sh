@@ -24,13 +24,14 @@
 # ============================================================================
 
 #SBATCH --job-name=esc-intact-sweep
-#SBATCH --qos=batch
+#SBATCH --qos=normal
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --partition=rtx4090_batch
+#SBATCH --partition=rtx4090
+#SBATCH --time=24:00:00
 #SBATCH --array=0-3
-# Alternatives: --partition=rtx4090 --qos=normal (interactive/short), or --partition=dgx --qos=big
+# Alternatives: --partition=rtx4090_batch --qos=batch (preemptible), or --partition=dgx --qos=big
 
 set -euo pipefail
 
