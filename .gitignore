@@ -1,2 +1,4 @@
 __pycache__
 InTAct/data
+InTact/toy_figs
+*.csv
