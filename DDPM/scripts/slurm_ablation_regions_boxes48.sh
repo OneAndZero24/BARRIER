@@ -1,16 +1,13 @@
 #!/bin/bash
 # ============================================================================
-# SLURM Array Job – Ablation over Protected-Region Constructions (BARRIER)
+# SLURM Array Job – Region Ablation, boxes_4 / boxes_8 only
 # ============================================================================
-# Runs the full ablation grid for DDPM class unlearning (CIFAR-10, forget
-# class 0 / airplane) held at the paper's configuration:
-#   targets = QKV attention projections + class-embedding MLP
-#   k = 32, Adam, lr = 1e-4, 3000 steps, RL objective, no remain-set loss
-#
-# Grid: 5 region constructions x 6 lambdas x 3 seeds = 90 jobs
-#   region_mode: two_corner | two_random | boxes_4 | boxes_8 | slabs_2k
+# Same protocol as scripts/slurm_ablation_regions.sh but restricted to the two
+# predefined m-group constructions:
+#   region_mode: boxes_4 | boxes_8
 #   lambda:      0.5 1 2 5 10 25
 #   seed:        0 1 2
+# Grid: 2 variants x 6 lambdas x 3 seeds = 36 jobs
 #
 # Each job appends a row to r/regions.csv and per-layer diagnostics to
 # r/diagnostics.csv (created under DDPM/results/).  After all jobs:
@@ -24,16 +21,16 @@
 #
 # Usage:
 #   cd DDPM
-#   sbatch scripts/slurm_ablation_regions.sh
+#   sbatch scripts/slurm_ablation_regions_boxes48.sh
 # ============================================================================
 
-#SBATCH --job-name=ablate-regions
+#SBATCH --job-name=ablate-boxes48
 #SBATCH --qos=batch
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32GB
 #SBATCH --partition=rtx4090_batch
-#SBATCH --array=0-89
+#SBATCH --array=0-35
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -45,7 +42,7 @@ export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 # Grid mapping (array index -> variant, lambda, seed)
 #   idx = 18*v + 6*lam_idx + seed_idx
 # ============================================================================
-VARIANTS=(two_corner two_random boxes_4 boxes_8 slabs_2k)
+VARIANTS=(boxes_4 boxes_8)
 LAMBDAS=(0.5 1 2 5 10 25)
 SEEDS=(0 1 2)
 
@@ -59,7 +56,7 @@ LAMBDA=${LAMBDAS[$L_IDX]}
 SEED=${SEEDS[$S_IDX]}
 
 echo "============================================"
-echo "Region ablation – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
+echo "boxes4/8 ablation – Job ${SLURM_ARRAY_JOB_ID}_${IDX}"
 echo "  variant=${VARIANT}  lambda=${LAMBDA}  seed=${SEED}"
 echo "============================================"
 
@@ -71,4 +68,4 @@ python ablation_regions.py \
     --n_iters 3000 \
     --results_dir /shared/results/common/miksa/intact/DDPM/r
 
-echo "Region ablation – ${VARIANT} lam=${LAMBDA} seed=${SEED} – Job ${IDX} complete."
+echo "boxes4/8 ablation – ${VARIANT} lam=${LAMBDA} seed=${SEED} – Job ${IDX} complete."

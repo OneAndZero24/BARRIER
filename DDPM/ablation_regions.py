@@ -655,6 +655,41 @@ def summarize(results_dir):
     log.info(f"Wrote {out} (aggregated {len(rows)} unique runs; "
              f"lambdas present: {lambdas})")
 
+    # --- console view: mean +- std per (variant, lambda) -------------------
+    print()
+    hdr = f"{'variant':<12s} {'lam':>5s} {'n':>2s} {'UA':>14s} {'TA':>14s} {'FID':>14s} {'prot-ms':>12s} {'wall(s)':>10s}"
+    print(hdr)
+    print("-" * len(hdr))
+    for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k"):
+        for lam in lambdas:
+            entries = by_var_lam.get((var, lam), [])
+            if not entries:
+                continue
+            ua_m, ua_s = agg(entries, "ua")
+            ta_m, ta_s = agg(entries, "ta")
+            fid_m, fid_s = agg(entries, "fid")
+            pl_m, pl_s = agg(entries, "prot_loss_ms")
+            tw_m, tw_s = agg(entries, "total_wall_s")
+            lam_txt = f"{lam:.1f}".rstrip("0").rstrip(".")
+            print(
+                f"{var:<12s} {lam_txt:>5s} {len(entries):>2d} "
+                f"{_fmt(ua_m)}+-{_fmt(ua_s):>7s} "
+                f"{_fmt(ta_m)}+-{_fmt(ta_s):>7s} "
+                f"{_fmt(fid_m)}+-{_fmt(fid_s):>7s} "
+                f"{_fmt(pl_m,1)}+-{_fmt(pl_s,1):>5s} "
+                f"{_fmt(tw_m,0):>10s}"
+            )
+    best_line = "best per variant: " + ", ".join(
+        f"{var}(λ={_fmt(variant_best[var][0],1).rstrip('0').rstrip('.')}) "
+        f"UA={_fmt(_mean_std([float(variant_best[var][1]['ua'])])[0])} "
+        f"TA={_fmt(_mean_std([float(variant_best[var][1]['ta'])])[0])} "
+        f"FID={_fmt(_mean_std([float(variant_best[var][1]['fid'])])[0])}"
+        for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k")
+        if var in variant_best
+    )
+    print()
+    print(best_line)
+
 
 # ============================================================================
 # Main
@@ -668,7 +703,7 @@ def main():
     parser.add_argument("--config", default="configs/pipeline_fulleval.yaml")
     parser.add_argument("--n_iters", type=int, default=3000)
     parser.add_argument("--label_to_forget", type=int, default=0)
-    parser.add_argument("--results_dir", default="./results")
+    parser.add_argument("--results_dir", default="/shared/results/common/miksa/intact/DDPM/r")
     parser.add_argument("--log_freq", type=int, default=100)
     parser.add_argument("--microbench_warmup", type=int, default=20)
     parser.add_argument("--microbench_iters", type=int, default=200)
@@ -738,7 +773,7 @@ def main():
     # ---- model + protection (paper config) --------------------------------
     model = Conditional_Model(runner_config)
     states = torch.load(
-        os.path.join(args.ckpt_folder, "ckpts", "ckpt.pth"),
+        os.path.join(runner_args.ckpt_folder, "ckpts", "ckpt.pth"),
         map_location=device,
     )
     model = model.to(device)
