@@ -18,15 +18,41 @@ log = logging.getLogger(__name__)
 # complement of the forget box [z_min, z_max] inside the envelope
 # [inf_low, inf_high].  boxes_4 / boxes_8 are the predefined m-group family
 # (2m boxes): each box is the full envelope clipped low/high on one consecutive
-# group of coordinates.
+# group of coordinates.  env_box is the single-box variant T(inf_low, inf_high):
+# the worst case over the complement equals the worst case over the envelope.
 
-REGION_MODES = ("two_corner", "two_random", "slabs_2k", "boxes_4", "boxes_8")
+REGION_MODES = ("two_corner", "two_random", "slabs_2k", "boxes_4", "boxes_8", "env_box")
+
+# Experiment 7: alpha is reported as a percent (1/5/10) and maps to the
+# lower/upper percentile fractions used for z_min / z_max.
+def percentile_alpha_to_quantiles(alpha):
+    """alpha in {1, 5, 10} -> (lower, upper) percentile fractions."""
+    if alpha not in (1, 5, 10):
+        raise ValueError(f"alpha must be one of (1, 5, 10), got {alpha}")
+    return alpha / 100.0, 1.0 - alpha / 100.0
+
+# Which part of Lemma 1's centre/width identity the interval term evaluates.
+#   full        : the historical expression over the box corners (current loss)
+#   width_only  : 0.5 * || |delta_f| @ w ||^2 per box        (Experiment 4b)
+#   centre_only : 2 * || delta_f @ c ||^2 per box            (Experiment 4c)
+#   full_decomp : width_only + centre_only via the exact (F1) route; used by
+#                 the bitwise (b)+(c) == (a) unit test, not an ablation config
+#   off         : no interval terms (L_mean / L_res only)
+INTERVAL_MODES = ("full", "width_only", "centre_only", "full_decomp", "off")
 
 
 def two_corner_boxes(inf_low, z_min, z_max, inf_high):
     """Current (baseline) layout: the two box shapes "all coordinates below
     z_min" and "all coordinates above z_max".  Returns a list of (l, u)."""
     return [(inf_low, z_min), (z_max, inf_high)]
+
+
+def env_box_boxes(inf_low, z_min, z_max, inf_high):
+    """Cheap exact-complement variant (Experiment 5): a single box spanning the
+    whole envelope.  Every envelope vertex lies outside the control region
+    [z_min, z_max], so the worst case over the complement equals the worst case
+    over the envelope; two squared terms are enough."""
+    return [(inf_low, inf_high)]
 
 
 def random_boxes(inf_low, z_min, z_max, inf_high, side):
@@ -102,6 +128,8 @@ def make_region_boxes(region_mode, inf_low, z_min, z_max, inf_high, side=None):
         return group_block_boxes(inf_low, z_min, z_max, inf_high, 2)
     if region_mode == "boxes_8":
         return group_block_boxes(inf_low, z_min, z_max, inf_high, 4)
+    if region_mode == "env_box":
+        return env_box_boxes(inf_low, z_min, z_max, inf_high)
     raise ValueError(f"Unknown region_mode {region_mode!r} (expected one of {REGION_MODES})")
 
 
@@ -205,6 +233,32 @@ class UnlearnIntervalProtection:
         region_mode: str = "two_corner",
         normalize_region: bool = False,
         region_random_seed: int = 0,
+
+        # --- Mechanism / design-choice experiments --------------------------
+        # interval_mode:  which part of Lemma 1's identity the interval term
+        #                 evaluates ("full" / "width_only" / "centre_only" /
+        #                 "off"; "full_decomp" is the exact (F1) route used by
+        #                 the bitwise (b)+(c)==(a) test — not an ablation flag).
+        # include_db:     add delta_b to each of the four corner legs of the
+        #                 interval terms (InTAct Eqs. 35-36; Experiment 8).
+        #                 Valid with interval_mode "full" only, since the (F1)
+        #                 centre/width identity does not hold with delta_b in
+        #                 the legs.  L_mean keeps its delta_b term regardless.
+        # include_mean:   L_mean = ||delta_W @ mu + delta_b||^2 on/off.
+        # include_res:    L_res  = ||delta_W @ Ur.T @ Sr||^2 on/off.
+        # sign_flip_frac: fraction of U_forget rows whose sign is flipped
+        #                 BEFORE the bounds are recomputed from the data
+        #                 (SVD sign-convention sensitivity; Experiment 6).
+        # sign_flip_seed: which rows get flipped (deterministic per run).
+        # uniform_margin: replace the per-coordinate envelope margins by their
+        #                 mean while keeping z_min/z_max (Experiment 3).
+        interval_mode: str = "full",
+        include_db: bool = False,
+        include_mean: bool = True,
+        include_res: bool = True,
+        sign_flip_frac: float = 0.0,
+        sign_flip_seed: int = 0,
+        uniform_margin: bool = False,
     ):
         self.targets = targets
         self.lambda_interval = lambda_interval
@@ -234,6 +288,29 @@ class UnlearnIntervalProtection:
             )
         self.normalize_region = normalize_region
         self.region_random_seed = int(region_random_seed)
+
+        self.interval_mode = interval_mode
+        if self.interval_mode not in INTERVAL_MODES:
+            raise ValueError(
+                f"interval_mode must be one of {INTERVAL_MODES}, got {self.interval_mode!r}"
+            )
+        if include_db and self.interval_mode != "full":
+            raise ValueError(
+                "include_db requires interval_mode='full' (the (F1) centre/width "
+                "identity does not hold with delta_b in the legs)"
+            )
+        if include_db:
+            log.info("include_db=True: delta_b enters the interval corner legs "
+                     "(InTAct Eqs. 35-36) as well as L_mean")
+        self.include_db = include_db
+        self.include_mean = include_mean
+        self.include_res = include_res
+
+        self.sign_flip_frac = float(sign_flip_frac)
+        if not (0.0 <= self.sign_flip_frac <= 1.0):
+            raise ValueError(f"sign_flip_frac must be in [0, 1], got {sign_flip_frac}")
+        self.sign_flip_seed = int(sign_flip_seed)
+        self.uniform_margin = bool(uniform_margin)
 
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}  # Only target layer parameters
@@ -280,6 +357,17 @@ class UnlearnIntervalProtection:
         
         # 2. Compute SVD on forget data and optionally collect projected remain data
         pca_components = {}  # Store mu and U_forget for each layer
+
+        def _maybe_flip(U):
+            """Sign-convention sensitivity (Experiment 6): flip a random subset
+            of U_forget rows BEFORE the bounds are recomputed from the data, so
+            z_min/z_max/inf_low/inf_high are consistent with the flipped basis."""
+            if self.sign_flip_frac <= 0.0 or U.size(0) == 0:
+                return U
+            gen = torch.Generator(device="cpu").manual_seed(self.sign_flip_seed)
+            mask = torch.rand(U.size(0), generator=gen) < self.sign_flip_frac
+            flip = (1.0 - 2.0 * mask.to(device=U.device, dtype=U.dtype)).unsqueeze(1)
+            return U * flip
         
         for layer_name, acts_info in acts_dict.items():
             acts = acts_info['activations']
@@ -310,8 +398,10 @@ class UnlearnIntervalProtection:
                 z_max = torch.quantile(Xc, self.upper_percentile, dim=0)
 
                 U_forget = torch.eye(mu.size(0), device=mu.device, dtype=mu.dtype)
+                U_forget = _maybe_flip(U_forget)
                 U_residual = torch.empty(0, mu.size(0), device=mu.device, dtype=mu.dtype)
                 S_residual = torch.empty(0, device=mu.device, dtype=mu.dtype)
+                S_forget = torch.empty(0, device=mu.device, dtype=mu.dtype)
                 Z_forget = Xc  # raw centred data — not used further
 
                 inf_low = z_min - self.infinity_scale
@@ -324,9 +414,10 @@ class UnlearnIntervalProtection:
                 V = V.T.flip(0)
 
                 k = min(self.reduced_dim, V.size(0))
-                U_forget = V[:k]
+                U_forget = _maybe_flip(V[:k])
                 U_residual = V[k:]
                 S_residual = eigenvalues[k:].clamp(min=0).sqrt()
+                S_forget = eigenvalues[:k].clamp(min=0).sqrt()
 
                 Z_forget = Xc @ U_forget.T
                 z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)
@@ -354,9 +445,10 @@ class UnlearnIntervalProtection:
                     Vh = V
 
                 k = min(self.reduced_dim, Vh.size(0))
-                U_forget = Vh[:k]
+                U_forget = _maybe_flip(Vh[:k])
                 U_residual = Vh[k:]
                 S_residual = S[k:]
+                S_forget = S[:k]
 
                 Z_forget = Xc @ U_forget.T
                 z_min = torch.quantile(Z_forget, self.lower_percentile, dim=0)
@@ -370,6 +462,7 @@ class UnlearnIntervalProtection:
             # remain.  The loss will skip all interval terms.
             if self.remove_top_directions and not self.skip_svd:
                 U_forget = torch.empty(0, mu.size(0), device=mu.device, dtype=mu.dtype)
+                S_forget = torch.empty(0, device=mu.device, dtype=mu.dtype)
                 z_min = torch.empty(0, device=mu.device, dtype=mu.dtype)
                 z_max = torch.empty(0, device=mu.device, dtype=mu.dtype)
                 inf_low = torch.empty(0, device=mu.device, dtype=mu.dtype)
@@ -409,6 +502,7 @@ class UnlearnIntervalProtection:
                 "U_forget": U_forget.detach().cpu(),
                 "U_residual": U_residual.detach().cpu(),
                 "S_residual": S_residual.detach().cpu(),
+                "S_forget": S_forget.detach().cpu(),
                 "z_min": z_min.detach().cpu(),
                 "z_max": z_max.detach().cpu(),
                 "inf_low": inf_low.detach().cpu(),
@@ -447,6 +541,26 @@ class UnlearnIntervalProtection:
                     
                     log.info(f"Layer {layer_name}: Updated bounds with {Z_remain.size(0)} projected remain samples")
                     del Z_remain, inf_low, inf_high, combined_min, combined_max
+
+        # 2c. Uniform-margin control (Experiment 3): replace the per-coordinate
+        # envelope margins by their mean while keeping z_min/z_max untouched.
+        if self.uniform_margin:
+            for pca_entry in self.pca_info:
+                if pca_entry["z_min"].numel() == 0:
+                    continue
+                w = torch.minimum(
+                    pca_entry["z_min"] - pca_entry["inf_low"],
+                    pca_entry["inf_high"] - pca_entry["z_max"],
+                )
+                wbar = float(w.mean().item())
+                pca_entry["inf_low"] = (pca_entry["z_min"] - wbar).clone()
+                pca_entry["inf_high"] = (pca_entry["z_max"] + wbar).clone()
+                pca_entry["uniform_margin_wbar"] = wbar
+                log.info(
+                    f"Layer {pca_entry['layer_name']}: uniform-margin control "
+                    f"wbar={wbar:.6f} (was per-coordinate in "
+                    f"[{float(w.min())}, {float(w.max())}])"
+                )
 
         # 3. Build param_to_name mapping and snapshot only target layer parameters
         self.param_to_name = {p: n for n, p in model.named_parameters()}
@@ -504,6 +618,80 @@ class UnlearnIntervalProtection:
         
         return [p for p in model.parameters() if p in self._target_params]
 
+    def _interval_chunks(self, delta_f, z_min, z_max, inf_low, inf_high, side,
+                         db_vec, dtype, device):
+        """Interval-term chunks in the exact evaluation order of the requested
+        interval_mode.
+
+        Every chunk is a scalar tensor; callers add them to the layer loss in
+        order, which preserves the historical aggregation exactly:
+          - "full" + normalize       : single chunk, torch.stack(all corner
+            terms).sum() / (2 * len(boxes))        (bitwise historical identity)
+          - "full" + no normalization: one chunk per box, the two corner terms
+            pre-summed in order (bitwise historical identity)
+          - "width_only"/"centre_only": one chunk per box (normalize: their
+            stack-sum divided by the mode's own term count = 2)
+          - "full_decomp": normalized route returns [Wnorm, Cnorm] so that
+            loss(width_only) + loss(centre_only) == loss(full_decomp) bitwise
+            with include_mean=False, include_res=False, lambda=1 (single layer)
+        """
+        boxes = make_region_boxes(
+            self.region_mode, inf_low, z_min, z_max, inf_high, side)
+        if not boxes:
+            return []
+        dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
+
+        if self.interval_mode == "full":
+            flat = []
+            pairs = []
+            for l, u in boxes:
+                leg1 = dWp @ l - dWn @ u
+                leg2 = dWp @ u - dWn @ l
+                if self.include_db:
+                    if db_vec is None:
+                        log.warning(
+                            f"include_db=True on bias-less layer: delta_b == 0, "
+                            f"interval legs unchanged"
+                        )
+                    else:
+                        leg1 = leg1 + db_vec
+                        leg2 = leg2 + db_vec
+                t1 = leg1.pow(2).mean()
+                t2 = leg2.pow(2).mean()
+                flat.append(t1)
+                flat.append(t2)
+                pairs.append(t1 + t2)
+            if self.normalize_region:
+                return [torch.stack(flat).sum() / (2 * len(boxes))]
+            return pairs
+
+        # (F1) decomposition route (width_only / centre_only / full_decomp).
+        # include_db is rejected at construction for these modes because the
+        # centre/width identity does not hold with delta_b in the legs.
+        width_terms = []
+        centre_terms = []
+        for l, u in boxes:
+            c = (l + u) / 2.0
+            w = u - l
+            width_terms.append((0.5 * (torch.abs(delta_f) @ w).pow(2)).mean())
+            centre_terms.append((2.0 * (delta_f @ c).pow(2)).mean())
+
+        if self.interval_mode == "width_only":
+            if self.normalize_region:
+                return [torch.stack(width_terms).sum() / len(width_terms)]
+            return width_terms
+        if self.interval_mode == "centre_only":
+            if self.normalize_region:
+                return [torch.stack(centre_terms).sum() / len(centre_terms)]
+            return centre_terms
+        # full_decomp: exact identity route used by the (b)+(c)==(a) test
+        if self.normalize_region:
+            return [
+                torch.stack(width_terms).sum() / len(width_terms),
+                torch.stack(centre_terms).sum() / len(centre_terms),
+            ]
+        return width_terms + centre_terms
+
     def compute_protection_loss(self, model: nn.Module, device) -> torch.Tensor:
         total_loss = torch.tensor(0.0, device=device)
         if not self.pca_info: return total_loss
@@ -511,12 +699,15 @@ class UnlearnIntervalProtection:
         num_layers = 0
         # Three mutually-exclusive interval modes:
         #   skip_svd          → raw-dim intervals  (z_min has same dim as delta_W)
-        #   skip_interval or remove_top_directions  → NO intervals at all
+        #   skip_interval or remove_top_directions or interval_mode=="off"
+        #                   → NO intervals at all
         #   otherwise         → projected intervals (U_forget-based)
         # When skip_svd is True it takes precedence: raw intervals are used
         # regardless of skip_interval / remove_top_directions.
         _use_raw_intervals = self.skip_svd
-        _no_intervals = (not self.skip_svd) and (self.skip_interval or self.remove_top_directions)
+        _no_intervals = (not self.skip_svd) and (
+            self.skip_interval or self.remove_top_directions or self.interval_mode == "off"
+        )
 
         for info in self.pca_info:
             layer_name = info["layer_name"]
@@ -553,17 +744,18 @@ class UnlearnIntervalProtection:
                 num_layers += 1
                 layer_loss = torch.tensor(0.0, device=device, dtype=target_dtype)
 
-                mean_response = torch.nn.functional.conv2d(
-                    mu_spatial, delta_W_raw,
-                    bias=delta_b,
-                    stride=target_layer.stride,
-                    padding=target_layer.padding,
-                    dilation=target_layer.dilation,
-                    groups=target_layer.groups,
-                )
-                layer_loss = layer_loss + mean_response.pow(2).mean()
+                if self.include_mean:
+                    mean_response = torch.nn.functional.conv2d(
+                        mu_spatial, delta_W_raw,
+                        bias=delta_b,
+                        stride=target_layer.stride,
+                        padding=target_layer.padding,
+                        dilation=target_layer.dilation,
+                        groups=target_layer.groups,
+                    )
+                    layer_loss = layer_loss + mean_response.pow(2).mean()
 
-                if Ur.size(0) > 0:
+                if self.include_res and Ur.size(0) > 0:
                     Ur_spatial = Ur.view(Ur.size(0), -1, 1, 1)
                     residual_responses = torch.nn.functional.conv2d(
                         Ur_spatial, delta_W_raw,
@@ -598,25 +790,11 @@ class UnlearnIntervalProtection:
                         _z_min, _z_max = z_min, z_max
                         _inf_low, _inf_high = inf_low, inf_high
 
-                    dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
-                    boxes = make_region_boxes(
-                        self.region_mode, _inf_low, _z_min, _z_max, _inf_high,
-                        info.get("region_side"),
-                    )
-                    if boxes:
-                        n_terms = 2 * len(boxes)
-                        if self.normalize_region:
-                            terms = []
-                            for l, u in boxes:
-                                terms.append((dWp @ l - dWn @ u).pow(2).mean())
-                                terms.append((dWp @ u - dWn @ l).pow(2).mean())
-                            layer_loss = layer_loss + torch.stack(terms).sum() / n_terms
-                        else:
-                            for l, u in boxes:
-                                layer_loss = layer_loss + (
-                                    (dWp @ l - dWn @ u).pow(2).mean()
-                                    + (dWp @ u - dWn @ l).pow(2).mean()
-                                )
+                    for chunk in self._interval_chunks(
+                        delta_f, _z_min, _z_max, _inf_low, _inf_high,
+                        info.get("region_side"), delta_b, target_dtype, device,
+                    ):
+                        layer_loss = layer_loss + chunk
 
             elif isinstance(target_layer, nn.Linear):
                 delta_W = delta_W_raw
@@ -625,10 +803,11 @@ class UnlearnIntervalProtection:
 
                 db = delta_b if delta_b is not None else torch.tensor(0.0, device=device, dtype=target_dtype)
 
-                global_shift = torch.matmul(delta_W, mu) + db
-                layer_loss = layer_loss + global_shift.pow(2).mean()
+                if self.include_mean:
+                    global_shift = torch.matmul(delta_W, mu) + db
+                    layer_loss = layer_loss + global_shift.pow(2).mean()
 
-                if Ur.size(0) > 0:
+                if self.include_res and Ur.size(0) > 0:
                     interference = delta_W @ Ur.T
                     weighted_interference = interference * Sr.unsqueeze(0)
                     num_activations = weighted_interference.numel()
@@ -645,25 +824,11 @@ class UnlearnIntervalProtection:
                         _z_min, _z_max = z_min, z_max
                         _inf_low, _inf_high = inf_low, inf_high
 
-                    dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
-                    boxes = make_region_boxes(
-                        self.region_mode, _inf_low, _z_min, _z_max, _inf_high,
-                        info.get("region_side"),
-                    )
-                    if boxes:
-                        n_terms = 2 * len(boxes)
-                        if self.normalize_region:
-                            terms = []
-                            for l, u in boxes:
-                                terms.append((dWp @ l - dWn @ u).pow(2).mean())
-                                terms.append((dWp @ u - dWn @ l).pow(2).mean())
-                            layer_loss = layer_loss + torch.stack(terms).sum() / n_terms
-                        else:
-                            for l, u in boxes:
-                                layer_loss = layer_loss + (
-                                    (dWp @ l - dWn @ u).pow(2).mean()
-                                    + (dWp @ u - dWn @ l).pow(2).mean()
-                                )
+                    for chunk in self._interval_chunks(
+                        delta_f, _z_min, _z_max, _inf_low, _inf_high,
+                        info.get("region_side"), delta_b, target_dtype, device,
+                    ):
+                        layer_loss = layer_loss + chunk
             else:
                 log.warning(f"Unknown layer type {type(target_layer)} for {layer_name}, skipping")
                 continue

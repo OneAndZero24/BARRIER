@@ -692,6 +692,13 @@ class Diffusion(object):
             region_mode=getattr(config.training, 'region_mode', 'two_corner'),
             normalize_region=getattr(config.training, 'normalize_region', False),
             region_random_seed=int(getattr(config.training, 'region_random_seed', 0)),
+            interval_mode=getattr(config.training, 'interval_mode', 'full'),
+            include_db=getattr(config.training, 'include_db', False),
+            include_mean=getattr(config.training, 'include_mean', True),
+            include_res=getattr(config.training, 'include_res', True),
+            sign_flip_frac=float(getattr(config.training, 'sign_flip_frac', 0.0)),
+            sign_flip_seed=int(getattr(config.training, 'sign_flip_seed', 0)),
+            uniform_margin=getattr(config.training, 'uniform_margin', False),
         )
         
         logging.info("Setting up InTAct protection...")

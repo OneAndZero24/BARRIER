@@ -61,24 +61,34 @@ from InTAct.intact import (  # noqa: E402
     UnlearnIntervalProtection,
     ddpm_forward_fn,
     make_region_boxes,
+    INTERVAL_MODES,
+    percentile_alpha_to_quantiles,
 )
 from models.diffusion import Conditional_Model  # noqa: E402
 from runners.diffusion import Diffusion  # noqa: E402
 
+from ablation_common import append_ablation_row, summarize_ablations, FIXED_LAMBDA  # noqa: E402
+
 log = logging.getLogger(__name__)
 
-REGION_MODES = ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k")
+REGION_MODES = ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k", "env_box")
+ABLATION_INTERVAL_MODES = ("full", "width_only", "centre_only", "off")
 LAMBDA_SWEEP = (0.5, 1.0, 2.0, 5.0, 10.0, 25.0)
+ALPHAS = (1, 5, 10)
 
-# Analytic number of [M, k] matvecs per layer per variant, per the ablation
-# writeup (a corner pair counts as one matvec; actual op counts in the README).
+# Analytic number of [M, k] matvecs per layer per (region, interval) mode.
 ANALYTIC_MATVECS = {
     "two_corner": 4,
     "two_random": 4,
     "boxes_4": 8,
     "boxes_8": 16,
     "slabs_2k": lambda k: 8 * k,
+    "env_box": 2,
 }
+
+# interval_mode affects the matvec count: width_only / centre_only halve it
+# (one term per box instead of two).
+INTERVAL_MATVECS = {"full": 1.0, "width_only": 0.5, "centre_only": 0.5, "off": 0.0}
 
 REGIONS_CSV_COLS = [
     "region_mode", "lambda", "seed", "terms", "analytic_matvecs",
@@ -92,19 +102,22 @@ DIAGNOSTICS_CSV_COLS = [
     "region_mode", "lambda", "seed", "layer_name", "k",
     "c_lo_norm", "c_hi_norm", "env_asym_ratio",
     "frac_remain_in_A", "frac_remain_in_B", "frac_remain_in_C",
-    "frac_remain_in_D", "frac_remain_in_E",
-    "aniso_A", "aniso_B", "aniso_C", "aniso_D", "aniso_E",
+    "frac_remain_in_D", "frac_remain_in_E", "frac_remain_in_F",
+    "aniso_A", "aniso_B", "aniso_C", "aniso_D", "aniso_E", "aniso_F",
     "vstar_drift_protected_A", "vstar_drift_envelope_A",
     "vstar_drift_protected_B", "vstar_drift_envelope_B",
     "vstar_drift_protected_C", "vstar_drift_envelope_C",
     "vstar_drift_protected_D", "vstar_drift_envelope_D",
     "vstar_drift_protected_E", "vstar_drift_envelope_E",
+    "vstar_drift_protected_F", "vstar_drift_envelope_F",
     "diag_dirs",
 ]
 
-# Diagnostic tags: A=two_corner, B=two_random, C=slabs_2k, D=boxes_4, E=boxes_8
+# Diagnostic tags: A=two_corner, B=two_random, C=slabs_2k, D=boxes_4, E=boxes_8,
+# F=env_box
 DIAG_TAGS = {"two_corner": "A", "two_random": "B",
-             "slabs_2k": "C", "boxes_4": "D", "boxes_8": "E"}
+             "slabs_2k": "C", "boxes_4": "D", "boxes_8": "E", "env_box": "F"}
+DIAG_NAMES = ("A", "B", "C", "D", "E", "F")
 
 
 # ============================================================================
@@ -247,8 +260,9 @@ def penalty_direction(v, boxes):
 
 
 def _variant_boxes(info):
-    """All five variants' box lists as numpy (l, u) pairs for layer `info`.
-    Keys: A=two_corner, B=two_random, C=slabs_2k, D=boxes_4, E=boxes_8."""
+    """The region variants' box lists as numpy (l, u) pairs for layer `info`.
+    Keys: A=two_corner, B=two_random, C=slabs_2k, D=boxes_4, E=boxes_8,
+    F=env_box."""
     inf_low = info["inf_low"].numpy()
     z_min = info["z_min"].numpy()
     z_max = info["z_max"].numpy()
@@ -297,7 +311,8 @@ def _variant_boxes(info):
 
     boxD = groups(2)
     boxE = groups(4)
-    return {"A": boxA, "B": boxB, "C": boxC, "D": boxD, "E": boxE}
+    boxF = [(inf_low, inf_high)]
+    return {"A": boxA, "B": boxB, "C": boxC, "D": boxD, "E": boxE, "F": boxF}
 
 
 def _max_drift_box(v, l, u):
@@ -329,17 +344,17 @@ def layer_diagnostics(info, z_remain, diag_dirs=10000):
     env_asym = c_hi_norm / c_lo_norm if c_lo_norm > 0 else float("nan")
 
     # --- fraction of remain activations inside each variant's protected set ---
-    frac_A = frac_B = frac_C = frac_D = frac_E = float("nan")
+    frac_A = frac_B = frac_C = frac_D = frac_E = frac_F = float("nan")
     if z_remain is not None:
         zr = z_remain.numpy()
         fracs = {}
-        for name in ("A", "B", "C", "D", "E"):
+        for name in DIAG_NAMES:
             inside = np.zeros(zr.shape[0], dtype=bool)
             for l, u in boxes[name]:
                 inside |= np.all((zr >= l) & (zr <= u), axis=1)
             fracs[name] = float(inside.mean())
-        frac_A, frac_B, frac_C, frac_D, frac_E = (
-            fracs["A"], fracs["B"], fracs["C"], fracs["D"], fracs["E"])
+        frac_A, frac_B, frac_C, frac_D, frac_E, frac_F = (
+            fracs["A"], fracs["B"], fracs["C"], fracs["D"], fracs["E"], fracs["F"])
 
     # --- penalty anisotropy over random unit directions ---
     rng = np.random.default_rng(0)
@@ -348,7 +363,7 @@ def layer_diagnostics(info, z_remain, diag_dirs=10000):
 
     aniso = {}
     vstar = {}
-    for name in ("A", "B", "C", "D", "E"):
+    for name in DIAG_NAMES:
         P = np.array([penalty_direction(v, boxes[name]) for v in V])
         pmin = P.min()
         aniso[name] = float(P.max() / pmin) if pmin > 0 else float("inf")
@@ -359,15 +374,15 @@ def layer_diagnostics(info, z_remain, diag_dirs=10000):
             _max_drift_set(vstar[name], boxes[name]),
             _max_drift_box(vstar[name], inf_low, inf_high),
         )
-        for name in ("A", "B", "C", "D", "E")
+        for name in DIAG_NAMES
     }
 
     row = {"k": k,
            "c_lo_norm": c_lo_norm, "c_hi_norm": c_hi_norm, "env_asym_ratio": env_asym,
            "frac_remain_in_A": frac_A, "frac_remain_in_B": frac_B,
            "frac_remain_in_C": frac_C, "frac_remain_in_D": frac_D,
-           "frac_remain_in_E": frac_E}
-    for name in ("A", "B", "C", "D", "E"):
+           "frac_remain_in_E": frac_E, "frac_remain_in_F": frac_F}
+    for name in DIAG_NAMES:
         row[f"aniso_{name}"] = aniso[name]
         row[f"vstar_drift_protected_{name}"] = drift[name][0]
         row[f"vstar_drift_envelope_{name}"] = drift[name][1]
@@ -610,7 +625,7 @@ def summarize(results_dir):
     lines.append(r"Variant & $\lambda_\mathrm{int}$ & terms & UA & TA & FID & "
                  r"prot-loss (ms/step) & total wall (s) \\")
     lines.append(r"\midrule")
-    for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k"):
+    for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k", "env_box"):
         entries5 = by_var_lam.get((var, 5.0), [])
         terms_txt = entries5[0]["terms"] if entries5 else "-"
         if entries5:
@@ -660,7 +675,7 @@ def summarize(results_dir):
     hdr = f"{'variant':<12s} {'lam':>5s} {'n':>2s} {'UA':>14s} {'TA':>14s} {'FID':>14s} {'prot-ms':>12s} {'wall(s)':>10s}"
     print(hdr)
     print("-" * len(hdr))
-    for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k"):
+    for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k", "env_box"):
         for lam in lambdas:
             entries = by_var_lam.get((var, lam), [])
             if not entries:
@@ -684,7 +699,7 @@ def summarize(results_dir):
         f"UA={_fmt(_mean_std([float(variant_best[var][1]['ua'])])[0])} "
         f"TA={_fmt(_mean_std([float(variant_best[var][1]['ta'])])[0])} "
         f"FID={_fmt(_mean_std([float(variant_best[var][1]['fid'])])[0])}"
-        for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k")
+        for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k", "env_box")
         if var in variant_best
     )
     print()
@@ -698,6 +713,34 @@ def summarize(results_dir):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region_mode", choices=REGION_MODES, default="two_corner")
+    parser.add_argument("--interval_mode", choices=ABLATION_INTERVAL_MODES,
+                        default="full")
+    parser.add_argument("--alpha", type=int, choices=[1, 5, 10], default=5,
+                        help="Experiment 7: percentile alpha (1/99 .. 10/90 "
+                             "quantiles for z_min/z_max)")
+    parser.add_argument("--sign_flip_frac", type=float, default=0.0,
+                        help="Experiment 6: fraction of U_forget rows whose "
+                             "sign is flipped before the bounds are recomputed")
+    parser.add_argument("--include_db", action="store_true",
+                        help="Experiment 8: put delta_b in the interval corner "
+                             "legs (InTAct Eqs. 35-36)")
+    parser.add_argument("--uniform_margin", action="store_true",
+                        help="Experiment 3: constant envelope margins = mean "
+                             "of the per-coordinate margins")
+    parser.add_argument("--include_mean", action="store_true",
+                        help="Experiment 9: keep L_mean (default on; set "
+                             "--no_include_mean to drop it)")
+    parser.add_argument("--no_include_mean", action="store_true",
+                        help="Experiment 9: drop L_mean")
+    parser.add_argument("--include_res", action="store_true",
+                        help="Experiment 9: keep L_res (default on; set "
+                             "--no_include_res to drop it)")
+    parser.add_argument("--no_include_res", action="store_true",
+                        help="Experiment 9: drop L_res")
+    parser.add_argument("--experiment", default="exp5", choices=[
+        "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", "exp9", "grid"],
+        help="which experiment this run belongs to (labels the ablations.csv "
+             "row and the summarise table)")
     parser.add_argument("--lambda", dest="lam", type=float, default=5.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--config", default="configs/pipeline_fulleval.yaml")
@@ -719,15 +762,21 @@ def main():
     )
 
     if args.summarize:
+        # legacy region table (regions.csv) + per-experiment tables (ablations.csv)
         summarize(args.results_dir)
+        summarize_ablations(args.results_dir)
         return
+
+    if args.interval_mode == "full_decomp":
+        raise ValueError("interval_mode='full_decomp' is the internal (F1) "
+                         "identity route used by the tests, not an ablation mode")
 
     t0_run = time.time()
 
     # ---- fixed paper hyperparameters (not retuned) -------------------------
     args.lr = 1e-4
     args.method = "rl"
-    args.alpha = 0.0
+    args.alpha_remain = 0.0
 
     seed = args.seed
     torch.manual_seed(seed)
@@ -736,11 +785,13 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+    lower_p, upper_p = percentile_alpha_to_quantiles(args.alpha)
+
     cfg = load_config(args.config)
     cfg["unlearn"]["lr"] = args.lr
     cfg["unlearn"]["n_iters"] = args.n_iters
     cfg["unlearn"]["method"] = args.method
-    cfg["unlearn"]["alpha"] = args.alpha
+    cfg["unlearn"]["alpha"] = args.alpha_remain
     cfg["unlearn"]["label_to_forget"] = args.label_to_forget
     cfg["pipeline"]["seed"] = seed
 
@@ -751,6 +802,15 @@ def main():
     ic["region_random_seed"] = 0
     ic["reduced_dim"] = 32
     ic["use_actual_bounds"] = True
+    ic["interval_mode"] = args.interval_mode
+    ic["lower_percentile"] = lower_p
+    ic["upper_percentile"] = upper_p
+    ic["include_db"] = args.include_db
+    ic["include_mean"] = not args.no_include_mean
+    ic["include_res"] = not args.no_include_res
+    ic["sign_flip_frac"] = args.sign_flip_frac
+    ic["sign_flip_seed"] = seed
+    ic["uniform_margin"] = args.uniform_margin
 
     results_dir = os.path.abspath(args.results_dir)
     os.makedirs(results_dir, exist_ok=True)
@@ -796,6 +856,13 @@ def main():
         region_mode=runner_config.training.region_mode,
         normalize_region=runner_config.training.normalize_region,
         region_random_seed=runner_config.training.region_random_seed,
+        interval_mode=getattr(runner_config.training, "interval_mode", "full"),
+        include_db=getattr(runner_config.training, "include_db", False),
+        include_mean=getattr(runner_config.training, "include_mean", True),
+        include_res=getattr(runner_config.training, "include_res", True),
+        sign_flip_frac=getattr(runner_config.training, "sign_flip_frac", 0.0),
+        sign_flip_seed=getattr(runner_config.training, "sign_flip_seed", 0),
+        uniform_margin=getattr(runner_config.training, "uniform_margin", False),
     )
     protection.freeze_non_target_params(model)
     trainable_params = protection.get_trainable_params(model)
@@ -821,7 +888,15 @@ def main():
             protection.pca_info[0]["inf_high"],
             protection.pca_info[0].get("region_side"),
         )
-        terms = 2 * len(boxes)
+        if args.interval_mode == "off":
+            terms, analytic_matvecs = 0, 0
+        else:
+            terms = 2 * len(boxes)
+            if args.interval_mode in ("width_only", "centre_only"):
+                terms //= 2
+            if isinstance(analytic_matvecs, int):
+                analytic_matvecs = int(
+                    analytic_matvecs * INTERVAL_MATVECS[args.interval_mode])
 
     # ---- diagnostics (once per layer) ------------------------------------
     diag_rows = []
@@ -880,6 +955,37 @@ def main():
         os.path.join(runner_config.ckpt_dir, "ckpt.pth"),
     )
 
+    # ---- artifacts for Experiments 1-2 (mechanism plot / kappa stats) ------
+    torch.save(
+        protection.pca_info,
+        os.path.join(runner_config.exp_root_dir, "pca_info.pth"),
+    )
+    run_meta = {
+        "backbone": "ddpm",
+        "setting": "classwise",
+        "config": os.path.abspath(args.config),
+        "model_config": cfg["model_config"],
+        "label_to_forget": args.label_to_forget,
+        "n_iters": args.n_iters,
+        "seed": seed,
+        "experiment": args.experiment,
+        "region_mode": args.region_mode,
+        "interval_mode": args.interval_mode,
+        "alpha": args.alpha,
+        "sign_flip_frac": args.sign_flip_frac,
+        "include_db": args.include_db,
+        "uniform_margin": args.uniform_margin,
+        "include_mean": not args.no_include_mean,
+        "include_res": not args.no_include_res,
+        "lambda": args.lam,
+        "base_ckpt_folder": cfg["paths"]["pretrained_ckpt_folder"],
+        "results_dir": results_dir,
+        "k": k,
+    }
+    import json
+    with open(os.path.join(runner_config.exp_root_dir, "run_meta.json"), "w") as f:
+        json.dump(run_meta, f, indent=2)
+
     # ---- evaluation (UA / TA / FID) ---------------------------------------
     ua = ta = fid = float("nan")
     fid_backend = "none"
@@ -917,6 +1023,32 @@ def main():
         "diag_dirs": args.diag_dirs, "run_dir": runner_config.exp_root_dir,
     }
     append_regions_row(results_dir, row)
+    ab_row = {
+        "experiment": args.experiment,
+        "backbone": "ddpm",
+        "setting": "classwise",
+        "region_mode": args.region_mode,
+        "interval_mode": args.interval_mode,
+        "alpha": args.alpha,
+        "sign_flip_frac": args.sign_flip_frac,
+        "include_db": int(args.include_db),
+        "uniform_margin": int(args.uniform_margin),
+        "include_mean": int(not args.no_include_mean),
+        "include_res": int(not args.no_include_res),
+        "lambda": args.lam,
+        "fixed_lambda": int(args.lam == FIXED_LAMBDA.get(("ddpm", "classwise"))),
+        "seed": seed,
+        "terms": terms,
+        "analytic_matvecs": analytic_matvecs,
+        "ua": ua, "ra": "", "ta": ta, "fid": fid, "fid_backend": fid_backend,
+        "mia": "",
+        "prot_loss_ms": pl_ms, "prot_loss_ms_std": pl_ms_std,
+        "setup_wall_s": setup_wall, "train_wall_s": train_wall,
+        "total_wall_s": total_wall, "peak_mem_mb": peak_mem,
+        "n_iters": args.n_iters, "k": k, "tparams": tparams,
+        "run_dir": runner_config.exp_root_dir,
+    }
+    append_ablation_row(results_dir, ab_row)
     if not args.skip_diagnostics:
         for d in diag_rows:
             d["lambda"] = args.lam
