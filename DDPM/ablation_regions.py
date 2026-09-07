@@ -3,20 +3,24 @@
 Ablation over protected-region constructions for BARRIER, on DDPM class
 unlearning (CIFAR-10, forget class "airplane").
 
-Three region constructions are compared, all built from the same two-corner
-primitive T(l, u) = ||dWp @ l - dWn @ u||^2 + ||dWp @ u - dWn @ l||^2:
+Region constructions, all built from the same two-corner primitive
+T(l, u) = ||dWp @ l - dWn @ u||^2 + ||dWp @ u - dWn @ l||^2:
 
     A. two_corner  (current baseline):  T(inf_low, z_min) + T(z_max, inf_high)
     B. two_random  (placement control):  two boxes of the same shape but with a
        random per-coordinate side pattern (fixed seed, stored in pca_info)
+    D. boxes_4     (4 boxes, predefined):  coordinates split into 2 consecutive
+       groups; one box per group per side (2m boxes with m = 2)
+    E. boxes_8     (8 boxes, predefined):  same construction with m = 4 groups
     C. slabs_2k    (exact complement):   sum over the 2k coordinate slabs whose
        union is exactly the complement of the forget box inside the envelope
 
+The m-group family interpolates between two_corner (m=1) and slabs_2k (m=k).
 Everything else is held at the paper's configuration: target layers = QKV
 attention projections + class-embedding MLP, k = 32, Adam, lr = 1e-4, 3000
 steps, Random-Label (RL) unlearning objective, no remain-set loss (the
 protection term substitutes for it).  delta_b is kept OUT of the interval terms
-in all three variants.
+in all variants.
 
 Usage:
     # single run
@@ -63,7 +67,7 @@ from runners.diffusion import Diffusion  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-REGION_MODES = ("two_corner", "two_random", "slabs_2k")
+REGION_MODES = ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k")
 LAMBDA_SWEEP = (0.5, 1.0, 2.0, 5.0, 10.0, 25.0)
 
 # Analytic number of [M, k] matvecs per layer per variant, per the ablation
@@ -71,6 +75,8 @@ LAMBDA_SWEEP = (0.5, 1.0, 2.0, 5.0, 10.0, 25.0)
 ANALYTIC_MATVECS = {
     "two_corner": 4,
     "two_random": 4,
+    "boxes_4": 8,
+    "boxes_8": 16,
     "slabs_2k": lambda k: 8 * k,
 }
 
@@ -86,12 +92,19 @@ DIAGNOSTICS_CSV_COLS = [
     "region_mode", "lambda", "seed", "layer_name", "k",
     "c_lo_norm", "c_hi_norm", "env_asym_ratio",
     "frac_remain_in_A", "frac_remain_in_B", "frac_remain_in_C",
-    "aniso_A", "aniso_B", "aniso_C",
+    "frac_remain_in_D", "frac_remain_in_E",
+    "aniso_A", "aniso_B", "aniso_C", "aniso_D", "aniso_E",
     "vstar_drift_protected_A", "vstar_drift_envelope_A",
     "vstar_drift_protected_B", "vstar_drift_envelope_B",
     "vstar_drift_protected_C", "vstar_drift_envelope_C",
+    "vstar_drift_protected_D", "vstar_drift_envelope_D",
+    "vstar_drift_protected_E", "vstar_drift_envelope_E",
     "diag_dirs",
 ]
+
+# Diagnostic tags: A=two_corner, B=two_random, C=slabs_2k, D=boxes_4, E=boxes_8
+DIAG_TAGS = {"two_corner": "A", "two_random": "B",
+             "slabs_2k": "C", "boxes_4": "D", "boxes_8": "E"}
 
 
 # ============================================================================
@@ -234,7 +247,8 @@ def penalty_direction(v, boxes):
 
 
 def _variant_boxes(info):
-    """The three variants' box lists as numpy (l, u) pairs for layer `info`."""
+    """All five variants' box lists as numpy (l, u) pairs for layer `info`.
+    Keys: A=two_corner, B=two_random, C=slabs_2k, D=boxes_4, E=boxes_8."""
     inf_low = info["inf_low"].numpy()
     z_min = info["z_min"].numpy()
     z_max = info["z_max"].numpy()
@@ -262,7 +276,28 @@ def _variant_boxes(info):
         u = inf_high.copy()
         l[j] = z_max[j]
         boxC.append((l, u))
-    return {"A": boxA, "B": boxB, "C": boxC}
+
+    def groups(m):
+        boxes = []
+        m = max(1, min(m, k))
+        for g in range(m):
+            j0 = (g * k) // m
+            j1 = ((g + 1) * k) // m
+            if j1 <= j0:
+                continue
+            l = inf_low.copy()
+            u = inf_high.copy()
+            u[j0:j1] = z_min[j0:j1]
+            boxes.append((l, u))
+            l = inf_low.copy()
+            u = inf_high.copy()
+            l[j0:j1] = z_max[j0:j1]
+            boxes.append((l, u))
+        return boxes
+
+    boxD = groups(2)
+    boxE = groups(4)
+    return {"A": boxA, "B": boxB, "C": boxC, "D": boxD, "E": boxE}
 
 
 def _max_drift_box(v, l, u):
@@ -294,19 +329,17 @@ def layer_diagnostics(info, z_remain, diag_dirs=10000):
     env_asym = c_hi_norm / c_lo_norm if c_lo_norm > 0 else float("nan")
 
     # --- fraction of remain activations inside each variant's protected set ---
-    frac_A = frac_B = frac_C = float("nan")
+    frac_A = frac_B = frac_C = frac_D = frac_E = float("nan")
     if z_remain is not None:
         zr = z_remain.numpy()
-        in_A = np.zeros(zr.shape[0], dtype=bool)
-        in_B = np.zeros(zr.shape[0], dtype=bool)
-        for l, u in boxes["A"]:
-            in_A |= np.all((zr >= l) & (zr <= u), axis=1)
-        for l, u in boxes["B"]:
-            in_B |= np.all((zr >= l) & (zr <= u), axis=1)
-        frac_A = float(in_A.mean())
-        frac_B = float(in_B.mean())
-        in_forget_box = np.all((zr >= z_min) & (zr <= z_max), axis=1)
-        frac_C = float((~in_forget_box).mean())
+        fracs = {}
+        for name in ("A", "B", "C", "D", "E"):
+            inside = np.zeros(zr.shape[0], dtype=bool)
+            for l, u in boxes[name]:
+                inside |= np.all((zr >= l) & (zr <= u), axis=1)
+            fracs[name] = float(inside.mean())
+        frac_A, frac_B, frac_C, frac_D, frac_E = (
+            fracs["A"], fracs["B"], fracs["C"], fracs["D"], fracs["E"])
 
     # --- penalty anisotropy over random unit directions ---
     rng = np.random.default_rng(0)
@@ -315,7 +348,7 @@ def layer_diagnostics(info, z_remain, diag_dirs=10000):
 
     aniso = {}
     vstar = {}
-    for name in ("A", "B", "C"):
+    for name in ("A", "B", "C", "D", "E"):
         P = np.array([penalty_direction(v, boxes[name]) for v in V])
         pmin = P.min()
         aniso[name] = float(P.max() / pmin) if pmin > 0 else float("inf")
@@ -326,19 +359,19 @@ def layer_diagnostics(info, z_remain, diag_dirs=10000):
             _max_drift_set(vstar[name], boxes[name]),
             _max_drift_box(vstar[name], inf_low, inf_high),
         )
-        for name in ("A", "B", "C")
+        for name in ("A", "B", "C", "D", "E")
     }
 
-    return {
-        "k": k,
-        "c_lo_norm": c_lo_norm, "c_hi_norm": c_hi_norm, "env_asym_ratio": env_asym,
-        "frac_remain_in_A": frac_A, "frac_remain_in_B": frac_B,
-        "frac_remain_in_C": frac_C,
-        "aniso_A": aniso["A"], "aniso_B": aniso["B"], "aniso_C": aniso["C"],
-        "vstar_drift_protected_A": drift["A"][0], "vstar_drift_envelope_A": drift["A"][1],
-        "vstar_drift_protected_B": drift["B"][0], "vstar_drift_envelope_B": drift["B"][1],
-        "vstar_drift_protected_C": drift["C"][0], "vstar_drift_envelope_C": drift["C"][1],
-    }
+    row = {"k": k,
+           "c_lo_norm": c_lo_norm, "c_hi_norm": c_hi_norm, "env_asym_ratio": env_asym,
+           "frac_remain_in_A": frac_A, "frac_remain_in_B": frac_B,
+           "frac_remain_in_C": frac_C, "frac_remain_in_D": frac_D,
+           "frac_remain_in_E": frac_E}
+    for name in ("A", "B", "C", "D", "E"):
+        row[f"aniso_{name}"] = aniso[name]
+        row[f"vstar_drift_protected_{name}"] = drift[name][0]
+        row[f"vstar_drift_envelope_{name}"] = drift[name][1]
+    return row
 
 
 # ============================================================================
@@ -577,7 +610,7 @@ def summarize(results_dir):
     lines.append(r"Variant & $\lambda_\mathrm{int}$ & terms & UA & TA & FID & "
                  r"prot-loss (ms/step) & total wall (s) \\")
     lines.append(r"\midrule")
-    for var in ("two_corner", "two_random", "slabs_2k"):
+    for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k"):
         entries5 = by_var_lam.get((var, 5.0), [])
         terms_txt = entries5[0]["terms"] if entries5 else "-"
         if entries5:

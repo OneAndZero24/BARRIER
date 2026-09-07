@@ -1,18 +1,24 @@
 # Region-construction ablation — results
 
 Summary (10 lines)
-1. `compute_protection_loss` now supports three region constructions of the
+1. `compute_protection_loss` now supports five region constructions of the
    same two-corner primitive `T(l,u)=||dWp@l-dWn@u||^2+||dWp@u-dWn@l||^2`:
    `two_corner` (baseline, 2 boxes), `two_random` (placement control, same box
-   shapes with a fixed-seed random side pattern stored in `pca_info`), and
-   `slabs_2k` (2k coordinate slabs whose union is exactly the complement of the
-   forget box inside the envelope). `region_mode` is a constructor arg; default
+   shapes with a fixed-seed random side pattern stored in `pca_info`),
+   `boxes_4` / `boxes_8` (4/8 predefined boxes: coordinates split into 2/4
+   consecutive groups, one box per group per side), and `slabs_2k` (2k
+   coordinate slabs whose union is exactly the complement of the forget box
+   inside the envelope). `region_mode` is a constructor arg; default
    `two_corner` + `normalize_region=False` reproduces the previous loss
    bitwise (regression test).
-2. Every variant normalises its interval part by its number of squared terms so
-   the sweep compares penalised-scale, not raw-lambda: A/B divide by 4, C by
-   `4k` (=128 for k=32; 2 terms per T, 2k slabs — see note 6).
-3. Grid: 3 variants x lambda in {0.5, 1, 2, 5, 10, 25} x 3 seeds = 54 runs,
+2. The m-group family (2m boxes) interpolates between `two_corner` (m=1) and
+   `slabs_2k` (m=k); boxes_4 = m=2, boxes_8 = m=4, grouping predefined
+   (consecutive), so results are deterministic across runs. Every variant
+   normalises its interval part by its number of squared terms so the sweep
+   compares penalised-scale, not raw-lambda: A/B divide by 4, boxes_4 by 8,
+   boxes_8 by 16, C by `4k` (=128 for k=32; 2 terms per T, 2k slabs — see
+   note 6).
+3. Grid: 5 variants x lambda in {0.5, 1, 2, 5, 10, 25} x 3 seeds = 90 runs,
    each at the paper's DDPM config (airplane forget, QKV+cemb targets, k=32,
    Adam lr=1e-4, 3000 RL steps, alpha=0 remain loss). One row per run in
    `regions.csv`, per-layer diagnostics in `diagnostics.csv`.
@@ -46,3 +52,6 @@ Summary (10 lines)
    `box_drift_max` vs brute-force corner search, and the diagnostics helpers.
 10. Regenerate the table after the grid completes:
     `python ablation_regions.py --summarize --results_dir ./results`.
+    Diagnostic tags: A=two_corner, B=two_random, D=boxes_4, E=boxes_8,
+    C=slabs_2k (columns `frac_remain_in_*`, `aniso_*`,
+    `vstar_drift_protected_*` / `vstar_drift_envelope_*`).

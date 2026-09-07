@@ -276,7 +276,8 @@ def test_region_term_counts():
     k = info["z_min"].numel()
 
     n_terms = {}
-    for mode in ("two_corner", "two_random", "slabs_2k"):
+    n_boxes = {}
+    for mode in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k"):
         side = info.get("region_side")
         if mode == "two_random" and side is None:
             side = torch.zeros(k, dtype=torch.long)
@@ -284,10 +285,53 @@ def test_region_term_counts():
             mode, info["inf_low"], info["z_min"], info["z_max"], info["inf_high"],
             side,
         )
+        n_boxes[mode] = len(boxes)
         n_terms[mode] = 2 * len(boxes)
-    assert n_terms["two_corner"] == 4
-    assert n_terms["two_random"] == 4
-    assert n_terms["slabs_2k"] == 4 * k
+        for l, u in boxes:
+            assert torch.all(l <= u), f"{mode}: box must satisfy l <= u"
+    assert n_boxes["two_corner"] == 2 and n_terms["two_corner"] == 4
+    assert n_boxes["two_random"] == 2 and n_terms["two_random"] == 4
+    assert n_boxes["boxes_4"] == 4 and n_terms["boxes_4"] == 8
+    assert n_boxes["boxes_8"] == 8 and n_terms["boxes_8"] == 16
+    assert n_boxes["slabs_2k"] == 2 * k and n_terms["slabs_2k"] == 4 * k
+
+
+def test_group_block_boxes_consecutive_and_nested():
+    """boxes_4/8 use consecutive predefined groups; slabs_2k (m=k) equals the
+    per-coordinate slab construction."""
+    from InTAct.intact import group_block_boxes
+
+    k = 12
+    torch.manual_seed(9)
+    inf_low = torch.randn(k) * 2 - 6
+    z_min = inf_low + torch.rand(k) + 0.5
+    z_max = z_min + torch.rand(k) + 0.5
+    inf_high = z_max + torch.rand(k) + 0.5
+
+    def group_ranges(m):
+        return [((g * k) // m, ((g + 1) * k) // m) for g in range(m)]
+
+    b4 = group_block_boxes(inf_low, z_min, z_max, inf_high, 2)
+    assert len(b4) == 4
+    # group g contributes two boxes (low, high), both clipping coords j0..j1-1
+    ranges = [rng for g in range(2) for rng in [group_ranges(2)[g]] * 2]
+    for box, (j0, j1) in zip(b4, ranges):
+        l, u = box
+        clipped = torch.where(u < inf_high, True, False) | torch.where(l > inf_low, True, False)
+        idx = torch.nonzero(clipped).flatten()
+        assert idx.min().item() == j0 and idx.max().item() == j1 - 1, (
+            f"group {j0}:{j1} clips {idx.tolist()}")
+
+    b8 = group_block_boxes(inf_low, z_min, z_max, inf_high, 4)
+    assert len(b8) == 8
+
+    # m = k reproduces the per-coordinate slabs exactly
+    from InTAct.intact import slab_boxes
+    bk = group_block_boxes(inf_low, z_min, z_max, inf_high, k)
+    sk = slab_boxes(inf_low, z_min, z_max, inf_high)
+    assert len(bk) == len(sk) == 2 * k
+    for (l1, u1), (l2, u2) in zip(bk, sk):
+        assert torch.equal(l1, l2) and torch.equal(u1, u2)
 
 
 def test_normalize_region_scale():
@@ -504,6 +548,7 @@ if __name__ == "__main__":
         test_two_corner_linear_bitwise,
         test_two_corner_conv_bitwise,
         test_region_term_counts,
+        test_group_block_boxes_consecutive_and_nested,
         test_normalize_region_scale,
         test_two_random_boxes_valid_and_deterministic,
         test_box_drift_max_matches_bruteforce,

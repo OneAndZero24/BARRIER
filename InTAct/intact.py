@@ -16,9 +16,11 @@ log = logging.getLogger(__name__)
 # with dWp = relu(delta_f), dWn = relu(-delta_f).  A and B evaluate T over two
 # boxes, C evaluates it over the 2k coordinate slabs whose union is exactly the
 # complement of the forget box [z_min, z_max] inside the envelope
-# [inf_low, inf_high].
+# [inf_low, inf_high].  boxes_4 / boxes_8 are the predefined m-group family
+# (2m boxes): each box is the full envelope clipped low/high on one consecutive
+# group of coordinates.
 
-REGION_MODES = ("two_corner", "two_random", "slabs_2k")
+REGION_MODES = ("two_corner", "two_random", "slabs_2k", "boxes_4", "boxes_8")
 
 
 def two_corner_boxes(inf_low, z_min, z_max, inf_high):
@@ -61,6 +63,31 @@ def slab_boxes(inf_low, z_min, z_max, inf_high):
     return boxes
 
 
+def group_block_boxes(inf_low, z_min, z_max, inf_high, m):
+    """Predefined m-group construction (2m boxes).  Split the k coordinates
+    into m consecutive, non-overlapping groups; for each group g and side:
+      low_j :  l = inf_low, u = inf_high with u[j] = z_min[j]   for j in group g
+      high_j:  l = inf_low with l[j] = z_max[j], u = inf_high   for j in group g
+    m = 1 reproduces the two_corner layout; m = k reproduces the 2k slabs."""
+    boxes = []
+    k = z_min.numel()
+    m = max(1, min(m, k))
+    for g in range(m):
+        j0 = (g * k) // m
+        j1 = ((g + 1) * k) // m
+        if j1 <= j0:
+            continue
+        l = inf_low.clone()
+        u = inf_high.clone()
+        u[j0:j1] = z_min[j0:j1]
+        boxes.append((l, u))
+        l = inf_low.clone()
+        u = inf_high.clone()
+        l[j0:j1] = z_max[j0:j1]
+        boxes.append((l, u))
+    return boxes
+
+
 def make_region_boxes(region_mode, inf_low, z_min, z_max, inf_high, side=None):
     """Build the (l, u) box list for the requested region construction."""
     if region_mode == "two_corner":
@@ -71,6 +98,10 @@ def make_region_boxes(region_mode, inf_low, z_min, z_max, inf_high, side=None):
         return random_boxes(inf_low, z_min, z_max, inf_high, side)
     if region_mode == "slabs_2k":
         return slab_boxes(inf_low, z_min, z_max, inf_high)
+    if region_mode == "boxes_4":
+        return group_block_boxes(inf_low, z_min, z_max, inf_high, 2)
+    if region_mode == "boxes_8":
+        return group_block_boxes(inf_low, z_min, z_max, inf_high, 4)
     raise ValueError(f"Unknown region_mode {region_mode!r} (expected one of {REGION_MODES})")
 
 

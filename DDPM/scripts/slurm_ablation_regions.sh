@@ -7,8 +7,8 @@
 #   targets = QKV attention projections + class-embedding MLP
 #   k = 32, Adam, lr = 1e-4, 3000 steps, RL objective, no remain-set loss
 #
-# Grid: 3 region constructions x 6 lambdas x 3 seeds = 54 jobs
-#   region_mode: two_corner | two_random | slabs_2k
+# Grid: 5 region constructions x 6 lambdas x 3 seeds = 90 jobs
+#   region_mode: two_corner | two_random | boxes_4 | boxes_8 | slabs_2k
 #   lambda:      0.5 1 2 5 10 25
 #   seed:        0 1 2
 #
@@ -33,7 +33,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32GB
 #SBATCH --partition=rtx4090_batch
-#SBATCH --array=0-53
+#SBATCH --array=0-89
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -45,7 +45,7 @@ export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 # Grid mapping (array index -> variant, lambda, seed)
 #   idx = 18*v + 6*lam_idx + seed_idx
 # ============================================================================
-VARIANTS=(two_corner two_random slabs_2k)
+VARIANTS=(two_corner two_random boxes_4 boxes_8 slabs_2k)
 LAMBDAS=(0.5 1 2 5 10 25)
 SEEDS=(0 1 2)
 
