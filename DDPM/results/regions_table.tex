@@ -1,0 +1,18 @@
+\begin{table}[t]
+\centering
+\caption{Protected-region construction ablation on DDPM class unlearning (CIFAR-10, forget airplane). Mean $\pm$ std over 3 seeds. \texttt{fixed} = $\lambda_\mathrm{int}=5$; \texttt{best} = best $\lambda_\mathrm{int}$ per variant (composite $1.5\cdot\mathrm{UA} + \mathrm{TA} - \mathrm{FID}/3$).}
+\label{tab:region-ablation}
+\small
+\begin{tabular}{l c c c c c c c}
+\toprule
+Variant & $\lambda_\mathrm{int}$ & terms & UA & TA & FID & prot-loss (ms/step) & total wall (s) \\
+\midrule
+two_corner (fixed) & 5 & - & - & - & - & - & - \\
+\addlinespace
+two_random (fixed) & 5 & - & - & - & - & - & - \\
+\addlinespace
+slabs_2k (fixed) & 5 & - & - & - & - & - & - \\
+\addlinespace
+\bottomrule
+\end{tabular}
+\end{table}

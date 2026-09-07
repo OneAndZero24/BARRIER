@@ -7,6 +7,86 @@ log = logging.getLogger(__name__)
 
 
 # ============================================================================
+# Region-construction primitives (ablation over protected-region layouts)
+# ============================================================================
+#
+# All variants are built from the same primitive: for a box with lower bound l
+# and upper bound u, the two-corner term
+#     T(l, u) = || dWp @ l - dWn @ u ||^2 + || dWp @ u - dWn @ l ||^2
+# with dWp = relu(delta_f), dWn = relu(-delta_f).  A and B evaluate T over two
+# boxes, C evaluates it over the 2k coordinate slabs whose union is exactly the
+# complement of the forget box [z_min, z_max] inside the envelope
+# [inf_low, inf_high].
+
+REGION_MODES = ("two_corner", "two_random", "slabs_2k")
+
+
+def two_corner_boxes(inf_low, z_min, z_max, inf_high):
+    """Current (baseline) layout: the two box shapes "all coordinates below
+    z_min" and "all coordinates above z_max".  Returns a list of (l, u)."""
+    return [(inf_low, z_min), (z_max, inf_high)]
+
+
+def random_boxes(inf_low, z_min, z_max, inf_high, side):
+    """Control for placement: two boxes of the same shape as two_corner, but
+    with a random side pattern s in {0,1}^k.  For each j the box keeps
+    [inf_low_j, z_min_j] if s_j == 0 else [z_max_j, inf_high_j]; the second box
+    takes the complementary sides."""
+    s = side.to(device=inf_low.device).bool()
+    lA = torch.where(s, z_max, inf_low)
+    uA = torch.where(s, inf_high, z_min)
+    lB = torch.where(s, inf_low, z_max)
+    uB = torch.where(s, z_min, inf_high)
+    return [(lA, uA), (lB, uB)]
+
+
+def slab_boxes(inf_low, z_min, z_max, inf_high):
+    """The exact complement: for each coordinate j and each side, a box that is
+    the full envelope in all i != j and clipped on j.
+      low_j :  l = inf_low,                    u = inf_high with u[j] = z_min[j]
+      high_j:  l = inf_low with l[j] = z_max[j], u = inf_high
+    The union of these 2k slabs equals the complement of the forget box inside
+    the envelope."""
+    boxes = []
+    k = z_min.numel()
+    for j in range(k):
+        l = inf_low.clone()
+        u = inf_high.clone()
+        u[j] = z_min[j]
+        boxes.append((l, u))
+        l = inf_low.clone()
+        u = inf_high.clone()
+        l[j] = z_max[j]
+        boxes.append((l, u))
+    return boxes
+
+
+def make_region_boxes(region_mode, inf_low, z_min, z_max, inf_high, side=None):
+    """Build the (l, u) box list for the requested region construction."""
+    if region_mode == "two_corner":
+        return two_corner_boxes(inf_low, z_min, z_max, inf_high)
+    if region_mode == "two_random":
+        if side is None:
+            raise ValueError("region_mode='two_random' requires a stored side pattern")
+        return random_boxes(inf_low, z_min, z_max, inf_high, side)
+    if region_mode == "slabs_2k":
+        return slab_boxes(inf_low, z_min, z_max, inf_high)
+    raise ValueError(f"Unknown region_mode {region_mode!r} (expected one of {REGION_MODES})")
+
+
+def box_drift_max(delta_f, l, u):
+    """Max |delta_f . z| over the box [l, u].  A linear response is maximised in
+    absolute value at a vertex of the box, so the value is
+        max( |sum_{d_i>=0} d_i u_i + sum_{d_i<0} d_i l_i|,
+             |sum_{d_i>=0} d_i l_i + sum_{d_i<0} d_i u_i| )."""
+    d = delta_f
+    pos = d >= 0
+    upper = torch.where(pos, d * u, d * l).sum()
+    lower = torch.where(pos, d * l, d * u).sum()
+    return torch.maximum(upper.abs(), lower.abs())
+
+
+# ============================================================================
 # Forward Functions for Different Model Types
 # ============================================================================
 
@@ -79,6 +159,21 @@ class UnlearnIntervalProtection:
         skip_interval: bool = False,
         remove_top_directions: bool = False,
         decomp_method: str = "svd",
+
+        # --- Ablation of protected-region constructions ---------------------
+        # region_mode:        which box layout the interval term is evaluated
+        #                     over: "two_corner" (current), "two_random"
+        #                     (placement control), "slabs_2k" (the exact
+        #                     complement of the forget box).
+        # normalize_region:   divide each variant's interval part by its number
+        #                     of squared terms so variants are on a comparable
+        #                     scale (A/B: 4, C: 4k).
+        # region_random_seed: fixed seed drawing the random side pattern of
+        #                     "two_random" (stored in pca_info -> identical
+        #                     across steps and seeds-of-training).
+        region_mode: str = "two_corner",
+        normalize_region: bool = False,
+        region_random_seed: int = 0,
     ):
         self.targets = targets
         self.lambda_interval = lambda_interval
@@ -100,6 +195,14 @@ class UnlearnIntervalProtection:
             log.warning("skip_svd=True overrides skip_interval/remove_top_directions.")
         if self.remove_top_directions and self.skip_interval:
             log.warning("remove_top_directions=True overrides skip_interval.")
+
+        self.region_mode = region_mode
+        if self.region_mode not in REGION_MODES:
+            raise ValueError(
+                f"region_mode must be one of {REGION_MODES}, got {self.region_mode!r}"
+            )
+        self.normalize_region = normalize_region
+        self.region_random_seed = int(region_random_seed)
 
         self.pca_info: List[Dict] = []
         self.params_snapshot = {}  # Only target layer parameters
@@ -262,6 +365,13 @@ class UnlearnIntervalProtection:
             del Z_forget
 
             # Store PCA info (will update inf_low/inf_high after remain collection if needed)
+            region_side = None
+            if self.region_mode == "two_random" and z_min.numel() > 0:
+                gen = torch.Generator(device="cpu").manual_seed(self.region_random_seed)
+                region_side = torch.randint(
+                    0, 2, (z_min.numel(),), dtype=torch.long, generator=gen
+                )
+
             pca_entry = {
                 "layer_name": layer_name,
                 "mu": mu.detach().cpu(),
@@ -274,6 +384,7 @@ class UnlearnIntervalProtection:
                 "inf_high": inf_high.detach().cpu(),
                 "layer_type": layer_type,
                 "decomp_tag": decomp_tag,
+                "region_side": region_side,
             }
             self.pca_info.append(pca_entry)
         
@@ -457,12 +568,24 @@ class UnlearnIntervalProtection:
                         _inf_low, _inf_high = inf_low, inf_high
 
                     dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
-                    drift_low_1 = dWp @ _inf_low - dWn @ _z_min
-                    drift_low_2 = dWp @ _z_min - dWn @ _inf_low
-                    drift_high_1 = dWp @ _z_max - dWn @ _inf_high
-                    drift_high_2 = dWp @ _inf_high - dWn @ _z_max
-                    layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
-                    layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+                    boxes = make_region_boxes(
+                        self.region_mode, _inf_low, _z_min, _z_max, _inf_high,
+                        info.get("region_side"),
+                    )
+                    if boxes:
+                        n_terms = 2 * len(boxes)
+                        if self.normalize_region:
+                            terms = []
+                            for l, u in boxes:
+                                terms.append((dWp @ l - dWn @ u).pow(2).mean())
+                                terms.append((dWp @ u - dWn @ l).pow(2).mean())
+                            layer_loss = layer_loss + torch.stack(terms).sum() / n_terms
+                        else:
+                            for l, u in boxes:
+                                layer_loss = layer_loss + (
+                                    (dWp @ l - dWn @ u).pow(2).mean()
+                                    + (dWp @ u - dWn @ l).pow(2).mean()
+                                )
 
             elif isinstance(target_layer, nn.Linear):
                 delta_W = delta_W_raw
@@ -492,12 +615,24 @@ class UnlearnIntervalProtection:
                         _inf_low, _inf_high = inf_low, inf_high
 
                     dWp, dWn = torch.relu(delta_f), torch.relu(-delta_f)
-                    drift_low_1 = dWp @ _inf_low - dWn @ _z_min
-                    drift_low_2 = dWp @ _z_min - dWn @ _inf_low
-                    drift_high_1 = dWp @ _z_max - dWn @ _inf_high
-                    drift_high_2 = dWp @ _inf_high - dWn @ _z_max
-                    layer_loss = layer_loss + (drift_low_1.pow(2).mean() + drift_low_2.pow(2).mean())
-                    layer_loss = layer_loss + (drift_high_1.pow(2).mean() + drift_high_2.pow(2).mean())
+                    boxes = make_region_boxes(
+                        self.region_mode, _inf_low, _z_min, _z_max, _inf_high,
+                        info.get("region_side"),
+                    )
+                    if boxes:
+                        n_terms = 2 * len(boxes)
+                        if self.normalize_region:
+                            terms = []
+                            for l, u in boxes:
+                                terms.append((dWp @ l - dWn @ u).pow(2).mean())
+                                terms.append((dWp @ u - dWn @ l).pow(2).mean())
+                            layer_loss = layer_loss + torch.stack(terms).sum() / n_terms
+                        else:
+                            for l, u in boxes:
+                                layer_loss = layer_loss + (
+                                    (dWp @ l - dWn @ u).pow(2).mean()
+                                    + (dWp @ u - dWn @ l).pow(2).mean()
+                                )
             else:
                 log.warning(f"Unknown layer type {type(target_layer)} for {layer_name}, skipping")
                 continue

@@ -689,6 +689,9 @@ class Diffusion(object):
             skip_interval=getattr(config.training, 'skip_interval', False),
             remove_top_directions=getattr(config.training, 'remove_top_directions', False),
             decomp_method=getattr(config.training, 'decomp_method', 'svd'),
+            region_mode=getattr(config.training, 'region_mode', 'two_corner'),
+            normalize_region=getattr(config.training, 'normalize_region', False),
+            region_random_seed=int(getattr(config.training, 'region_random_seed', 0)),
         )
         
         logging.info("Setting up InTAct protection...")
