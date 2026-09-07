@@ -2,6 +2,8 @@ import os
 import sys
 import time
 import random
+import json
+import hashlib
 
 import torch
 from torch import nn
@@ -174,6 +176,14 @@ def parse_args():
     parser.add_argument('--wandb_entity', type=str, default='oneandzero24', help='wandb entity')
     parser.add_argument('--wandb_name', type=str, default=None, help='wandb run name (default: auto)')
 
+    ####### MIA sweep (grid-by-index) setting #######
+    parser.add_argument('--config_index', type=int, default=None,
+                        help='row index into the MIA configs JSON (grid sweep over the best runs)')
+    parser.add_argument('--mia_configs_json', type=str, default=None,
+                        help='path to JSON list of hyperparameter dicts; --config_index selects the row')
+    parser.add_argument('--force_unlearn', action='store_true',
+                        help='ignore and overwrite an existing unlearned-artifact checkpoint')
+
     args = parser.parse_args()
 
     return args
@@ -185,6 +195,18 @@ def _load_checkpoint_state(args, path, device):
     if isinstance(ckpt, nn.Module) or hasattr(ckpt, 'state_dict'):
         ckpt = ckpt.state_dict()
     return ckpt
+
+
+def _intact_ckpt_path(args):
+    """Deterministic artifact path per hyperparameter set (shared across reruns/nodes)."""
+    key = (args.method, args.data_name, tuple(args.forget_class), args.model_name,
+           args.intact_base_method, args.intact_lambda, args.intact_forget_weight,
+           args.intact_reduced_dim, args.unlearn_epochs, args.lr, args.seed,
+           tuple(args.intact_targets) if args.intact_targets else None)
+    h = hashlib.sha1(repr(key).encode()).hexdigest()[:12]
+    d = os.path.join(args.checkpoint_dir, 'intact_unlearned')
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f'intact_{h}.pth')
 
 
 def main(args):
@@ -204,6 +226,21 @@ def main(args):
               f"intact_lambda={getattr(args, 'intact_lambda', None)} "
               f"intact_base_method={getattr(args, 'intact_base_method', None)} "
               f"unlearn_epochs={getattr(args, 'unlearn_epochs', None)} lr={args.lr}")
+
+    # MIA grid-by-index: pick the hyperparameter row from the configs JSON
+    if args.mia_configs_json:
+        with open(args.mia_configs_json) as f:
+            mia_configs = json.load(f)
+        if args.config_index is None or args.config_index < 0 or args.config_index >= len(mia_configs):
+            raise SystemExit(f"--config_index {args.config_index} out of range 0..{len(mia_configs) - 1}")
+        row = mia_configs[args.config_index]
+        for k, v in row.items():
+            if hasattr(args, k):
+                setattr(args, k, v)
+        print(f'[mia-sweep] config_index={args.config_index} -> {row}')
+        if args.wandb:
+            import wandb
+            wandb.config.update(row, allow_val_change=True)
 
     # Summary for experiment
     exp_summary(args)
@@ -401,76 +438,92 @@ def main(args):
             targets = ['head.0'] if args.model_name == 'AllCNN' else ['head']
         print(f'InTAct targets: {targets}')
 
-        protection = UnlearnIntervalProtection(
-            targets=targets,
-            lambda_interval=args.intact_lambda,
-            lower_percentile=args.intact_lower_percentile,
-            upper_percentile=args.intact_upper_percentile,
-            reduced_dim=args.intact_reduced_dim,
-            infinity_scale=args.intact_infinity_scale,
-            use_actual_bounds=args.intact_use_actual_bounds,
-            normalize_protection=True,
-        )
+        # Artifact-aware: reuse an existing unlearned checkpoint when present,
+        # otherwise run InTAct and persist it (even under wandb sweeps).
+        intact_ckpt = _intact_ckpt_path(args)
+        reused = os.path.exists(intact_ckpt) and not args.force_unlearn
 
-        # InTAct setup: collect forget activations on target layers, compute SVD,
-        # snapshot target params.  remain_dataloader is only used with
-        # --intact_use_actual_bounds.
-        t0 = time.time()
-        protection.setup_protection(
-            model, trfl, device,
-            remain_dataloader=ttrl,
-            forward_fn=classification_forward_fn,
-        )
-        protection.freeze_non_target_params(model)
-        trainable_params = protection.get_trainable_params(model)
-        t1 = time.time()
-        print(f'INTACT_SETUP_SECONDS {t1 - t0:.4f}')
+        if reused:
+            print(f'INTACT_ARTIFACT reused {intact_ckpt} (skipping unlearning)')
+            model.load_state_dict(torch.load(intact_ckpt, map_location=device, weights_only=False))
+        else:
+            if os.path.exists(intact_ckpt):
+                print(f'INTACT_ARTIFACT --force_unlearn: overwriting {intact_ckpt}')
 
-        criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.SGD(
-            trainable_params, lr=args.lr, momentum=args.momentum,
-            weight_decay=args.weight_decay,
-        )
+            protection = UnlearnIntervalProtection(
+                targets=targets,
+                lambda_interval=args.intact_lambda,
+                lower_percentile=args.intact_lower_percentile,
+                upper_percentile=args.intact_upper_percentile,
+                reduced_dim=args.intact_reduced_dim,
+                infinity_scale=args.intact_infinity_scale,
+                use_actual_bounds=args.intact_use_actual_bounds,
+                normalize_protection=True,
+            )
 
-        model.train()
-        for epo in range(args.unlearn_epochs):
-            t_start = time.time()
-            for x, y in trfl:
-                x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+            # InTAct setup: collect forget activations on target layers, compute SVD,
+            # snapshot target params.  remain_dataloader is only used with
+            # --intact_use_actual_bounds.
+            t0 = time.time()
+            protection.setup_protection(
+                model, trfl, device,
+                remain_dataloader=ttrl,
+                forward_fn=classification_forward_fn,
+            )
+            protection.freeze_non_target_params(model)
+            trainable_params = protection.get_trainable_params(model)
+            t1 = time.time()
+            print(f'INTACT_SETUP_SECONDS {t1 - t0:.4f}')
 
-                optimizer.zero_grad()
-                outputs = model(x)
+            criterion = nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(
+                trainable_params, lr=args.lr, momentum=args.momentum,
+                weight_decay=args.weight_decay,
+            )
 
-                if args.intact_base_method == 'rl':
-                    rand_t = torch.randint(0, num_classes, y.shape, device=device)
-                    base_loss = criterion(outputs, rand_t)
-                else:
-                    base_loss = -criterion(outputs, y)
-
-                protect_loss = protection.compute_protection_loss(model, device)
-                total_loss = args.intact_forget_weight * base_loss + protect_loss
-                total_loss.backward()
-                optimizer.step()
-
-            t_end = time.time()
-            print(f'INTACT_EPOCH_SECONDS {t_end - t_start:.4f} '
-                  f'base_loss={base_loss.item():.4f} protect_loss={protect_loss.item():.4f}')
-
-            model.eval()
-            with torch.no_grad():
-                num_hits = 0
-                for i, (x, y) in enumerate(trfl):
-                    x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-                    outputs = model(x)
-                    pred = outputs.argmax(dim=1)
-                    num_hits += (y == pred).sum().item()
-            print(f'INTACT_EPOCH {epo} forget train hits: {num_hits}')
             model.train()
+            for epo in range(args.unlearn_epochs):
+                t_start = time.time()
+                for x, y in trfl:
+                    x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+
+                    optimizer.zero_grad()
+                    outputs = model(x)
+
+                    if args.intact_base_method == 'rl':
+                        rand_t = torch.randint(0, num_classes, y.shape, device=device)
+                        base_loss = criterion(outputs, rand_t)
+                    else:
+                        base_loss = -criterion(outputs, y)
+
+                    protect_loss = protection.compute_protection_loss(model, device)
+                    total_loss = args.intact_forget_weight * base_loss + protect_loss
+                    total_loss.backward()
+                    optimizer.step()
+
+                t_end = time.time()
+                print(f'INTACT_EPOCH_SECONDS {t_end - t_start:.4f} '
+                      f'base_loss={base_loss.item():.4f} protect_loss={protect_loss.item():.4f}')
+
+                model.eval()
+                with torch.no_grad():
+                    num_hits = 0
+                    for i, (x, y) in enumerate(trfl):
+                        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+                        outputs = model(x)
+                        pred = outputs.argmax(dim=1)
+                        num_hits += (y == pred).sum().item()
+                print(f'INTACT_EPOCH {epo} forget train hits: {num_hits}')
+                model.train()
+
+            torch.save(model.state_dict(), intact_ckpt)
+            print(f'INTACT_ARTIFACT saved {intact_ckpt}')
 
         model.eval()
-        # save model (skipped under wandb sweeps)
-        if not args.wandb:
-            torch.save(model, '{}.pth'.format(ckpt_dir + "InTAct_unlearned_model"))
+
+        if args.wandb:
+            import wandb
+            wandb.log({'artifact_reused': bool(reused)})
 
     if args.evaluation:
         with torch.no_grad():
@@ -491,13 +544,19 @@ def main(args):
         score = 100.0 * (accs['remain_acc'] - accs['forget_acc'])
         wandb.log({**accs, 'score': score})
         print(f"[wandb] score={score:.2f}")
-        wandb.finish()
 
     if args.mia:
-        evaluate_mia(model, trfl, tefl, device, args)
+        mia_acc, mia_acc_std = evaluate_mia(model, trfl, tefl, device, args)
+        if args.wandb:
+            import wandb
+            wandb.log({'mia_acc': mia_acc, 'mia_acc_std': mia_acc_std})
 
     if args.kr:
         evaluate_KR(model, train_loader, test_loader, ttfl, ttrl, tefl, terl, num_classes, ckpt_dir=ckpt_dir, device=device, args=args)
+
+    if args.wandb:
+        import wandb
+        wandb.finish()
 
     return model
 

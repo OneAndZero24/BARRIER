@@ -152,4 +152,7 @@ def evaluate_mia(model, trfl, tefl, device, args):
     #     f"The MIA has an accuracy of {mia_scores.mean():.4f} on forgotten vs unseen images"
     # )
     mia_scores = mia_scores * 100
-    print(f"MIA: {mia_scores.mean():.2f}")
+    mean = float(mia_scores.mean())
+    std = float(mia_scores.std())
+    print(f"MIA: {mean:.2f} (+/- {std:.2f})")
+    return mean, std

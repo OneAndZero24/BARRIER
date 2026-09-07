@@ -1,0 +1,90 @@
+# ============================================================================
+# wandb sweep - MIA evaluation of the best 21 InTAct runs (sweep 8pk87uns)
+#
+# Tiny-ImageNet ViT-B/16, forget class 4 (ESC convention), protects the ViT
+# head.  The 21 hyperparameter rows (top-score runs of intact-bayes-v2) live in
+# configs/intact_mia_best21_configs.json; each sweep trial picks one via
+# `config_index` (grid 0..20, same order as the score ranking).
+#
+# Artifact-aware (robust to both cases):
+#   * artifacts = unlearned checkpoints at
+#     <checkpoint_dir>/intact_unlearned/intact_<hash>.pth (hash over
+#     hyperparameters).  If it exists, unlearning is SKIPPED and MIA runs on
+#     the saved artifact (reruns of the same config are cheap).
+#   * if no artifact exists, InTAct unlearning runs (~5-6 min on 4090) and
+#     the checkpoint is saved for reuse.  --force_unlearn bypasses reuse.
+#   Note: the original ay3uwyze/8pk87uns sweeps saved NO model artifacts
+#   (saving was skipped under --wandb), so the first launch will re-run
+#   unlearning once per config.
+#
+# Metric: mia_acc = attack accuracy of a 5-fold logistic-regression MIA on
+# sample losses (forget-train vs forget-test of class 4).  Chance = 50%;
+# LOWER is better (stronger privacy).  Use --use_pytorch_mia for the stronger
+# MLP attack if desired.
+#
+# Usage (on login node):
+#   cd Classification/ESC
+#   wandb sweep configs/sweep_mia_grid_best21_tinyimagenet.yaml
+#   sbatch --array=0-3 slurm_wandb_sweep.sh <sweep-id> 6
+# ============================================================================
+program: unlearn_intact.py
+method: grid
+entity: oneandzero24
+project: esc-intact-tinyimagenet
+name: intact-mia-best21
+
+metric:
+  name: mia_acc
+  goal: minimize
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --method
+  - intact
+  - --data_name
+  - tiny_imagenet
+  - --model_name
+  - vit_base_patch16_224
+  - --dataset_dir
+  - /shared/sets/datasets
+  - --checkpoint_dir
+  - /shared/results/common/miksa/ESC/checkpoints
+  - --forget_class
+  - 4
+  - --batch_size
+  - 64
+  - --intact_targets
+  - head
+  - --intact_base_method
+  - rl
+  - --mia
+  - --mia_configs_json
+  - configs/intact_mia_best21_configs.json
+  - --wandb
+
+parameters:
+  config_index:
+    values:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      - 16
+      - 17
+      - 18
+      - 19
+      - 20
