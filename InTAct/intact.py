@@ -357,10 +357,11 @@ class UnlearnIntervalProtection:
         
         # 2. Compute SVD on forget data and optionally collect projected remain data
         pca_components = {}  # Store mu and U_forget for each layer
-        # Snapshot the items so per-layer tensors can be freed as they are
-        # processed (keeps the SVD-phase RAM flat instead of holding all raw
-        # activation buffers at once).
-        acts_items = list(acts_dict.items())
+        # Iterate over NAMES, not (name, tensor) pairs: the loop deletes each
+        # raw activation buffer after processing it, and a snapshot list of
+        # (name, tensor) pairs would keep every tensor alive (reference leak
+        # that re-peaked RAM at ~raw-buffers + remain-projection = OOM).
+        layer_names = list(acts_dict.keys())
 
         def _maybe_flip(U):
             """Sign-convention sensitivity (Experiment 6): flip a random subset
@@ -373,7 +374,8 @@ class UnlearnIntervalProtection:
             flip = (1.0 - 2.0 * mask.to(device=U.device, dtype=U.dtype)).unsqueeze(1)
             return U * flip
         
-        for layer_name, acts_info in acts_items:
+        for layer_name in layer_names:
+            acts_info = acts_dict[layer_name]
             acts = acts_info['activations']
             layer_type = acts_info.get('layer_type', 'Linear')
             
@@ -524,35 +526,41 @@ class UnlearnIntervalProtection:
         # doubles peak RAM (observed OOM kill at 32 GB cgroup).
         del acts_dict
 
-        # 2b. Collect projected remain data and update bounds
+        # 2b. Collect projected remain data and update bounds, CHUNKED per few
+        # layers so the projected buffers never accumulate (~1.5 GB per conv
+        # layer at DDPM scale; collecting all 17 at once re-peaks RAM).
         if self.use_actual_bounds and remain_dataloader is not None:
             log.info("Collecting and projecting remain data on-the-fly...")
-            remain_projected = self._collect_activations(
-                model, list(pca_components.keys()), remain_dataloader, device,
-                forward_fn=forward_fn,
-                data_transform_fn=data_transform_fn, betas=betas, num_timesteps=num_timesteps,
-                pca_components=pca_components  # Enable projection mode
-            )
-            
-            # Update inf_low/inf_high for each layer
-            for pca_entry in self.pca_info:
-                layer_name = pca_entry["layer_name"]
-                if layer_name in remain_projected:
+            layer_list = [e["layer_name"] for e in self.pca_info
+                          if e["layer_name"] in pca_components]
+            chunk_size = 3
+            for start in range(0, len(layer_list), chunk_size):
+                chunk = layer_list[start:start + chunk_size]
+                remain_projected = self._collect_activations(
+                    model, chunk, remain_dataloader, device,
+                    forward_fn=forward_fn,
+                    data_transform_fn=data_transform_fn, betas=betas,
+                    num_timesteps=num_timesteps,
+                    pca_components={n: pca_components[n] for n in chunk}
+                )
+                by_name = {e["layer_name"]: e for e in self.pca_info}
+                for layer_name in chunk:
+                    pca_entry = by_name[layer_name]
                     Z_remain = remain_projected[layer_name].to(device)
-                    
+
                     # Update bounds to include remain data
                     inf_low = pca_entry["inf_low"].to(device)
                     inf_high = pca_entry["inf_high"].to(device)
-                    
+
                     combined_min = torch.minimum(inf_low, Z_remain.min(dim=0)[0])
                     combined_max = torch.maximum(inf_high, Z_remain.max(dim=0)[0])
-                    
+
                     pca_entry["inf_low"] = combined_min.cpu()
                     pca_entry["inf_high"] = combined_max.cpu()
-                    
+
                     log.info(f"Layer {layer_name}: Updated bounds with {Z_remain.size(0)} projected remain samples")
                     del Z_remain, inf_low, inf_high, combined_min, combined_max
-                    del remain_projected[layer_name]  # free per layer
+                del remain_projected
 
         # 2c. Uniform-margin control (Experiment 3): replace the per-coordinate
         # envelope margins by their mean while keeping z_min/z_max untouched.
@@ -609,6 +617,11 @@ class UnlearnIntervalProtection:
                 target_params.add(target_layer.weight)
             if hasattr(target_layer, 'bias') and target_layer.bias is not None:
                 target_params.add(target_layer.bias)
+        if not target_params:
+            log.error(
+                "freeze_non_target_params found NO target params — did you call "
+                "it after setup_protection()? (target layers are only resolved "
+                "during setup)")
         
         self._target_params = target_params
         

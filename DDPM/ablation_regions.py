@@ -865,15 +865,21 @@ def main():
         sign_flip_seed=getattr(runner_config.training, "sign_flip_seed", 0),
         uniform_margin=getattr(runner_config.training, "uniform_margin", False),
     )
-    protection.freeze_non_target_params(model)
-    trainable_params = protection.get_trainable_params(model)
-    tparams = sum(p.numel() for p in trainable_params)
-
     # ---- setup / preprocessing wall time (activations + SVD + bounds) -----
     setup_wall = setup_protection(
         protection, runner, model, forget_loader, remain_loader
     )
     log.info(f"setup/preprocessing wall time: {setup_wall:.2f}s")
+
+    # freeze AFTER setup: setup_protection populates target_layers; calling
+    # freeze before it would mark 0 parameters -> empty optimizer (observed).
+    protection.freeze_non_target_params(model)
+    trainable_params = protection.get_trainable_params(model)
+    if not trainable_params:
+        raise RuntimeError(
+            "no trainable parameters after freeze_non_target_params — "
+            f"targets {runner_config.training.targets} did not match the model")
+    tparams = sum(p.numel() for p in trainable_params)
 
     k = protection.pca_info[0]["z_min"].numel() if protection.pca_info else 0
     terms = 0
