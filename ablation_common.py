@@ -116,12 +116,25 @@ def safe_run_suffix(row_or_ident):
         v = row_or_ident.get(k, default)
         return "" if v is None else str(v)
 
+    def _flag(k, default=0):
+        v = row_or_ident.get(k, default)
+        if v is None or v == "":
+            return 0
+        if isinstance(v, bool):
+            return int(v)
+        s = str(v).strip().lower()
+        if s in ("true", "yes", "on", "1"):
+            return 1
+        if s in ("false", "no", "off", "0"):
+            return 0
+        return int(float(s))
+
     return (
         f"{g('experiment')}_{g('region_mode')}_{g('interval_mode', 'full')}"
         f"_a{g('alpha', '5')}_f{g('sign_flip_frac', '0.0')}"
-        f"_db{int(g('include_db', '0') or 0)}"
-        f"_um{int(g('uniform_margin', '0') or 0)}"
-        f"_mn{int(g('include_mean', '1') or 1)}_rs{int(g('include_res', '1') or 1)}"
+        f"_db{_flag('include_db')}"
+        f"_um{_flag('uniform_margin')}"
+        f"_mn{_flag('include_mean', 1)}_rs{_flag('include_res', 1)}"
         f"_lam{g('lambda')}_s{g('seed')}"
     )
 

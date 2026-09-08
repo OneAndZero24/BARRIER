@@ -802,8 +802,21 @@ def main():
 
     results_dir = os.path.abspath(args.results_dir)
     os.makedirs(results_dir, exist_ok=True)
+    run_ident = {
+        "experiment": args.experiment,
+        "region_mode": args.region_mode,
+        "interval_mode": args.interval_mode,
+        "alpha": args.alpha,
+        "sign_flip_frac": args.sign_flip_frac,
+        "include_db": int(args.include_db),
+        "uniform_margin": int(args.uniform_margin),
+        "include_mean": int(not args.no_include_mean),
+        "include_res": int(not args.no_include_res),
+        "lambda": args.lam,
+        "seed": seed,
+    }
     run_suffix = (
-        f"{safe_run_suffix({**args.__dict__, 'seed': seed})}"
+        f"{safe_run_suffix(run_ident)}"
         f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     runner_config = build_runner_config(cfg, results_dir, run_suffix)
