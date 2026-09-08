@@ -39,7 +39,7 @@
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
-conda activate salun-ddpm
+conda activate salun-ddpm2
 cd $HOME/InTAct-Unl/DDPM
 export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 
