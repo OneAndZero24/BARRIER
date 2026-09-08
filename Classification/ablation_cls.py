@@ -48,8 +48,10 @@ from InTAct.intact import (  # noqa: E402
 from pipeline import build_args, build_data_loaders  # noqa: E402
 from ablation_common import (  # noqa: E402
     FIXED_LAMBDA,
-    append_ablation_row,
+    aggregate_rows,
+    safe_run_suffix,
     summarize_ablations,
+    write_sidecar,
 )
 
 import utils  # noqa: E402
@@ -141,6 +143,23 @@ def evaluate_all_headless(model, data_loaders, args, device):
     return metrics
 
 
+def _ident(args):
+    """Collision-proof run identity (all flags that change loss/metrics)."""
+    return {
+        "experiment": args.experiment,
+        "region_mode": args.region_mode,
+        "interval_mode": args.interval_mode,
+        "alpha": args.alpha,
+        "sign_flip_frac": args.sign_flip_frac,
+        "include_db": int(args.include_db),
+        "uniform_margin": int(args.uniform_margin),
+        "include_mean": int(not args.no_include_mean),
+        "include_res": int(not args.no_include_res),
+        "lambda": args.lam,
+        "seed": args.seed,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region_mode", choices=REGION_MODES, default="two_corner")
@@ -169,6 +188,7 @@ def main():
                         format="%(asctime)s [%(levelname)s] %(message)s")
 
     if args.summarize:
+        aggregate_rows(args.results_dir)
         summarize_ablations(args.results_dir)
         return
 
@@ -300,8 +320,8 @@ def main():
 
     # ---- run metadata + artifacts for Experiments 1-2 ----------------------
     run_suffix = (
-        f"{args.experiment}_{args.region_mode}_{args.interval_mode}_"
-        f"lam{args.lam}_s{seed}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        f"{safe_run_suffix(_ident(args))}"
+        f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     run_dir = os.path.join(args.results_dir, "runs", run_suffix)
     os.makedirs(run_dir, exist_ok=True)
     torch.save(protection.pca_info, os.path.join(run_dir, "pca_info.pth"))
@@ -377,7 +397,7 @@ def main():
         "n_iters": n_epochs, "k": k, "tparams": tparams,
         "run_dir": run_dir,
     }
-    append_ablation_row(args.results_dir, row)
+    write_sidecar(run_dir, row, diagnostics=None)
 
     log.info(f"run complete: {args.experiment} {args.region_mode}/"
              f"{args.interval_mode} lam={args.lam} seed={seed} "

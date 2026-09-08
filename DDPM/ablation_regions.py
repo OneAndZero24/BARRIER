@@ -67,7 +67,15 @@ from InTAct.intact import (  # noqa: E402
 from models.diffusion import Conditional_Model  # noqa: E402
 from runners.diffusion import Diffusion  # noqa: E402
 
-from ablation_common import append_ablation_row, summarize_ablations, FIXED_LAMBDA  # noqa: E402
+from ablation_common import (  # noqa: E402
+    FIXED_LAMBDA,
+    REGIONS_CSV_COLS,
+    DIAGNOSTICS_CSV_COLS,
+    aggregate_rows,
+    safe_run_suffix,
+    summarize_ablations,
+    write_sidecar,
+)
 
 log = logging.getLogger(__name__)
 
@@ -90,28 +98,8 @@ ANALYTIC_MATVECS = {
 # (one term per box instead of two).
 INTERVAL_MATVECS = {"full": 1.0, "width_only": 0.5, "centre_only": 0.5, "off": 0.0}
 
-REGIONS_CSV_COLS = [
-    "region_mode", "lambda", "seed", "terms", "analytic_matvecs",
-    "ua", "ta", "fid", "fid_backend",
-    "prot_loss_ms", "prot_loss_ms_std",
-    "setup_wall_s", "train_wall_s", "total_wall_s", "peak_mem_mb",
-    "n_iters", "k", "tparams", "diag_dirs", "run_dir",
-]
-
-DIAGNOSTICS_CSV_COLS = [
-    "region_mode", "lambda", "seed", "layer_name", "k",
-    "c_lo_norm", "c_hi_norm", "env_asym_ratio",
-    "frac_remain_in_A", "frac_remain_in_B", "frac_remain_in_C",
-    "frac_remain_in_D", "frac_remain_in_E", "frac_remain_in_F",
-    "aniso_A", "aniso_B", "aniso_C", "aniso_D", "aniso_E", "aniso_F",
-    "vstar_drift_protected_A", "vstar_drift_envelope_A",
-    "vstar_drift_protected_B", "vstar_drift_envelope_B",
-    "vstar_drift_protected_C", "vstar_drift_envelope_C",
-    "vstar_drift_protected_D", "vstar_drift_envelope_D",
-    "vstar_drift_protected_E", "vstar_drift_envelope_E",
-    "vstar_drift_protected_F", "vstar_drift_envelope_F",
-    "diag_dirs",
-]
+REGIONS_CSV_COLS = REGIONS_CSV_COLS  # re-exported from ablation_common
+DIAGNOSTICS_CSV_COLS = DIAGNOSTICS_CSV_COLS  # re-exported from ablation_common
 
 # Diagnostic tags: A=two_corner, B=two_random, C=slabs_2k, D=boxes_4, E=boxes_8,
 # F=env_box
@@ -539,21 +527,20 @@ def _ensure_header(path, cols):
             csv.writer(f).writerow(cols)
 
 
-def append_regions_row(results_dir, row):
-    path = os.path.join(results_dir, "regions.csv")
-    _ensure_header(path, REGIONS_CSV_COLS)
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=REGIONS_CSV_COLS)
-        w.writerow({c: row.get(c, "") for c in REGIONS_CSV_COLS})
+def append_regions_row_deprecated(results_dir, row):
+    raise NotImplementedError(
+        "direct CSV appends are disabled for parallel safety; run "
+        "--summarize to aggregate runs/*/rows.json")
 
 
-def append_diagnostics_rows(results_dir, rows):
-    path = os.path.join(results_dir, "diagnostics.csv")
-    _ensure_header(path, DIAGNOSTICS_CSV_COLS)
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=DIAGNOSTICS_CSV_COLS)
-        for r in rows:
-            w.writerow({c: r.get(c, "") for c in DIAGNOSTICS_CSV_COLS})
+def append_diagnostics_rows_deprecated(results_dir, rows):
+    raise NotImplementedError(
+        "direct CSV appends are disabled for parallel safety; run "
+        "--summarize to aggregate runs/*/rows.json")
+
+
+# NOTE: per-run rows go to <run_dir>/rows.json (sidecar); the CSVs under
+# results_dir are regenerated offline by aggregate_rows().
 
 
 # ============================================================================
@@ -762,7 +749,8 @@ def main():
     )
 
     if args.summarize:
-        # legacy region table (regions.csv) + per-experiment tables (ablations.csv)
+        # regenerate the CSVs from per-run sidecars, then render tables
+        aggregate_rows(args.results_dir)
         summarize(args.results_dir)
         summarize_ablations(args.results_dir)
         return
@@ -815,8 +803,8 @@ def main():
     results_dir = os.path.abspath(args.results_dir)
     os.makedirs(results_dir, exist_ok=True)
     run_suffix = (
-        f"{args.region_mode}_lam{args.lam}_s{seed}_"
-        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        f"{safe_run_suffix(args.__dict__ | {'seed': seed})}"
+        f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     runner_config = build_runner_config(cfg, results_dir, run_suffix)
     runner_args = build_runner_args(cfg, runner_config, seed)
@@ -1009,20 +997,6 @@ def main():
         )
 
     total_wall = time.time() - t0_run
-    row = {
-        "region_mode": args.region_mode,
-        "lambda": args.lam,
-        "seed": seed,
-        "terms": terms,
-        "analytic_matvecs": analytic_matvecs,
-        "ua": ua, "ta": ta, "fid": fid, "fid_backend": fid_backend,
-        "prot_loss_ms": pl_ms, "prot_loss_ms_std": pl_ms_std,
-        "setup_wall_s": setup_wall, "train_wall_s": train_wall,
-        "total_wall_s": total_wall, "peak_mem_mb": peak_mem,
-        "n_iters": args.n_iters, "k": k, "tparams": tparams,
-        "diag_dirs": args.diag_dirs, "run_dir": runner_config.exp_root_dir,
-    }
-    append_regions_row(results_dir, row)
     ab_row = {
         "experiment": args.experiment,
         "backbone": "ddpm",
@@ -1046,14 +1020,14 @@ def main():
         "setup_wall_s": setup_wall, "train_wall_s": train_wall,
         "total_wall_s": total_wall, "peak_mem_mb": peak_mem,
         "n_iters": args.n_iters, "k": k, "tparams": tparams,
+        "diag_dirs": args.diag_dirs,
         "run_dir": runner_config.exp_root_dir,
     }
-    append_ablation_row(results_dir, ab_row)
     if not args.skip_diagnostics:
         for d in diag_rows:
             d["lambda"] = args.lam
             d["seed"] = seed
-        append_diagnostics_rows(results_dir, diag_rows)
+    write_sidecar(runner_config.exp_root_dir, ab_row, diag_rows)
 
     log.info(f"run complete: variant={args.region_mode} lambda={args.lam} "
              f"seed={seed} UA={ua:.3f} TA={ta:.3f} FID={fid:.3f} "

@@ -17,8 +17,10 @@ width_only / centre_only: 2 each) so all variants sit on a comparable scale.
 """
 
 import csv
+import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -38,6 +40,32 @@ ABLATIONS_CSV_COLS = [
     "n_iters", "k", "tparams", "run_dir",
 ]
 
+# Legacy region-grid schema (regenerated offline by aggregate_rows).
+REGIONS_CSV_COLS = [
+    "region_mode", "lambda", "seed", "terms", "analytic_matvecs",
+    "ua", "ta", "fid", "fid_backend",
+    "prot_loss_ms", "prot_loss_ms_std",
+    "setup_wall_s", "train_wall_s", "total_wall_s", "peak_mem_mb",
+    "n_iters", "k", "tparams", "diag_dirs", "run_dir",
+]
+
+# Per-layer diagnostics schema (regenerated offline by aggregate_rows).
+DIAGNOSTICS_CSV_COLS = [
+    "region_mode", "lambda", "seed", "layer_name", "k",
+    "c_lo_norm", "c_hi_norm", "env_asym_ratio",
+    "frac_remain_in_A", "frac_remain_in_B", "frac_remain_in_C",
+    "frac_remain_in_D", "frac_remain_in_E", "frac_remain_in_F",
+    "aniso_A", "aniso_B", "aniso_C", "aniso_D", "aniso_E", "aniso_F",
+    "vstar_drift_protected_A", "vstar_drift_envelope_A",
+    "vstar_drift_protected_B", "vstar_drift_envelope_B",
+    "vstar_drift_protected_C", "vstar_drift_envelope_C",
+    "vstar_drift_protected_D", "vstar_drift_envelope_D",
+    "vstar_drift_protected_E", "vstar_drift_envelope_E",
+    "vstar_drift_protected_F", "vstar_drift_envelope_F",
+    "diag_dirs",
+]
+
+
 # Fixed (paper) lambda per backbone/setting, used to label the "fixed" row.
 FIXED_LAMBDA = {
     ("ddpm", "classwise"): 5.0,
@@ -47,20 +75,117 @@ FIXED_LAMBDA = {
 }
 
 
-def _ensure_header(path, cols):
+# ============================================================================
+# Parallel-safe row transport: per-run sidecar files, aggregated offline.
+# The runners NEVER append to shared CSVs directly (hundreds of concurrent
+# appends would interleave rows); each run writes <run_dir>/rows.json
+# {"run": {...}, "diagnostics": [...]} and --summarize aggregates.
+# ============================================================================
+
+def run_key(row):
+    """Canonical identity of a run: everything that changes loss or metrics."""
+    keys = ("experiment", "backbone", "setting", "region_mode", "interval_mode",
+            "alpha", "sign_flip_frac", "include_db", "uniform_margin",
+            "include_mean", "include_res", "lambda", "seed")
+    return tuple(str(row.get(k, "")) for k in keys)
+
+
+def run_key_suppl(r):
+    return "|".join(str(r.get(k, "")) for k in
+                    ("experiment", "backbone", "setting", "region_mode",
+                     "interval_mode", "alpha", "sign_flip_frac", "include_db",
+                     "uniform_margin", "include_mean", "include_res",
+                     "lambda", "seed"))
+
+
+def safe_run_suffix(row_or_ident):
+    """Collision-proof run-dir suffix encoding ALL discriminating flags (two
+    distinct configurations NEVER share a directory, regardless of clock
+    resolution)."""
+    def g(k, default=""):
+        v = row_or_ident.get(k, default)
+        return "" if v is None else str(v)
+
+    return (
+        f"{g('experiment')}_{g('region_mode')}_{g('interval_mode', 'full')}"
+        f"_a{g('alpha', '5')}_f{g('sign_flip_frac', '0.0')}"
+        f"_db{int(g('include_db', '0') or 0)}"
+        f"_um{int(g('uniform_margin', '0') or 0)}"
+        f"_mn{int(g('include_mean', '1') or 1)}_rs{int(g('include_res', '1') or 1)}"
+        f"_lam{g('lambda')}_s{g('seed')}"
+    )
+
+
+def write_sidecar(run_dir, run_row, diagnostics=None):
+    """Write <run_dir>/rows.json with one unified run row + optional per-layer
+    diagnostics rows.  Adds run_dir and a timestamp (aggregation keeps the
+    newest row per run_key on resubmission)."""
+    os.makedirs(run_dir, exist_ok=True)
+    payload = {
+        "run": {c: run_row.get(c, "") for c in ABLATIONS_CSV_COLS},
+        "diagnostics": diagnostics or [],
+    }
+    payload["run"]["run_dir"] = run_dir
+    payload["run"]["ts"] = datetime.now(timezone.utc).isoformat()
+    with open(os.path.join(run_dir, "rows.json"), "w") as f:
+        json.dump(payload, f, indent=1)
+
+
+def _write_csv(path, cols, rows):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    if not os.path.exists(path):
-        with open(path, "w", newline="") as f:
-            csv.writer(f).writerow(cols)
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c, "") for c in cols})
+    os.replace(tmp, path)  # atomic: no torn reads by concurrent summarise
 
 
-def append_ablation_row(results_dir, row):
-    """Append one run to <results_dir>/ablations.csv (unified schema)."""
-    path = os.path.join(results_dir, "ablations.csv")
-    _ensure_header(path, ABLATIONS_CSV_COLS)
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=ABLATIONS_CSV_COLS)
-        w.writerow({c: row.get(c, "") for c in ABLATIONS_CSV_COLS})
+def _newest(rows, keyfn):
+    by = {}
+    for r in rows:
+        k = keyfn(r)
+        if k not in by or (r.get("ts") or "") > (by[k].get("ts") or ""):
+            by[k] = r
+    return list(by.values())
+
+
+def aggregate_rows(results_dir):
+    """Scan <results_dir>/runs/*/rows.json and (re)generate regions.csv,
+    ablations.csv and diagnostics.csv.  Deterministic, idempotent, and safe to
+    run while jobs are still writing (sidecars are per-run files)."""
+    runs_root = os.path.join(results_dir, "runs")
+    if not os.path.isdir(runs_root):
+        log.info(f"no {runs_root}; nothing to aggregate")
+        return
+    ab, diag = [], []
+    n_sidecars = 0
+    for name in sorted(os.listdir(runs_root)):
+        d = os.path.join(runs_root, name)
+        p = os.path.join(d, "rows.json")
+        if not (os.path.isdir(d) and os.path.exists(p)):
+            continue
+        try:
+            with open(p) as f:
+                payload = json.load(f)
+        except Exception as exc:
+            log.warning(f"skipping unreadable sidecar {p}: {exc}")
+            continue
+        r = payload.get("run")
+        if r:
+            ab.append(r)
+            n_sidecars += 1
+        diag.extend(payload.get("diagnostics", []) or [])
+
+    ab = _newest(ab, run_key)
+    reg = [{c: r.get(c, "") for c in REGIONS_CSV_COLS} for r in ab]
+    diag = _newest(diag, lambda r: run_key_suppl(r) + ("|" + str(r.get("layer_name", "")) if r.get("layer_name") else ""))
+    _write_csv(os.path.join(results_dir, "ablations.csv"), ABLATIONS_CSV_COLS, ab)
+    _write_csv(os.path.join(results_dir, "regions.csv"), REGIONS_CSV_COLS, reg)
+    _write_csv(os.path.join(results_dir, "diagnostics.csv"), DIAGNOSTICS_CSV_COLS, diag)
+    log.info(f"aggregated {n_sidecars} sidecars -> {len(ab)} unique runs, "
+             f"{len(diag)} diagnostics rows")
 
 
 # ============================================================================
