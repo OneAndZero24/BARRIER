@@ -28,7 +28,7 @@
 #SBATCH --qos=batch
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32GB
+#SBATCH --mem=48GB
 #SBATCH --partition=rtx4090_batch
 #SBATCH --array=0-35
 

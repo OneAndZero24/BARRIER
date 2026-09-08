@@ -39,7 +39,7 @@
 #SBATCH --qos=big
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32GB
+#SBATCH --mem=48GB
 #SBATCH --partition=dgx
 #SBATCH --array=0-179
 

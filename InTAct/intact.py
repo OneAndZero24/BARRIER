@@ -357,6 +357,10 @@ class UnlearnIntervalProtection:
         
         # 2. Compute SVD on forget data and optionally collect projected remain data
         pca_components = {}  # Store mu and U_forget for each layer
+        # Snapshot the items so per-layer tensors can be freed as they are
+        # processed (keeps the SVD-phase RAM flat instead of holding all raw
+        # activation buffers at once).
+        acts_items = list(acts_dict.items())
 
         def _maybe_flip(U):
             """Sign-convention sensitivity (Experiment 6): flip a random subset
@@ -369,7 +373,7 @@ class UnlearnIntervalProtection:
             flip = (1.0 - 2.0 * mask.to(device=U.device, dtype=U.dtype)).unsqueeze(1)
             return U * flip
         
-        for layer_name, acts_info in acts_dict.items():
+        for layer_name, acts_info in acts_items:
             acts = acts_info['activations']
             layer_type = acts_info.get('layer_type', 'Linear')
             
@@ -512,7 +516,14 @@ class UnlearnIntervalProtection:
                 "region_side": region_side,
             }
             self.pca_info.append(pca_entry)
-        
+            del acts_dict[layer_name]  # free raw activations as we go
+
+        # Free the raw forget-activation buffers BEFORE projecting the remain
+        # set: with DDPM-scale data they are ~16 GB for all target layers and
+        # the remain projection accumulates a similar amount, which otherwise
+        # doubles peak RAM (observed OOM kill at 32 GB cgroup).
+        del acts_dict
+
         # 2b. Collect projected remain data and update bounds
         if self.use_actual_bounds and remain_dataloader is not None:
             log.info("Collecting and projecting remain data on-the-fly...")
@@ -541,6 +552,7 @@ class UnlearnIntervalProtection:
                     
                     log.info(f"Layer {layer_name}: Updated bounds with {Z_remain.size(0)} projected remain samples")
                     del Z_remain, inf_low, inf_high, combined_min, combined_max
+                    del remain_projected[layer_name]  # free per layer
 
         # 2c. Uniform-margin control (Experiment 3): replace the per-coordinate
         # envelope margins by their mean while keeping z_min/z_max untouched.

@@ -19,8 +19,10 @@
 #
 # Resources (RTX 4090, 24 GB VRAM):
 #   - VRAM  ~2-4 GB training / ~5 GB peak during setup SVD  -> 24 GB is ample
-#   - RAM   ~16-20 GB peak (8 attn layers x 1.31 GB forget-activation buffers
-#     during setup)  -> 32 GB requested; 16 GB would OOM
+#   - RAM   the pre-fix setup held all raw activation buffers (~16 GB) while
+#     projecting the remain set (~18 GB more) -> OOM at 32 GB (fixed: buffers
+#     are now freed per layer and before the remain pass; peak ~20 GB).
+#     48 GB requested for headroom.
 #
 # Usage:
 #   cd DDPM
@@ -31,7 +33,7 @@
 #SBATCH --qos=batch
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32GB
+#SBATCH --mem=48GB
 #SBATCH --partition=rtx4090_batch
 #SBATCH --array=0-89
 
