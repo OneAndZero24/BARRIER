@@ -23,10 +23,20 @@ import os
 from datetime import datetime, timezone
 
 import numpy as np
+import torch
 
 log = logging.getLogger(__name__)
 
 BACKBONES = ("ddpm", "resnet18")
+
+
+def torch_load(path, map_location="cpu", **kwargs):
+    """torch.load with a fallback for torch < 1.13 (no weights_only kwarg)."""
+    try:
+        return torch.load(path, map_location=map_location,
+                          weights_only=False, **kwargs)
+    except TypeError:
+        return torch.load(path, map_location=map_location, **kwargs)
 
 # One row per (experiment, variant, lambda, seed, backbone).
 ABLATIONS_CSV_COLS = [

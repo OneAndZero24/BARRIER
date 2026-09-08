@@ -28,7 +28,7 @@
 #                                  -> Experiments 1-2 (pass --no_remain to
 #                                     skip the Exp2 activation collection)
 #
-# Resources: dgx partition (qos=big), 32 GB RAM, one GPU per job.
+# Resources: rtx4090\_batch partition (qos=batch), 32 GB RAM, one GPU per job.
 #
 # Usage:
 #   cd DDPM
@@ -36,11 +36,11 @@
 # ============================================================================
 
 #SBATCH --job-name=exp3-9-ddpm
-#SBATCH --qos=big
+#SBATCH --qos=batch
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48GB
-#SBATCH --partition=dgx
+#SBATCH --partition=rtx4090_batch
 #SBATCH --array=0-179
 
 # ---- Environment ----

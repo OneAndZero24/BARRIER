@@ -26,11 +26,11 @@
 # ============================================================================
 
 #SBATCH --job-name=intact-exp3-9-cls-rd
-#SBATCH --qos=big
+#SBATCH --qos=batch
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48GB
-#SBATCH --partition=dgx
+#SBATCH --partition=rtx4090_batch
 #SBATCH --array=0-179
 
 # ---- Environment ----

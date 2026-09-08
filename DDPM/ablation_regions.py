@@ -803,7 +803,7 @@ def main():
     results_dir = os.path.abspath(args.results_dir)
     os.makedirs(results_dir, exist_ok=True)
     run_suffix = (
-        f"{safe_run_suffix(args.__dict__ | {'seed': seed})}"
+        f"{safe_run_suffix({**args.__dict__, 'seed': seed})}"
         f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     runner_config = build_runner_config(cfg, results_dir, run_suffix)

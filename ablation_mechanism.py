@@ -47,6 +47,8 @@ import sys
 import numpy as np
 import torch
 
+from ablation_common import torch_load  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 log = logging.getLogger(__name__)
@@ -80,9 +82,9 @@ def load_run(run_dir):
         raise FileNotFoundError(f"{meta_path} missing")
     with open(meta_path) as f:
         meta = json.load(f)
-    pca_info = torch.load(os.path.join(run_dir, "pca_info.pth"),
+    pca_info = torch_load(os.path.join(run_dir, "pca_info.pth"),
                           map_location="cpu", weights_only=False)
-    ckpt = torch.load(os.path.join(run_dir, "ckpt.pth"),
+    ckpt = torch_load(os.path.join(run_dir, "ckpt.pth"),
                       map_location="cpu", weights_only=False)
     # DDPM saves [state_dict, optimizer, iter]; ResNet-18 saves state_dict.
     trained = ckpt[0] if isinstance(ckpt, list) else ckpt
@@ -92,11 +94,11 @@ def load_run(run_dir):
 def load_base_weights(meta):
     if meta["backbone"] == "ddpm":
         path = os.path.join(meta["base_ckpt_folder"], "ckpts", "ckpt.pth")
-        state = torch.load(path, map_location="cpu", weights_only=False)
+        state = torch_load(path, map_location="cpu")
         base = state[0]
     else:
         path = meta["base_ckpt"]
-        base = torch.load(path, map_location="cpu", weights_only=False)
+        base = torch_load(path, map_location="cpu")
         if isinstance(base, dict) and "state_dict" in base:
             base = base["state_dict"]
     return {k.replace("module.", "", 1): v for k, v in base.items()}
@@ -224,7 +226,7 @@ def remain_projections_cls(meta, info, device):
     fargs = build_args(cfg)
     model, _, val_loader, test_loader, marked_loader = utils.setup_model_dataset(fargs)
     model = model.to(device).eval()
-    ckpt = torch.load(meta["base_ckpt"], map_location=device, weights_only=False)
+    ckpt = torch_load(meta["base_ckpt"], map_location=device, )
     if isinstance(ckpt, dict) and "state_dict" in ckpt:
         ckpt = ckpt["state_dict"]
     model.load_state_dict(ckpt, strict=False)

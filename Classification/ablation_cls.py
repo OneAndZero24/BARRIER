@@ -32,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
+from ablation_common import torch_load  # noqa: E402
 import torch.nn as nn
 import yaml
 
@@ -232,7 +234,7 @@ def main():
     model, _, val_loader, test_loader, marked_loader = utils.setup_model_dataset(fargs)
     model = model.to(device)
 
-    ckpt = torch.load(fargs.model_path, map_location=device, weights_only=False)
+    ckpt = torch_load(fargs.model_path, map_location=device)
     if isinstance(ckpt, dict) and "state_dict" in ckpt:
         ckpt = ckpt["state_dict"]
     model.load_state_dict(ckpt, strict=False)
