@@ -215,40 +215,23 @@ def aggregate_rows(results_dir):
 # Summarise -> results/tables/<experiment>.tex
 # ============================================================================
 
-def _fmt(v, nd=3):
-    if v is None or (isinstance(v, float) and v != v):
-        return "-"
-    return f"{v:.{nd}f}"
-
-
-def _mean_std(vals):
-    vals = [v for v in vals if v == v and v is not None]
-    if not vals:
-        return float("nan"), float("nan")
-    a = np.asarray(vals, dtype=float)
-    return float(a.mean()), float(a.std())
-
-
-def _composite(e, backbone):
-    """Headline for best-per-variant selection.  DDPM: UA/TA/FID paper
-    composite.  ResNet-18: UA + TA (no FID)."""
-    ua = float(e.get("ua", "nan"))
-    ta = float(e.get("ta", "nan"))
-    if backbone == "ddpm":
-        fid = float(e.get("fid", "nan"))
-        if fid == fid:
-            return 1.5 * ua + ta - fid / 3.0
-    if ua != ua or ta != ta:
-        return float("-inf")
-    return ua + ta
-
-
 def _load_ablations(results_dir):
     path = os.path.join(results_dir, "ablations.csv")
     if not os.path.exists(path):
         return []
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _dedup(rows, keys=("experiment", "backbone", "setting", "region_mode",
+                       "interval_mode", "alpha", "sign_flip_frac", "include_db",
+                       "uniform_margin", "include_mean", "include_res",
+                       "lambda", "seed")):
+    latest = {}
+    for r in rows:
+        k = tuple(str(r.get(kk, "")) for kk in keys)
+        latest[k] = r
+    return list(latest.values())
 
 
 def _load_legacy_regions(results_dir):
@@ -302,8 +285,10 @@ def _load_legacy_regions(results_dir):
 def _merge_exp5(exp5_rows, legacy_rows):
     """Keep ablations.csv rows (newest regime) and fill region modes from the
     legacy grid; dedup by (region_mode, lambda, seed)."""
-    merged = {("env_box", str(r.get("lambda")), str(r.get("seed"))): r
-              for r in exp5_rows}
+    merged = {}
+    for r in exp5_rows:
+        key = (r.get("region_mode"), str(r.get("lambda")), str(r.get("seed")))
+        merged[key] = r
     for r in legacy_rows:
         key = (r["region_mode"], str(r.get("lambda")), str(r.get("seed")))
         if key not in merged:
@@ -311,22 +296,40 @@ def _merge_exp5(exp5_rows, legacy_rows):
     return list(merged.values())
 
 
-def _dedup(rows, keys=("experiment", "backbone", "setting", "region_mode",
-                       "interval_mode", "alpha", "sign_flip_frac", "include_db",
-                       "uniform_margin", "include_mean", "include_res",
-                       "lambda", "seed")):
-    latest = {}
-    for r in rows:
-        k = tuple(str(r.get(kk, "")) for kk in keys)
-        latest[k] = r
-    return list(latest.values())
+def _fmt(v, nd=3):
+    if v is None or (isinstance(v, float) and v != v):
+        return "-"
+    return f"{v:.{nd}f}"
+
+
+def _mean_std(vals):
+    nums = []
+    for v in vals:
+        if v is None or v == "":
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f == f:
+            nums.append(f)
+    if not nums:
+        return float("nan"), float("nan")
+    a = np.asarray(nums, dtype=float)
+    return float(a.mean()), float(a.std())
+
+
+# Display labels used in table headers -> column names in ablations.csv.
+METRIC_KEYS = {"UA": "ua", "RA": "ra", "TA": "ta", "FID": "fid",
+               "TParams": "tparams", "terms": "terms"}
 
 
 def _agg_tex(entries, cols):
     """Mean +- std cells over seeds for the requested metric columns."""
     out = []
     for c in cols:
-        m, s = _mean_std([float(e.get(c, "nan")) for e in entries])
+        k = METRIC_KEYS.get(c, c)
+        m, s = _mean_std([e.get(k) for e in entries])
         out.append(rf"{_fmt(m)}$\pm${_fmt(s)}")
     return " & ".join(out)
 
@@ -376,13 +379,30 @@ def _experiment_table(experiment, rows, backbone, metrics,
             lines.append(rf"{v} (fixed) & "
                          rf"{_fmt(fixed_lam, 1).rstrip('0').rstrip('.')} & "
                          rf"{cells} \\")
-        best = max(entries, key=lambda e: _composite(e, backbone))
-        if best is not None:
-            best_per_variant[v] = best
-            lam = float(str(best.get("lambda", "nan")))
-            cells = _agg_tex([best], metrics)
+
+        # best-per-variant = the lambda whose CELL MEAN (over seeds) maximises
+        # the composite — not the best single seed (which can lie below the
+        # mean and would disagree with the table's mean +/- std cells).
+        by_lam = {}
+        for e in entries:
+            by_lam.setdefault(float(str(e.get("lambda", "nan"))), []).append(e)
+
+        def _cell_score(es):
+            u, _ = _mean_std([float(x.get("ua", "nan")) for x in es])
+            t, _ = _mean_std([float(x.get("ta", "nan")) for x in es])
+            if u != u or t != t:
+                return float("-inf")
+            f, _ = _mean_std([float(x.get("fid", "nan")) for x in es])
+            concrete = f if f == f else 0.0
+            return 1.5 * u + t - concrete / 3.0
+
+        best_group = max(by_lam.values(), key=_cell_score)
+        if best_group:
+            best_per_variant[v] = best_group
+            lam = float(str(best_group[0].get("lambda", "nan")))
+            cells = _agg_tex(best_group, metrics)
             if extra_cols:
-                cells += " & " + _agg_tex([best], list(extra_cols))
+                cells += " & " + _agg_tex(best_group, list(extra_cols))
             lines.append(rf"{v} (best) & {_fmt(lam, 1).rstrip('0').rstrip('.')} & "
                          rf"{cells} \\")
         lines.append(r"\addlinespace")

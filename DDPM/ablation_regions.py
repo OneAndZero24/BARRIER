@@ -587,15 +587,25 @@ def summarize(results_dir):
         vals = [float(e.get(key, "nan")) for e in entries]
         return _mean_std(vals)
 
-    def composite(e):
-        ua, ta, fid = float(e["ua"]), float(e["ta"]), float(e["fid"])
-        return 1.5 * ua + ta - fid / 3.0
+    def cell_composite(entries):
+        """Composite of the cell MEAN over seeds (nan-safe)."""
+        ua_m, _ = _mean_std([float(e.get("ua", "nan")) for e in entries])
+        ta_m, _ = _mean_std([float(e.get("ta", "nan")) for e in entries])
+        fid_m, _ = _mean_std([float(e.get("fid", "nan")) for e in entries])
+        if ua_m != ua_m or ta_m != ta_m:
+            return float("-inf")
+        concrete = fid_m if fid_m == fid_m else 0.0
+        return 1.5 * ua_m + ta_m - concrete / 3.0
 
+    # Best-per-variant = the lambda whose CELL MEAN (over seeds) maximises the
+    # composite — not the best single seed (which can lie below the mean).
     variant_best = {}
     for (var, lam), entries in by_var_lam.items():
-        best = max(entries, key=composite)
-        if var not in variant_best or composite(best) > composite(variant_best[var][1]):
-            variant_best[var] = (lam, best)
+        if not entries:
+            continue
+        score = cell_composite(entries)
+        if var not in variant_best or score > variant_best[var][0]:
+            variant_best[var] = (score, lam, entries)
 
     lines = []
     lines.append(r"\begin{table}[t]")
@@ -632,15 +642,15 @@ def summarize(results_dir):
             rf"{var} (fixed) & 5 & {terms_txt} & {fixed_cells} \\"
         )
         if var in variant_best:
-            lam, best = variant_best[var]
-            ua_m, ua_s = _mean_std([float(best["ua"])])
-            ta_m, ta_s = _mean_std([float(best["ta"])])
-            fid_m, fid_s = _mean_std([float(best["fid"])])
-            pl_m, pl_s = _mean_std([float(best["prot_loss_ms"])])
-            tw_m, tw_s = _mean_std([float(best["total_wall_s"])])
+            _, lam, best_entries = variant_best[var]
+            ua_m, ua_s = agg(best_entries, "ua")
+            ta_m, ta_s = agg(best_entries, "ta")
+            fid_m, fid_s = agg(best_entries, "fid")
+            pl_m, pl_s = agg(best_entries, "prot_loss_ms")
+            tw_m, tw_s = agg(best_entries, "total_wall_s")
             lam_txt = f"{lam:.1f}".rstrip("0").rstrip(".")
             lines.append(
-                rf"{var} (best) & {lam_txt} & {best['terms']} & "
+                rf"{var} (best) & {lam_txt} & {best_entries[0]['terms']} & "
                 rf"{_fmt(ua_m)}$\pm${_fmt(ua_s)} & {_fmt(ta_m)}$\pm${_fmt(ta_s)} & "
                 rf"{_fmt(fid_m)}$\pm${_fmt(fid_s)} & "
                 rf"{_fmt(pl_m)}$\pm${_fmt(pl_s)} & {_fmt(tw_m)}$\pm${_fmt(tw_s)} \\"
@@ -681,11 +691,11 @@ def summarize(results_dir):
                 f"{_fmt(pl_m,1)}+-{_fmt(pl_s,1):>5s} "
                 f"{_fmt(tw_m,0):>10s}"
             )
-    best_line = "best per variant: " + ", ".join(
-        f"{var}(λ={_fmt(variant_best[var][0],1).rstrip('0').rstrip('.')}) "
-        f"UA={_fmt(_mean_std([float(variant_best[var][1]['ua'])])[0])} "
-        f"TA={_fmt(_mean_std([float(variant_best[var][1]['ta'])])[0])} "
-        f"FID={_fmt(_mean_std([float(variant_best[var][1]['fid'])])[0])}"
+    best_line = "best per variant (cell mean over seeds): " + ", ".join(
+        f"{var}(λ={_fmt(variant_best[var][1],1).rstrip('0').rstrip('.')}) "
+        f"UA={_fmt(agg(variant_best[var][2], 'ua')[0])} "
+        f"TA={_fmt(agg(variant_best[var][2], 'ta')[0])} "
+        f"FID={_fmt(agg(variant_best[var][2], 'fid')[0])}"
         for var in ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k", "env_box")
         if var in variant_best
     )
