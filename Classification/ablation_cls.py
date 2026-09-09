@@ -148,6 +148,8 @@ def evaluate_all_headless(model, data_loaders, args, device):
 def _ident(args):
     """Collision-proof run identity (all flags that change loss/metrics)."""
     return {
+        "backbone": "resnet18",
+        "setting": args.setting,
         "experiment": args.experiment,
         "region_mode": args.region_mode,
         "interval_mode": args.interval_mode,
@@ -205,6 +207,7 @@ def main():
 
     cfg = load_config(args.config)
     setting = cfg["pipeline"]["setting"]
+    args.setting = "classwise" if setting == "classifier_classwise" else "random"
     if args.lam is None:
         args.lam = FIXED_LAMBDA.get(("resnet18", "classwise" if setting == "classifier_classwise" else "random"))
     args.lower_p, args.upper_p = percentile_alpha_to_quantiles(args.alpha)

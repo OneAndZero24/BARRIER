@@ -130,7 +130,7 @@ def safe_run_suffix(row_or_ident):
         return int(float(s))
 
     return (
-        f"{g('experiment')}_{g('region_mode')}_{g('interval_mode', 'full')}"
+        f"{g('backbone')}_{g('setting')}_{g('experiment')}_{g('region_mode')}_{g('interval_mode', 'full')}"
         f"_a{g('alpha', '5')}_f{g('sign_flip_frac', '0.0')}"
         f"_db{_flag('include_db')}"
         f"_um{_flag('uniform_margin')}"

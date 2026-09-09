@@ -820,6 +820,8 @@ def main():
     results_dir = os.path.abspath(args.results_dir)
     os.makedirs(results_dir, exist_ok=True)
     run_ident = {
+        "backbone": "ddpm",
+        "setting": "classwise",
         "experiment": args.experiment,
         "region_mode": args.region_mode,
         "interval_mode": args.interval_mode,
