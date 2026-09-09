@@ -497,17 +497,24 @@ def compute_ua_ta_fid(args, runner_args, runner_config, device, clf_ckpt,
                 import torchvision.transforms as T
                 from PIL import Image
 
-                def _load(paths):
+                def _chunked_load(paths, chunk=256):
+                    """Stream the image stack in chunks: passing all 2048
+                    images through Inception in one forward pass peaks at tens
+                    of GB of CPU activations (observed OOM kill at 64 GB)."""
                     t = T.Compose([T.ToTensor()])
-                    imgs = torch.stack([t(Image.open(p).convert("RGB")) for p in paths])
-                    return (imgs * 255).byte()
+                    for i in range(0, len(paths), chunk):
+                        imgs = torch.stack([t(Image.open(p).convert("RGB"))
+                                            for p in paths[i:i + chunk]])
+                        yield (imgs * 255).byte()
 
                 n = 2048
-                fidm = FrechetInceptionDistance(feature=64)
+                fidm = FrechetInceptionDistance(feature=64).to(device)
                 ref_paths = sorted(Path(ref_dir).glob("*.png"))[:n]
                 gen_paths = sorted(Path(fid_dir).glob("*.png"))[:n]
-                fidm.update(_load([str(p) for p in ref_paths]), real=True)
-                fidm.update(_load([str(p) for p in gen_paths]), real=False)
+                for batch in _chunked_load(ref_paths):
+                    fidm.update(batch, real=True)
+                for batch in _chunked_load(gen_paths):
+                    fidm.update(batch, real=False)
                 fid = float(fidm.compute())
                 fid_backend = "torchmetrics"
             except Exception as exc2:
