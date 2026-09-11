@@ -6,10 +6,11 @@
 #
 # Usage:  sbatch scripts/slurm_train_base_cls.sh
 # ============================================================================
+set -euo pipefail
 
 #SBATCH --job-name=train-base-rn18
-#SBATCH --partition=dgx
-#SBATCH --qos=quick
+#SBATCH --partition=rtx4090_batch
+#SBATCH --qos=priority
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32GB
