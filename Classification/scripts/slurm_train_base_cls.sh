@@ -6,7 +6,6 @@
 #
 # Usage:  sbatch scripts/slurm_train_base_cls.sh
 # ============================================================================
-set -euo pipefail
 
 #SBATCH --job-name=train-base-rn18
 #SBATCH --partition=rtx4090_batch
