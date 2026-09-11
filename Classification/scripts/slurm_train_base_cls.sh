@@ -13,7 +13,7 @@ set -euo pipefail
 #SBATCH --qos=priority
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32GB
+#SBATCH --mem=64GB
 #SBATCH --time=04:00:00
 
 MODELS_DIR=/shared/results/common/miksa/intact/Cls/models
