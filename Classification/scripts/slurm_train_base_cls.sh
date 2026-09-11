@@ -22,7 +22,7 @@ MODELS_DIR=/shared/results/common/miksa/intact/Cls/models
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate /shared/results/common/miksa/envs/salun-ddpm2
 cd $HOME/InTAct-Unl/Classification
-export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
+export PYTHONPATH=${PYTHONPATH:-}:/home/miksa/InTAct-Unl/
 
 mkdir -p ${MODELS_DIR}
 
