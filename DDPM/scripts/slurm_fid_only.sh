@@ -13,12 +13,11 @@
 # ============================================================================
 
 #SBATCH --job-name=fid-backfill
-#SBATCH --partition=rtx3080
-#SBATCH --qos=quick
+#SBATCH --partition=rtx4090_batch
+#SBATCH --qos=priority
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32GB
-#SBATCH --time=02:00:00
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh

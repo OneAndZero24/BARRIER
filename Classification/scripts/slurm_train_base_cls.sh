@@ -8,12 +8,11 @@
 # ============================================================================
 
 #SBATCH --job-name=train-base-rn18
-#SBATCH --partition=rtx3080
-#SBATCH --qos=quick
+#SBATCH --partition=rtx4090_batch
+#SBATCH --qos=priority
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
-#SBATCH --time=04:00:00
 
 MODELS_DIR=/shared/results/common/miksa/intact/Cls/models
 
