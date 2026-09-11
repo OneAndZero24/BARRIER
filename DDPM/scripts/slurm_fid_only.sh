@@ -14,7 +14,7 @@
 
 #SBATCH --job-name=fid-backfill
 #SBATCH --partition=rtx4090_batch
-#SBATCH --qos=batch
+#SBATCH --qos=priority
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32GB
