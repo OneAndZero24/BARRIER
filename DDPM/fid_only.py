@@ -91,6 +91,25 @@ def compute_fid_torchmetrics(ref_dir, fid_dir, n, device, note=None):
     return fid
 
 
+def compute_fid_torch_fidelity(ref_dir, fid_dir, device, note=None):
+    """Faithful torch port of pipeline.py's TF evaluator (Inception-v3 pool3,
+    2048-dim, improving-renes weights, same preprocessing as evaluator.py)."""
+    import torch_fidelity
+
+    t0 = time.time()
+    out = torch_fidelity.calculate_metrics(
+        input1=ref_dir,
+        input2=fid_dir,
+        cuda=str(device).startswith("cuda"),
+        fid=True,
+        feature_layer=2048,
+        verbose=False,
+    )
+    fid = float(out["frechet_inception_distance"])
+    log.info(f"FID = {fid:.3f}   ({time.time() - t0:.0f}s incl. inception)")
+    return fid
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results_dir", default="/shared/results/common/miksa/intact/DDPM/r")
@@ -100,6 +119,13 @@ def main():
     parser.add_argument("--n", type=int, default=0,
                         help="cap per-side image count (0 = use all)")
     parser.add_argument("--ref_dir", default=REF_DIR_DEFAULT)
+    parser.add_argument("--backend", choices=["torch_fidelity",
+                                              "torchmetrics-2048",
+                                              "torchmetrics-64"],
+                        default="torch_fidelity",
+                        help="pipeline.py uses the TF evaluator; torch_fidelity "
+                             "is its faithful torch port (2048-dim improved-renes "
+                             "Inception). torchmetrics-* only for A/B calibration.")
     parser.add_argument("--dry_run", action="store_true")
     parser.add_argument("--force", action="store_true",
                         help="recompute even for runs that already have a FID")
@@ -149,16 +175,24 @@ def main():
             continue
         try:
             device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-            fid = compute_fid_torchmetrics(args.ref_dir, str(fid_dirs[0]),
-                                           args.n, device)
+            if args.backend == "torch_fidelity":
+                fid = compute_fid_torch_fidelity(args.ref_dir, str(fid_dirs[0]),
+                                                 device)
+            else:
+                fid = compute_fid_torchmetrics(
+                    args.ref_dir, str(fid_dirs[0]), args.n, device)
         except Exception as exc:
             log.warning(f"FID failed for {d}: {exc}")
             continue
         r["fid"] = fid
-        r["fid_backend"] = "torchmetrics-2048"
-        r["fid_note"] = "backfill (pool3 2048-dim, TF-equivalent stats)"
+        r["fid_backend"] = args.backend
+        r["fid_note"] = "backfill (" + {
+            "torch_fidelity": "TF-evaluator-equivalent (improved-renes pool3)",
+            "torchmetrics-2048": "torchmetrics pool3 2048-dim",
+            "torchmetrics-64": "torchmetrics 64-dim (legacy table scale)",
+        }[args.backend] + ")"
         write_sidecar(d, r, side.get("diagnostics") or [])
-        done.append((d, fid, "torchmetrics-2048"))
+        done.append((d, fid, args.backend))
 
     print()
     if done:

@@ -31,6 +31,7 @@ python fid_only.py \
     --region_modes two_corner two_random \
     --lambda 0.5 \
     --n 0 \
-    --force
+    --force \
+    --backend torch_fidelity
 
 echo "FID backfill complete."
