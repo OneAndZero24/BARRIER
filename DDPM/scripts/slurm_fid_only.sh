@@ -30,6 +30,7 @@ python fid_only.py \
     --results_dir /shared/results/common/miksa/intact/DDPM/r \
     --region_modes two_corner two_random \
     --lambda 0.5 \
-    --n 0
+    --n 0 \
+    --force
 
 echo "FID backfill complete."

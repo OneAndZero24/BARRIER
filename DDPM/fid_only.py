@@ -101,6 +101,8 @@ def main():
                         help="cap per-side image count (0 = use all)")
     parser.add_argument("--ref_dir", default=REF_DIR_DEFAULT)
     parser.add_argument("--dry_run", action="store_true")
+    parser.add_argument("--force", action="store_true",
+                        help="recompute even for runs that already have a FID")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -137,9 +139,9 @@ def main():
         log.info(f"{Path(d).name}: region={r.get('region_mode')} "
                  f"lam={r.get('lambda')} seed={r.get('seed')} "
                  f"fid_dir={len(fid_dirs)} img={n_imgs} fid_old={old_fid!r}")
-        if has_fid:
+        if has_fid and not args.force:
             done.append((d, old_fid, r.get("fid_backend", "")))
-            continue  # already has a numeric FID; leave it
+            continue  # already has a numeric FID; leave it (use --force)
         if not fid_dirs:
             log.warning(f"no {FID_DIR_PREFIX}* dir in {d}; skipping")
             continue
