@@ -1,4 +1,11 @@
 #!/bin/bash
+#SBATCH --job-name=esc-intact-best21-c2
+#SBATCH --qos=batch
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --partition=rtx4090_batch
+# Alternatives: --partition=rtx4090 --qos=normal (non-preemptible), or --partition=dgx --qos=big
 # ============================================================================
 # Rerun the best all-around MIA config (oxy8n7qx / npzwqain, config_index=2)
 # on extra seeds to get independent MIA estimates.
@@ -45,7 +52,13 @@ export TMPDIR="$CACHE_ROOT/tmp"
 
 mkdir -p "$HF_HOME" "$TORCH_HOME" "$TMPDIR"
 
-cd "$(dirname "$0")"
+# Under sbatch, $0 is the spool copy (/var/spool/slurmd/...), so prefer the
+# submit dir; fall back to the script's own dir for direct bash execution.
+if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/unlearn_intact.py" ]; then
+    cd "$SLURM_SUBMIT_DIR"
+else
+    cd "$(dirname "$0")"
+fi
 
 for seed in $SEEDS; do
     echo "=== [$(date '+%F %T')] best21 config_index=$CONFIG_INDEX seed=$seed ==="
