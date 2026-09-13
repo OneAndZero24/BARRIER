@@ -52,7 +52,7 @@ def _imgs(folder, n):
     for fmt in ("*.png", "*.jpg", "*.jpeg"):
         files += sorted(Path(folder).rglob(fmt))
     files = sorted(set(files))
-    return files[:n]
+    return files if not n or n <= 0 else files[:n]
 
 
 def compute_fid_torchmetrics(ref_dir, fid_dir, n, device, note=None):
@@ -74,13 +74,13 @@ def compute_fid_torchmetrics(ref_dir, fid_dir, n, device, note=None):
 
     ref_paths = _imgs(ref_dir, n)
     gen_paths = _imgs(fid_dir, n)
+    both = min(len(ref_paths), len(gen_paths))
     log.info(f"ref images: {len(ref_paths)}   gen images: {len(gen_paths)}"
-             f"   n={n}")
+             f"   using: {both}")
     if len(gen_paths) == 0:
         raise RuntimeError(f"no images found under {fid_dir}")
-    both = max(len(ref_paths), len(gen_paths))
-    if min(len(ref_paths), len(gen_paths)) < n:
-        log.warning("fewer than requested images on disk; using what's there")
+    if both < min(len(ref_paths), len(gen_paths)):
+        log.warning("image sets differ in size; truncating to the smaller")
     t0 = time.time()
     for batch in _chunked(ref_paths[:both]):
         fidm.update(batch.to(device), real=True)
@@ -97,7 +97,8 @@ def main():
     parser.add_argument("--region_modes", nargs="+",
                         default=["two_corner", "two_random"])
     parser.add_argument("--lambda", dest="lam", type=float, default=0.5)
-    parser.add_argument("--n", type=int, default=2048)
+    parser.add_argument("--n", type=int, default=0,
+                        help="cap per-side image count (0 = use all)")
     parser.add_argument("--ref_dir", default=REF_DIR_DEFAULT)
     parser.add_argument("--dry_run", action="store_true")
     args = parser.parse_args()

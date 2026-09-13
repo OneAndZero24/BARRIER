@@ -17,7 +17,8 @@
 #SBATCH --qos=priority
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32GB
+#SBATCH --mem=64GB
+#SBATCH --time=04:00:00
 
 # ---- Environment ----
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -29,6 +30,6 @@ python fid_only.py \
     --results_dir /shared/results/common/miksa/intact/DDPM/r \
     --region_modes two_corner two_random \
     --lambda 0.5 \
-    --n 2048
+    --n 0
 
 echo "FID backfill complete."
