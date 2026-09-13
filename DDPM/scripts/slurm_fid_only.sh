@@ -6,7 +6,7 @@
 #
 # FID = torchmetrics InceptionV3 pool3 (2048-dim), the same statistics as the
 # paper's TF evaluator.  Patches rows.json sidecars; then run:
-#   python ablation_regions.py --summarize --
+#   python ablation_regions.py --summarize --222
 #       --results_dir /shared/results/common/miksa/intact/DDPM/r
 #
 # Usage:  sbatch scripts/slurm_fid_only.sh

@@ -387,12 +387,18 @@ def _experiment_table(experiment, rows, backbone, metrics,
         for e in entries:
             by_lam.setdefault(float(str(e.get("lambda", "nan"))), []).append(e)
 
+        def _fnum(x):
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return float("nan")
+
         def _cell_score(es):
-            u, _ = _mean_std([float(x.get("ua", "nan")) for x in es])
-            t, _ = _mean_std([float(x.get("ta", "nan")) for x in es])
+            u, _ = _mean_std([_fnum(x.get("ua", "nan")) for x in es])
+            t, _ = _mean_std([_fnum(x.get("ta", "nan")) for x in es])
             if u != u or t != t:
                 return float("-inf")
-            f, _ = _mean_std([float(x.get("fid", "nan")) for x in es])
+            f, _ = _mean_std([_fnum(x.get("fid", "nan")) for x in es])
             concrete = f if f == f else 0.0
             return 1.5 * u + t - concrete / 3.0
 
