@@ -83,9 +83,9 @@ def compute_fid_torchmetrics(ref_dir, fid_dir, n, device, note=None):
         log.warning("fewer than requested images on disk; using what's there")
     t0 = time.time()
     for batch in _chunked(ref_paths[:both]):
-        fidm.update(batch, real=True)
+        fidm.update(batch.to(device), real=True)
     for batch in _chunked(gen_paths[:both]):
-        fidm.update(batch, real=False)
+        fidm.update(batch.to(device), real=False)
     fid = float(fidm.compute())
     log.info(f"FID = {fid:.3f}   ({time.time() - t0:.0f}s incl. inception)")
     return fid
