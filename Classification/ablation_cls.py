@@ -231,6 +231,7 @@ def main():
 
     # ---- model + data (same as pipeline.main, headless) --------------------
     fargs = build_args(cfg)
+    fargs.skip_mia = args.skip_mia
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.results_dir, exist_ok=True)
 
