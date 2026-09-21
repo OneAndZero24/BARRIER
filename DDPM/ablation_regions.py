@@ -742,7 +742,8 @@ def main():
     parser.add_argument("--no_include_res", action="store_true",
                         help="Experiment 9: drop L_res")
     parser.add_argument("--experiment", default="exp5", choices=[
-        "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", "exp9", "grid"],
+        "exp3", "exp4", "exp5", "exp6", "exp7", "exp8", "exp9", "grid",
+        "lambda_sweep"],
         help="which experiment this run belongs to (labels the ablations.csv "
              "row and the summarise table)")
     parser.add_argument("--lambda", dest="lam", type=float, default=5.0)
