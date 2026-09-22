@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader, TensorDataset
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from InTAct.intact import (  # noqa: E402
+from barrier.intact import (  # noqa: E402
     UnlearnIntervalProtection,
     box_drift_max,
     classification_forward_fn,
@@ -299,7 +299,7 @@ def test_region_term_counts():
 def test_group_block_boxes_consecutive_and_nested():
     """boxes_4/8 use consecutive predefined groups; slabs_2k (m=k) equals the
     per-coordinate slab construction."""
-    from InTAct.intact import group_block_boxes
+    from barrier.intact import group_block_boxes
 
     k = 12
     torch.manual_seed(9)
@@ -326,7 +326,7 @@ def test_group_block_boxes_consecutive_and_nested():
     assert len(b8) == 8
 
     # m = k reproduces the per-coordinate slabs exactly
-    from InTAct.intact import slab_boxes
+    from barrier.intact import slab_boxes
     bk = group_block_boxes(inf_low, z_min, z_max, inf_high, k)
     sk = slab_boxes(inf_low, z_min, z_max, inf_high)
     assert len(bk) == len(sk) == 2 * k
@@ -550,7 +550,7 @@ def test_layer_diagnostics_finite_and_ordered():
 def test_env_box_matches_slabs_and_bruteforce():
     """The single env_box bound equals the max over the 2k slabs and over all
     3^k - 1 complement cells enumerated by brute force (to 1e-6)."""
-    from InTAct.intact import env_box_boxes
+    from barrier.intact import env_box_boxes
 
     for k in range(3, 7):
         rng = np.random.default_rng(200 + k)
@@ -896,7 +896,7 @@ def test_uniform_margin_bounds():
 # ============================================================================
 
 def test_percentile_alpha_mapping():
-    from InTAct.intact import percentile_alpha_to_quantiles
+    from barrier.intact import percentile_alpha_to_quantiles
 
     assert percentile_alpha_to_quantiles(1) == (0.01, 0.99)
     assert percentile_alpha_to_quantiles(5) == (0.05, 0.95)
@@ -924,7 +924,7 @@ def test_alpha_quantile_effect():
             return self.probe(x)
 
     def build(alpha):
-        from InTAct.intact import percentile_alpha_to_quantiles
+        from barrier.intact import percentile_alpha_to_quantiles
         lo, hi = percentile_alpha_to_quantiles(alpha)
         m = ToyLinear()
         p = UnlearnIntervalProtection(

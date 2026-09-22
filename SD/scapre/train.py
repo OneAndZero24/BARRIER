@@ -32,7 +32,7 @@ SD_DIR = SCRIPT_DIR.parent
 
 sys.path.insert(0, str(SCRIPT_DIR))      # For scapre.* / imagenet_data
 sys.path.insert(0, str(SD_DIR / "train-scripts"))
-sys.path.insert(0, str(SD_DIR.parent))  # For InTAct
+sys.path.insert(0, str(SD_DIR.parent))  # For barrier
 sys.path.insert(0, str(SD_DIR))         # For LDM
 
 from imagenet_data import (
@@ -41,7 +41,8 @@ from imagenet_data import (
     make_forget_remain_dataloaders,
 )
 
-from InTAct.intact import UnlearnIntervalProtection
+from barrier.intact import UnlearnIntervalProtection
+from barrier.sd_utils import compact_target_tag, setup_intact_protection
 from convertModels import savemodelDiffusers
 
 
@@ -111,90 +112,6 @@ def parse_args():
                    help="Override auto-generated model name (used for checkpoint save dir)")
 
     return p.parse_args()
-
-
-def compact_target_tag(targets):
-    import hashlib, re
-    pattern = re.compile(r"^output_blocks\.(\d+)\.1\.transformer_blocks\.0\.(.+)$")
-    parsed = [pattern.match(t) for t in targets]
-    if all(m is not None for m in parsed):
-        blocks = sorted(set(m.group(1) for m in parsed))
-        aliases = []
-        for layer in sorted(set(m.group(2) for m in parsed)):
-            if layer == "attn2.to_q": aliases.append("q")
-            elif layer == "attn2.to_k": aliases.append("k")
-            elif layer == "attn2.to_v": aliases.append("v")
-            elif layer == "attn2.to_out.0": aliases.append("out0")
-            else: aliases.append(layer.split(".")[-1].replace("to_", ""))
-        tag = f"blk{'-'.join(blocks)}_{'-'.join(aliases)}"
-        if len(tag) <= 48:
-            return tag
-    digest = hashlib.sha1("|".join(targets).encode("utf-8")).hexdigest()[:10]
-    return f"tgth_{digest}_n{len(targets)}"
-
-
-def sd_forward_fn(model, batch, device, prompts=None, data_transform_fn=None,
-                  betas=None, num_timesteps=1000):
-    if isinstance(batch, (tuple, list)) and len(batch) == 2 and isinstance(batch[0], torch.Tensor):
-        images, labels = batch
-    else:
-        images = batch
-        labels = None
-
-    images = torch.stack([item for item in images])
-    images = images.to(device)
-    n = images.size(0)
-
-    if prompts is not None and labels is not None:
-        txt = [prompts[label] for label in labels]
-    elif prompts is not None:
-        txt = [prompts[0]] * n
-    else:
-        txt = [""] * n
-
-    batch_dict = {"jpg": images.permute(0, 2, 3, 1), "txt": txt}
-    with torch.no_grad():
-        x, c = model.get_input(batch_dict, model.first_stage_key)
-
-    if data_transform_fn is not None:
-        x = data_transform_fn(x)
-
-    t = torch.randint(0, num_timesteps, (n // 2 + 1,), device=device)
-    t = torch.cat([t, num_timesteps - t - 1], dim=0)[:n]
-
-    if betas is not None:
-        e = torch.randn_like(x)
-        a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
-        x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
-    else:
-        x_noisy = x
-
-    model.model.diffusion_model(x_noisy, t.float(), context=c)
-
-
-def setup_intact_protection(model, forget_dl, remain_dl, descriptions, device,
-                            targets, lambda_interval, lower_percentile, upper_percentile,
-                            reduced_dim, infinity_scale, use_actual_bounds, normalize_protection):
-    protection = UnlearnIntervalProtection(
-        targets=targets,
-        lambda_interval=lambda_interval,
-        lower_percentile=lower_percentile,
-        upper_percentile=upper_percentile,
-        reduced_dim=reduced_dim,
-        infinity_scale=infinity_scale,
-        use_actual_bounds=use_actual_bounds,
-        normalize_protection=normalize_protection,
-    )
-    protection.setup_protection(
-        model.model.diffusion_model,
-        forget_dl,
-        device,
-        remain_dataloader=remain_dl,
-        forward_fn=lambda m, b, dev, **kwargs: sd_forward_fn(model, b, dev, prompts=descriptions, **kwargs),
-        betas=None,
-        num_timesteps=1000,
-    )
-    return protection
 
 
 def compute_rl_loss(model, forget_images, forget_prompts, pseudo_prompts,

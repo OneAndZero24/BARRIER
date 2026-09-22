@@ -19,8 +19,8 @@ Usage:
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root for setup_cache
-import setup_cache  # noqa: E402  — must precede torch / HF imports
+sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root for barrier
+import barrier.cache  # noqa: E402  — must precede torch / HF imports
 
 import argparse
 import csv

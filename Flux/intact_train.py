@@ -30,11 +30,11 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Add parent directories to path (must be before library imports for setup_cache)
-sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root for InTAct + setup_cache
+# Add parent directories to path (must be before library imports for barrier)
+sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root for barrier
 sys.path.insert(0, str(Path(__file__).parent))          # For Flux modules
 
-import setup_cache  # noqa: E402  — must precede torch / HF imports
+import barrier.cache  # noqa: E402  — must precede torch / HF imports
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,7 +43,7 @@ import torch.nn as nn
 import yaml
 from tqdm.auto import tqdm
 
-from InTAct.intact import UnlearnIntervalProtection
+from barrier.intact import UnlearnIntervalProtection
 
 import transformers
 import diffusers

@@ -6,7 +6,7 @@
 # attention projections + class-embedding MLP, k = 32, Adam, lr = 1e-4,
 # 3000 steps, RL objective, no remain-set loss).
 #
-# Grid (180 jobs, defined in <repo>/expgrid.py):
+# Grid (180 jobs, defined in <repo>/barrier/expgrid.py):
 #   exp3  uniform-margin control        two_corner      6L x 3s =  18
 #   exp4  centre vs width               width/centre    2 x 6L x 3s =  36
 #   exp5  protected-region family       env_box         6L x 3s =  18
@@ -50,7 +50,7 @@ cd $HOME/InTAct-Unl/DDPM
 export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 
 IDX=${SLURM_ARRAY_TASK_ID}
-FLAGS=$(python /home/miksa/InTAct-Unl/expgrid.py ddpm ${IDX} 2>&1)
+FLAGS=$(python /home/miksa/InTAct-Unl/barrier/expgrid.py ddpm ${IDX} 2>&1)
 if [ $? -ne 0 ]; then
     echo "grid decode failed: ${FLAGS}"
     exit 2

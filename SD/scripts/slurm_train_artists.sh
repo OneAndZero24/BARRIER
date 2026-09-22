@@ -31,7 +31,7 @@ fi
 
 export PYTHONPATH="${PYTHONPATH}:$(cd .. && pwd)"
 
-# Redirect caches to scratch directory (from setup_cache.py candidates)
+# Redirect caches to scratch directory (from barrier/cache.py candidates)
 if [ -n "$SCRATCH" ]; then
     export CACHE_ROOT="$SCRATCH/.cache"
 else

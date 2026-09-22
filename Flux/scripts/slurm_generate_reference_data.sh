@@ -80,7 +80,7 @@ if [ "$TARGET_SET" != "both" ] && [ "$TARGET_SET" != "nsfw" ] && [ "$TARGET_SET"
     exit 1
 fi
 
-python -c "import setup_cache; print('Cache configured')"
+python -c "import barrier; print('Cache configured')"
 
 if [ -z "${SCRATCH:-}" ]; then
     echo "ERROR: SCRATCH is not set"

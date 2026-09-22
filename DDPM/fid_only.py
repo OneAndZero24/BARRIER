@@ -32,7 +32,7 @@ _CLS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_CLS_DIR, ".."))  # repo root (ablation_common)
 sys.path.insert(0, _CLS_DIR)
 
-from ablation_common import write_sidecar  # noqa: E402
+from barrier.ablation_common import write_sidecar  # noqa: E402
 
 log = logging.getLogger(__name__)
 

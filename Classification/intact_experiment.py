@@ -22,9 +22,9 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 from torchvision.models import resnet18, ResNet18_Weights
 
-# Add parent directory to path for InTAct import
+# Add parent directory to path for barrier import
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from InTAct.intact import UnlearnIntervalProtection, classification_forward_fn
+from barrier.intact import UnlearnIntervalProtection, classification_forward_fn
 
 # Setup logging
 logging.basicConfig(

@@ -52,12 +52,12 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-import setup_cache  # noqa: E402  -- must precede torch/HF imports
+import barrier.cache  # noqa: E402  -- must precede torch/HF imports
 
 from datasets import data_transform, get_forget_dataset  # noqa: E402
 from functions import cycle, dict2namespace, get_optimizer  # noqa: E402
 from functions.losses import loss_registry_conditional  # noqa: E402
-from InTAct.intact import (  # noqa: E402
+from barrier.intact import (  # noqa: E402
     UnlearnIntervalProtection,
     ddpm_forward_fn,
     make_region_boxes,
@@ -67,10 +67,15 @@ from InTAct.intact import (  # noqa: E402
 from models.diffusion import Conditional_Model  # noqa: E402
 from runners.diffusion import Diffusion  # noqa: E402
 
-from ablation_common import (  # noqa: E402
+from barrier.ablation_common import (  # noqa: E402
+    ABLATION_INTERVAL_MODES,
+    ANALYTIC_MATVECS,
     FIXED_LAMBDA,
+    INTERVAL_MATVECS,
+    REGION_MODES,
     REGIONS_CSV_COLS,
     DIAGNOSTICS_CSV_COLS,
+    microbench_protection,
     aggregate_rows,
     safe_run_suffix,
     summarize_ablations,
@@ -79,24 +84,6 @@ from ablation_common import (  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-REGION_MODES = ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k", "env_box")
-ABLATION_INTERVAL_MODES = ("full", "width_only", "centre_only", "off")
-LAMBDA_SWEEP = (0.5, 1.0, 2.0, 5.0, 10.0, 25.0)
-ALPHAS = (1, 5, 10)
-
-# Analytic number of [M, k] matvecs per layer per (region, interval) mode.
-ANALYTIC_MATVECS = {
-    "two_corner": 4,
-    "two_random": 4,
-    "boxes_4": 8,
-    "boxes_8": 16,
-    "slabs_2k": lambda k: 8 * k,
-    "env_box": 2,
-}
-
-# interval_mode affects the matvec count: width_only / centre_only halve it
-# (one term per box instead of two).
-INTERVAL_MATVECS = {"full": 1.0, "width_only": 0.5, "centre_only": 0.5, "off": 0.0}
 
 REGIONS_CSV_COLS = REGIONS_CSV_COLS  # re-exported from ablation_common
 DIAGNOSTICS_CSV_COLS = DIAGNOSTICS_CSV_COLS  # re-exported from ablation_common
@@ -188,24 +175,6 @@ def build_runner_args(cfg, runner_config, seed):
 # ============================================================================
 # Protection-loss microbenchmark
 # ============================================================================
-
-def microbench_protection(protection, model, device, warmup=20, iters=200):
-    """Isolate compute_protection_loss: warmup + timed calls, CUDA-synced.
-    Returns (mean_ms, std_ms)."""
-    cuda = device.type == "cuda"
-    for _ in range(warmup):
-        protection.compute_protection_loss(model, device)
-    if cuda:
-        torch.cuda.synchronize()
-    times = []
-    for _ in range(iters):
-        t0 = time.perf_counter()
-        protection.compute_protection_loss(model, device)
-        if cuda:
-            torch.cuda.synchronize()
-        times.append((time.perf_counter() - t0) * 1e3)
-    times = np.asarray(times)
-    return float(times.mean()), float(times.std())
 
 
 # ============================================================================

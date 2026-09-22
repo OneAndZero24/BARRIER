@@ -1,3 +1,7 @@
+## BARRIER overview
+The shared core (`barrier/`) and the full experiment matrix are documented in
+[`../README.md`](../README.md); setup details in [`../NOTES.md`](../NOTES.md).
+
 # Stable Diffusion Unlearning
 
 Class forgetting (Imagenette) and NSFW concept removal for Stable Diffusion v1.4. Based on the [ESD](https://github.com/rohitgandikota/erasing/tree/main) codebase.

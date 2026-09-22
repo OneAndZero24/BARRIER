@@ -47,9 +47,7 @@ import sys
 import numpy as np
 import torch
 
-from ablation_common import torch_load  # noqa: E402
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from barrier.ablation_common import torch_load  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -212,7 +210,7 @@ def _add_backbone_path(backbone):
 
 
 def remain_projections_cls(meta, info, device):
-    from InTAct.intact import UnlearnIntervalProtection, classification_forward_fn
+    from barrier.intact import UnlearnIntervalProtection, classification_forward_fn
     sys.path.insert(0, os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "Classification"))
     import yaml
@@ -243,7 +241,7 @@ def remain_projections_cls(meta, info, device):
 
 
 def remain_projections_ddpm(meta, info, device):
-    from InTAct.intact import UnlearnIntervalProtection, ddpm_forward_fn
+    from barrier.intact import UnlearnIntervalProtection, ddpm_forward_fn
     sys.path.insert(0, os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "DDPM"))
     import yaml

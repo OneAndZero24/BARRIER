@@ -14,11 +14,11 @@ import tqdm
 
 from pathlib import Path
 
-# InTAct (BARRIER) lives at the BARRIER repo root: <repo>/InTAct/intact.py
+# barrier (BARRIER core) lives at the BARRIER repo root: <repo>/barrier/
 def _find_repo_root():
     p = Path(__file__).resolve().parent
     for _ in range(6):
-        if (p / 'InTAct').is_dir():
+        if (p / 'barrier').is_dir():
             return p
         p = p.parent
     return Path(__file__).resolve().parents[2]
@@ -425,7 +425,7 @@ def main(args):
             torch.save(model, '{}.pth'.format(ckpt_dir + "ESC_T_unlearned_model"))
 
     elif args.method == "intact":
-        from InTAct.intact import UnlearnIntervalProtection, classification_forward_fn
+        from barrier.intact import UnlearnIntervalProtection, classification_forward_fn
 
         print('*' * 100)
         print(' ' * 20 + 'begin InTAct (BARRIER) unlearning')

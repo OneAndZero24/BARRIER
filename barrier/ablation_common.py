@@ -20,6 +20,7 @@ import csv
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -542,3 +543,47 @@ if __name__ == "__main__":
     p.add_argument("--results_dir", required=True)
     args = p.parse_args()
     summarize_ablations(args.results_dir)
+
+# ============================================================================
+# Shared ablation configuration + protection-loss microbenchmark
+# ============================================================================
+# Consumption points: DDPM/ablation_regions.py and Classification/ablation_cls.py.
+# (Kept in one place so both runners agree on the mode lists, the analytic
+# matvec counts, and the way the protection loss is timed.)
+
+REGION_MODES = ("two_corner", "two_random", "boxes_4", "boxes_8", "slabs_2k", "env_box")
+ABLATION_INTERVAL_MODES = ("full", "width_only", "centre_only", "off")
+LAMBDA_SWEEP = (0.5, 1.0, 2.0, 5.0, 10.0, 25.0)
+
+# Analytic number of [M, k] matvecs per layer per (region, interval) mode.
+ANALYTIC_MATVECS = {
+    "two_corner": 4,
+    "two_random": 4,
+    "boxes_4": 8,
+    "boxes_8": 16,
+    "slabs_2k": lambda k: 8 * k,
+    "env_box": 2,
+}
+
+# interval_mode affects the matvec count: width_only / centre_only halve it
+# (one term per box instead of two).
+INTERVAL_MATVECS = {"full": 1.0, "width_only": 0.5, "centre_only": 0.5, "off": 0.0}
+
+
+def microbench_protection(protection, model, device, warmup=20, iters=200):
+    """Isolate compute_protection_loss: warmup + timed calls, CUDA-synced.
+    Returns (mean_ms, std_ms)."""
+    cuda = device.type == "cuda"
+    for _ in range(warmup):
+        protection.compute_protection_loss(model, device)
+    if cuda:
+        torch.cuda.synchronize()
+    times = []
+    for _ in range(iters):
+        t0 = time.perf_counter()
+        protection.compute_protection_loss(model, device)
+        if cuda:
+            torch.cuda.synchronize()
+        times.append((time.perf_counter() - t0) * 1e3)
+    times = np.asarray(times)
+    return float(times.mean()), float(times.std())

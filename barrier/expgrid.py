@@ -21,6 +21,8 @@ Usage:  python expgrid.py <backbone/setting> <index>     (index in 0..N-1)
 
 import sys
 
+# NOTE: kept self-contained (no barrier imports) — this script is invoked as a
+# bare `python expgrid.py <setting> <index>` inside SLURM array jobs.
 LAMBDA_SWEEP = (0.5, 1.0, 2.0, 5.0, 10.0, 25.0)
 SEEDS = (0, 1, 2)
 

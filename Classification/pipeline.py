@@ -16,7 +16,7 @@ Usage:
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import setup_cache  # noqa: E402  — must precede torch / HF imports
+import barrier.cache  # noqa: E402  — must precede torch / HF imports
 
 import argparse
 import copy
@@ -29,7 +29,7 @@ import torch
 import torch.nn as nn
 import yaml
 
-# Add project root to path for InTAct imports
+# Add project root to path for barrier imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import evaluation
@@ -194,7 +194,7 @@ def build_data_loaders(args, marked_loader, val_loader, test_loader):
 def run_intact_unlearn(cfg, model, data_loaders, criterion, device):
     """Run InTAct unlearning for classification models."""
     import wandb
-    from InTAct.intact import UnlearnIntervalProtection, classification_forward_fn
+    from barrier.intact import UnlearnIntervalProtection, classification_forward_fn
 
     ic = cfg.get("intact", {})
     protection = UnlearnIntervalProtection(

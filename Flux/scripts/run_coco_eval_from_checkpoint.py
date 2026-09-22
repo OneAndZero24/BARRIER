@@ -21,10 +21,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 FLUX_ROOT = SCRIPT_DIR.parent
-sys.path.insert(0, str(REPO_ROOT))  # for setup_cache
+sys.path.insert(0, str(REPO_ROOT))  # for barrier
 sys.path.insert(0, str(FLUX_ROOT))   # for eval modules
 
-import setup_cache  # noqa: F401,E402  # ensure cache env is configured early
+import barrier.cache  # noqa: F401,E402  # ensure cache env is configured early
 
 from eval.evaluate import compute_clip_score_coco, compute_fid_coco, generate_coco_prompts_csv  # noqa: E402
 from eval.generate_images import generate_images  # noqa: E402

@@ -48,7 +48,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # InTAct
 sys.path.insert(0, str(Path(__file__).parent.parent))          # SD root
 sys.path.insert(0, str(Path(__file__).parent.parent / "train-scripts"))
 
-from InTAct.intact import UnlearnIntervalProtection
+from barrier.intact import UnlearnIntervalProtection
+from barrier.sd_utils import sd_forward_fn_model_schedule as sd_forward_fn
 from dataset import setup_forget_nsfw_data, setup_model
 
 logging.basicConfig(
@@ -79,27 +80,6 @@ def make_fractional_dataloader(dataloader, n_batches, seed=42):
         drop_last=False,
     )
 
-
-def sd_forward_fn(model, batch, device, prompts=None, **kwargs):
-    """Exact copy of intact_unlearn.sd_forward_fn — no modifications."""
-    images = batch
-    if isinstance(batch, (tuple, list)) and len(batch) == 2 and isinstance(batch[0], torch.Tensor):
-        images, _labels = batch
-    images = torch.stack([item for item in images]).to(device)
-    n = images.size(0)
-    txt = [prompts[0]] * n if prompts else [""] * n
-    batch_dict = {"jpg": images.permute(0, 2, 3, 1), "txt": txt}
-    with torch.no_grad():
-        x, c = model.get_input(batch_dict, model.first_stage_key)
-    t = torch.randint(0, model.num_timesteps, (n,), device=device).long()
-    betas = model.betas.to(device) if hasattr(model, "betas") else None
-    if betas is not None:
-        e = torch.randn_like(x)
-        a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
-        x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
-    else:
-        x_noisy = x
-    model.model.diffusion_model(x_noisy, t.float(), context=c)
 
 
 # ---------------------------------------------------------------------------

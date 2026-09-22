@@ -1,4 +1,19 @@
-__pycache__
-InTAct/data
-InTact/toy_figs
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_cache/**
+
+# Data / artifact cache dirs
+.inTAct_cache/
+.smoke_cache/
+data/
+
+# CSV outputs (raw results / sweep exports) — prompt CSVs are force-added
+# where required (see git ls-files '*.csv')
 *.csv
+
+# Heavy vendored weights / checkpoints (DDPM.pth intentionally stays tracked
+# via git-lfs)
+*.safetensors
+*.pth

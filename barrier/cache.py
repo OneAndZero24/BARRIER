@@ -5,7 +5,7 @@ the home-directory disk quota is not exceeded.
 Import this module **before** any library that downloads models (torch,
 transformers, diffusers, datasets, clip, wandb, …).
 
-    import setup_cache          # sets env vars once
+    import barrier       # runs barrier.cache as the first side effect
     import torch, transformers  # libraries now use the redirected paths
 
 The module is idempotent – re-importing is a no-op.
@@ -49,7 +49,7 @@ def _resolve_cache_root() -> str:
         seen.add(path)
         try:
             os.makedirs(path, exist_ok=True)
-            print(f"[setup_cache] Using cache root: {path}")
+            print(f"[barrier.cache] Using cache root: {path}")
             return path
         except OSError:
             continue

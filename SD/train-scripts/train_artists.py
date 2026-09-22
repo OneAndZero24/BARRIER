@@ -40,7 +40,7 @@ else:
 from erase_methods import edit_model_adversarial  # type: ignore
 from execs import generate_images, compute_nudity_rate  # type: ignore
 from utils.embedding_calculation import close_form_emb, close_form_emb_regzero  # type: ignore
-from InTAct.intact import UnlearnIntervalProtection
+from barrier.intact import UnlearnIntervalProtection
 
 def resolve_intact_targets(intact_cfg: dict) -> list[str]:
     """Resolve InTAct target layers from config.

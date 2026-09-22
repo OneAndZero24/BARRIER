@@ -73,7 +73,7 @@ FLUX_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(FLUX_ROOT))
 
-import setup_cache  # noqa: F401,E402
+import barrier.cache  # noqa: F401,E402
 
 from eval.evaluate import compute_clip_score_coco, compute_fid_coco  # noqa: E402
 

@@ -1,3 +1,18 @@
+## BARRIER additions
+This folder vendors the [EraseAnything](https://github.com/tomguluson92/EraseAnything) codebase.
+The BARRIER experiments live on top of it — see [`../README.md`](../README.md) (experiment matrix) and [`../NOTES.md`](../NOTES.md) (setup):
+
+```bash
+python intact_pipeline.py --config configs/intact/pipeline_concept.yaml   # concept erasure
+python intact_pipeline.py --config configs/intact/pipeline_class.yaml     # class forgetting
+python intact_pipeline.py --config configs/intact/pipeline_nsfw.yaml      # NSFW erasure
+```
+
+The files below (`train_flux_lora.py`, `train.sh`, `config/`, `tools/`) are the unmodified
+upstream EraseAnything trainer and are not used by the InTAct pipelines.
+
+---
+
 # EraseAnything (ICML 2025)
 
 <p align="center">

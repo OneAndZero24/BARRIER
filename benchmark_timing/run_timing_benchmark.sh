@@ -158,10 +158,10 @@ fi
 # esc: ESC paper codebase (also hosts the intact/barrier run)
 [ -d "$REPOS/esc" ] || run cp -r "$BARRIER_ROOT/Classification/ESC" "$REPOS/esc"
 [ -d "$REPOS/intact" ] || run cp -r "$BARRIER_ROOT/Classification/ESC" "$REPOS/intact"
-# InTAct package must be importable from the intact harness repo-root
+# barrier package must be importable from the intact harness repo-root
 # (unlearn_intact.py resolves it by walking up from $REPOS/intact, i.e.
-# <work>/InTAct).
-[ -d "$WORK_BASE/work/InTAct" ] || run cp -r "$BARRIER_ROOT/InTAct" "$WORK_BASE/work/InTAct"
+# <work>/barrier).
+[ -d "$WORK_BASE/work/barrier" ] || run cp -r "$BARRIER_ROOT/barrier" "$WORK_BASE/work/barrier"
 run cp "$SCRIPT_DIR/timing_runner.py" "$REPOS/salun/timing_runner.py"
 run cp "$SCRIPT_DIR/timing_runner.py" "$REPOS/semu/timing_runner.py"
 

@@ -1,3 +1,7 @@
+## BARRIER overview
+The shared core (`barrier/`) and the full experiment matrix are documented in
+[`../README.md`](../README.md); setup details in [`../NOTES.md`](../NOTES.md).
+
 # Classification Unlearning
 
 ResNet-18 on CIFAR-10 with class-wise and random data forgetting. Based on the [Sparse Unlearn](https://github.com/OPTML-Group/Unlearn-Sparse) codebase.

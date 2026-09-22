@@ -26,7 +26,7 @@ from models.ema import EMAHelper
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 
-from InTAct.intact import UnlearnIntervalProtection, ddpm_forward_fn
+from barrier.intact import UnlearnIntervalProtection, ddpm_forward_fn
 
 
 def save_image_retry(tensor, fp, **kwargs):

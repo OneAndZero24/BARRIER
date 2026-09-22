@@ -6,7 +6,7 @@
 # Protocol: target layer = final FC, k = 32, SGD lr = 1e-3, 10 epochs, RL
 # objective.  Fixed (paper) lambda = 1; sweep 0.5 1 2 5 10 25; seeds 0..2.
 #
-# Grid (180 jobs, defined in <repo>/expgrid.py as "resnet18-random"):
+# Grid (180 jobs, defined in <repo>/barrier/expgrid.py as "resnet18-random"):
 #   exp3 18 | exp4 36 | exp5 18 | exp6 9 | exp7 54 | exp8 36 | exp9 9
 #
 # Each job appends one row to
@@ -40,7 +40,7 @@ cd $HOME/InTAct-Unl/Classification
 export PYTHONPATH=$PYTHONPATH:/home/miksa/InTAct-Unl/
 
 IDX=${SLURM_ARRAY_TASK_ID}
-FLAGS=$(python /home/miksa/InTAct-Unl/expgrid.py resnet18-random ${IDX} 2>&1)
+FLAGS=$(python /home/miksa/InTAct-Unl/barrier/expgrid.py resnet18-random ${IDX} 2>&1)
 if [ $? -ne 0 ]; then
     echo "grid decode failed: ${FLAGS}"
     exit 2

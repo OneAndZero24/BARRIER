@@ -32,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "train-scripts"))
 
-from InTAct.intact import UnlearnIntervalProtection
+from barrier.intact import UnlearnIntervalProtection
+from barrier.sd_utils import sd_forward_fn_model_schedule as sd_forward_fn
 from dataset import setup_forget_nsfw_data, setup_model
 
 logging.basicConfig(
@@ -63,128 +64,6 @@ def make_fractional_dataloader(dataloader, n_batches, seed=42):
         drop_last=False,
     )
 
-
-def sd_forward_fn(model, batch, device, prompts=None, **kwargs):
-    images = batch
-    if isinstance(batch, (tuple, list)) and len(batch) == 2 and isinstance(batch[0], torch.Tensor):
-        images, _labels = batch
-    images = torch.stack([item for item in images]).to(device)
-    n = images.size(0)
-    txt = [prompts[0]] * n if prompts else [""] * n
-    batch_dict = {"jpg": images.permute(0, 2, 3, 1), "txt": txt}
-    with torch.no_grad():
-        x, c = model.get_input(batch_dict, model.first_stage_key)
-    t = torch.randint(0, model.num_timesteps, (n,), device=device).long()
-    betas = model.betas.to(device) if hasattr(model, "betas") else None
-    if betas is not None:
-        e = torch.randn_like(x)
-        a = (1 - betas).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
-        x_noisy = x * a.sqrt() + e * (1.0 - a).sqrt()
-    else:
-        x_noisy = x
-    model.model.diffusion_model(x_noisy, t.float(), context=c)
-
-
-# ---------------------------------------------------------------------------
-# IoU / separation metrics
-# ---------------------------------------------------------------------------
-
-def compute_1d_overlap(forget_vals, remain_vals, n_bins=80):
-    """Compute IoU of 1D histograms for a single SVD dimension."""
-    combined = torch.cat([forget_vals, remain_vals])
-    lo, hi = combined.min().item(), combined.max().item()
-    if hi <= lo:
-        return 1.0
-    bins = np.linspace(lo, hi, n_bins + 1)
-    f_hist, _ = np.histogram(forget_vals.numpy(), bins=bins, density=True)
-    r_hist, _ = np.histogram(remain_vals.numpy(), bins=bins, density=True)
-    f_hist /= max(f_hist.sum(), 1e-12)
-    r_hist /= max(r_hist.sum(), 1e-12)
-    intersection = np.minimum(f_hist, r_hist).sum()
-    union = np.maximum(f_hist, r_hist).sum()
-    if union < 1e-12:
-        return 1.0
-    return float(intersection / union)
-
-
-def compute_2d_iou(forget_2d, remain_2d, n_bins=50):
-    """Compute IoU of 2D binned projections for a pair of SVD dimensions."""
-    f = forget_2d.numpy()
-    r = remain_2d.numpy()
-    combined = np.concatenate([f, r], axis=0)
-    x_lo, x_hi = combined[:, 0].min(), combined[:, 0].max()
-    y_lo, y_hi = combined[:, 1].min(), combined[:, 1].max()
-    if x_hi <= x_lo or y_hi <= y_lo:
-        return 1.0
-    bins_x = np.linspace(x_lo, x_hi, n_bins + 1)
-    bins_y = np.linspace(y_lo, y_hi, n_bins + 1)
-    f_hist, _, _ = np.histogram2d(f[:, 0], f[:, 1], bins=[bins_x, bins_y], density=True)
-    r_hist, _, _ = np.histogram2d(r[:, 0], r[:, 1], bins=[bins_x, bins_y], density=True)
-    f_hist /= max(f_hist.sum(), 1e-12)
-    r_hist /= max(r_hist.sum(), 1e-12)
-    intersection = np.minimum(f_hist, r_hist).sum()
-    union = np.maximum(f_hist, r_hist).sum()
-    if union < 1e-12:
-        return 1.0
-    return float(intersection / union)
-
-
-def find_best_dims(forget_proj, remain_proj, pca_info, top_k_1d=10, n_bins_2d=50):
-    """
-    For each layer: compute 1D overlap per dim, take top_k_1d candidates,
-    then search all pairs among them for lowest 2D IoU.
-
-    Returns list of (layer_name, dim_a, dim_b, iou_2d, iou_1d_a, iou_1d_b)
-    """
-    results = []
-    for entry in pca_info:
-        name = entry["layer_name"]
-        fproj = forget_proj.get(name)
-        rproj = remain_proj.get(name)
-        if fproj is None or rproj is None or fproj.size(1) < 2:
-            continue
-
-        k_dims = fproj.size(1)
-        log.info("  %s: %d SVD dims, %d forget tokens, %d remain tokens",
-                 name[-50:], k_dims, fproj.size(0), rproj.size(0))
-
-        # 1D overlap per dimension
-        overlaps_1d = []
-        for d in range(k_dims):
-            ov = compute_1d_overlap(fproj[:, d], rproj[:, d])
-            overlaps_1d.append((d, ov))
-        overlaps_1d.sort(key=lambda x: x[1])
-
-        # Take top_k_1d candidates with LOWEST overlap (most separated)
-        candidates = [d for d, _ in overlaps_1d[:top_k_1d]]
-        log.info("    top-%d 1D candidate dims: %s", len(candidates), candidates)
-
-        # 2D IoU for all pairs among candidates
-        best_iou = 1.0
-        best_pair = (0, 1)
-        for i in range(len(candidates)):
-            for j in range(i + 1, len(candidates)):
-                di, dj = candidates[i], candidates[j]
-                iou = compute_2d_iou(
-                    fproj[:, [di, dj]], rproj[:, [di, dj]], n_bins=n_bins_2d,
-                )
-                if iou < best_iou:
-                    best_iou = iou
-                    best_pair = (di, dj)
-
-        log.info("    best pair: dims (%d, %d)  IoU_2d=%.4f", best_pair[0], best_pair[1], best_iou)
-        results.append({
-            "layer_name": name,
-            "dim_a": best_pair[0],
-            "dim_b": best_pair[1],
-            "iou_2d": best_iou,
-            "iou_1d_a": overlaps_1d[best_pair[0]][1] if best_pair[0] < len(overlaps_1d) else 1.0,
-            "iou_1d_b": overlaps_1d[best_pair[1]][1] if best_pair[1] < len(overlaps_1d) else 1.0,
-            "all_1d_overlaps": [{"dim": d, "iou_1d": ov} for d, ov in overlaps_1d],
-            "k_dims": k_dims,
-        })
-
-    return results
 
 
 # ---------------------------------------------------------------------------

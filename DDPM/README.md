@@ -1,3 +1,7 @@
+## BARRIER overview
+The shared core (`barrier/`) and the full experiment matrix are documented in
+[`../README.md`](../README.md); setup details in [`../NOTES.md`](../NOTES.md).
+
 # DDPM Unlearning
 
 Conditional DDPM class forgetting. Based on [DDIM](https://github.com/ermongroup/ddim) and [SA](https://github.com/clear-nus/selective-amnesia/tree/a7a27ab573ba3be77af9e7aae4a3095da9b136ac/ddpm).
