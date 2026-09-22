@@ -2,11 +2,13 @@
 """
 FID-only backfill for DDPM region-grid runs whose eval was killed before FID
 was computed (rows with fid=""/nan, e.g. the old -+-+- console).  Uses the
-ALREADY-SAVED fid_samples PNGs -- no training, no sampling, no tensorflow.
+ALREADY-SAVED fid_samples PNGs -- no training, no sampling.
 
-FID backend: torchmetrics FrechetInceptionDistance(feature=2048) -- Inception
-V3 pool3 activations, the same 2048-dim mu/sigma statistics as the paper's TF
-evaluator.  (The old fallback used feature=64, a different scale; keep 2048.)
+FID backend (default ``tf``): the exact TensorFlow Inception-V3 evaluator from
+evaluator.py (OpenAI classify_image_graph_def.pb graph, pool_3 2048-dim) --
+the same code path and scale as the paper tables.  Requires tensorflow.
+``torch_fidelity`` / ``torchmetrics-*`` are approximate torch alternatives
+(different scale) for environments without tensorflow.
 
 For each matching run dir the script patches <run_dir>/rows.json (fid,
 fid_backend, + fid_note) via write_sidecar (ts bumped -> aggregation dedup
@@ -110,22 +112,60 @@ def compute_fid_torch_fidelity(ref_dir, fid_dir, device, note=None):
     return fid
 
 
+def compute_fid_tf(ref_dir, fid_dir, note=None):
+    """EXACT table-scale FID: the TensorFlow Inception-V3 evaluator from
+    evaluator.py (OpenAI guided-diffusion classify_image_graph_def.pb graph,
+    pool_3 2048-dim) — the same code path that produced the paper tables.
+    Requires tensorflow."""
+    import tensorflow.compat.v1 as tf
+    from evaluator import Evaluator, read_images_folder
+
+    log.info(f"ref: {ref_dir}")
+    log.info(f"gen: {fid_dir}")
+    ref_arr = read_images_folder(ref_dir)
+    sample_arr = read_images_folder(fid_dir)
+    log.info(f"ref images: {len(ref_arr)}   gen images: {len(sample_arr)}")
+
+    t0 = time.time()
+    config = tf.ConfigProto(allow_soft_placement=True)
+    config.gpu_options.allow_growth = True
+    sess = tf.Session(config=config)
+    evaluator = Evaluator(sess)
+    evaluator.warmup()
+
+    ref_acts = evaluator.read_activations(ref_arr)
+    ref_stats, _ = evaluator.read_statistics(ref_acts)
+    sample_acts = evaluator.read_activations(sample_arr)
+    sample_stats, _ = evaluator.read_statistics(sample_acts)
+
+    fid = float(sample_stats.frechet_distance(ref_stats))
+    sess.close()
+    log.info(f"FID = {fid:.4f}   ({time.time() - t0:.0f}s incl. inception)")
+    return fid
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results_dir", default="/shared/results/common/miksa/intact/DDPM/r")
     parser.add_argument("--region_modes", nargs="+",
                         default=["two_corner", "two_random"])
-    parser.add_argument("--lambda", dest="lam", type=float, default=0.5)
+    parser.add_argument("--experiment", default=None,
+                        help="only backfill runs with this experiment tag "
+                             "(e.g. lambda_sweep); default = all experiments")
+    parser.add_argument("--lambda", dest="lam", type=float, default=None,
+                        help="only backfill this lambda; default = all lambdas")
     parser.add_argument("--n", type=int, default=0,
                         help="cap per-side image count (0 = use all)")
     parser.add_argument("--ref_dir", default=REF_DIR_DEFAULT)
-    parser.add_argument("--backend", choices=["torch_fidelity",
+    parser.add_argument("--backend", choices=["tf",
+                                              "torch_fidelity",
                                               "torchmetrics-2048",
                                               "torchmetrics-64"],
-                        default="torch_fidelity",
-                        help="pipeline.py uses the TF evaluator; torch_fidelity "
-                             "is its faithful torch port (2048-dim improved-renes "
-                             "Inception). torchmetrics-* only for A/B calibration.")
+                        default="tf",
+                        help="tf = the exact evaluator.py Inception graph (same "
+                             "scale as the paper tables; needs tensorflow). "
+                             "torch_fidelity / torchmetrics-* are approximate "
+                             "torch alternatives (different scale).")
     parser.add_argument("--dry_run", action="store_true")
     parser.add_argument("--force", action="store_true",
                         help="recompute even for runs that already have a FID")
@@ -138,6 +178,14 @@ def main():
         log.error(f"reference dir missing: {args.ref_dir}")
         sys.exit(2)
 
+    def _lam_matches(r, lam):
+        if lam is None:
+            return True
+        try:
+            return abs(float(r.get("lambda", float("nan"))) - lam) < 1e-9
+        except (TypeError, ValueError):
+            return str(r.get("lambda", "")) == str(lam)
+
     runs_root = os.path.join(args.results_dir, "runs")
     matches = []
     for run_dir in sorted(os.listdir(runs_root)):
@@ -147,11 +195,14 @@ def main():
             continue
         r = side["run"]
         if (r.get("region_mode") in args.region_modes
-                and str(r.get("lambda", "")) == str(args.lam)):
+                and _lam_matches(r, args.lam)
+                and (args.experiment is None
+                     or r.get("experiment") == args.experiment)):
             matches.append(d)
 
     if not matches:
-        log.error(f"no runs match region_modes={args.region_modes} lam={args.lam}")
+        log.error(f"no runs match region_modes={args.region_modes} "
+                  f"lam={args.lam} experiment={args.experiment}")
         sys.exit(1)
 
     done = []
@@ -175,7 +226,9 @@ def main():
             continue
         try:
             device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-            if args.backend == "torch_fidelity":
+            if args.backend == "tf":
+                fid = compute_fid_tf(args.ref_dir, str(fid_dirs[0]))
+            elif args.backend == "torch_fidelity":
                 fid = compute_fid_torch_fidelity(args.ref_dir, str(fid_dirs[0]),
                                                  device)
             else:
@@ -187,6 +240,7 @@ def main():
         r["fid"] = fid
         r["fid_backend"] = args.backend
         r["fid_note"] = "backfill (" + {
+            "tf": "exact evaluator.py Inception graph (table scale)",
             "torch_fidelity": "TF-evaluator-equivalent (improved-renes pool3)",
             "torchmetrics-2048": "torchmetrics pool3 2048-dim",
             "torchmetrics-64": "torchmetrics 64-dim (legacy table scale)",

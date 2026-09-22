@@ -454,7 +454,9 @@ def sample_for_eval(runner_args, runner_config, mode, classes_to_generate,
 def compute_ua_ta_fid(args, runner_args, runner_config, device, clf_ckpt,
                       ref_dir, n_classes):
     """Reuse pipeline.py's evaluation (UA, TA via ResNet-34; FID via the TF
-    Inception evaluator with torchmetrics fallback)."""
+    Inception evaluator).  FID is ONLY the evaluator.py Inception graph (the
+    table scale); if TensorFlow is unavailable we leave FID=NaN rather than
+    emit a different-scale number (backfill with fid_only.py --backend tf)."""
     from pipeline import (
         classifier_eval,
         classifier_eval_remaining,
@@ -491,34 +493,10 @@ def compute_ua_ta_fid(args, runner_args, runner_config, device, clf_ckpt,
             fid = float(metrics["fid"])
             fid_backend = "tf-inception"
         except Exception as exc:  # pragma: no cover - cluster fallback
-            log.warning(f"TF FID failed ({exc}); falling back to torchmetrics")
-            try:
-                from torchmetrics.image.fid import FrechetInceptionDistance
-                import torchvision.transforms as T
-                from PIL import Image
-
-                def _chunked_load(paths, chunk=256):
-                    """Stream the image stack in chunks: passing all 2048
-                    images through Inception in one forward pass peaks at tens
-                    of GB of CPU activations (observed OOM kill at 64 GB)."""
-                    t = T.Compose([T.ToTensor()])
-                    for i in range(0, len(paths), chunk):
-                        imgs = torch.stack([t(Image.open(p).convert("RGB"))
-                                            for p in paths[i:i + chunk]])
-                        yield (imgs * 255).byte()
-
-                n = 2048
-                fidm = FrechetInceptionDistance(feature=64).to(device)
-                ref_paths = sorted(Path(ref_dir).glob("*.png"))[:n]
-                gen_paths = sorted(Path(fid_dir).glob("*.png"))[:n]
-                for batch in _chunked_load(ref_paths):
-                    fidm.update(batch, real=True)
-                for batch in _chunked_load(gen_paths):
-                    fidm.update(batch, real=False)
-                fid = float(fidm.compute())
-                fid_backend = "torchmetrics"
-            except Exception as exc2:
-                log.warning(f"torchmetrics FID also failed ({exc2}); FID=NaN")
+            log.warning(
+                f"TF FID failed ({exc}); leaving FID=NaN. Backfill with: "
+                f"python fid_only.py --backend tf --experiment <tag>"
+            )
 
     return ua, ta, fid, fid_backend
 
