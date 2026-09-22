@@ -1,15 +1,14 @@
 #!/bin/bash
 # ============================================================================
-# FID-only backfill (GPU) for the DDPM InTAct lambda_interval sweep.
+# FID-only backfill (GPU) for the DDPM InTAct lambda_interval sweep (pareto).
 # Reuses the ALREADY-SAVED fid_samples PNGs — no training, no re-sampling.
 #
 # The main runs produced FID=NaN because the salun-ddpm2 env has no
-# TensorFlow and the torchmetrics fallback had a CPU/GPU device mismatch.
-# This backfills FID with the EXACT table-scale evaluator (evaluator.py
-# Inception graph, pool_3 2048-dim) and patches each run's rows.json sidecar.
-# Requires: pip install tensorflow   (in the salun-ddpm2 env).
+# TensorFlow. This backfills FID with the EXACT table-scale evaluator
+# (evaluator.py Inception graph, pool_3 2048-dim) and patches each run's
+# rows.json sidecar. Requires: pip install tensorflow  (in salun-ddpm2).
 #
-# Then run the plot script:
+# Then render the pareto curves:
 #   python scripts/plot_lambda_sweep.py \
 #       --results_dir /shared/results/common/miksa/intact/DDPM/lambda_sweep
 #

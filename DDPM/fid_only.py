@@ -148,7 +148,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results_dir", default="/shared/results/common/miksa/intact/DDPM/r")
     parser.add_argument("--region_modes", nargs="+",
-                        default=["two_corner", "two_random"])
+                        default=None,
+                        help="only backfill these region modes "
+                             "(default = all region modes)")
     parser.add_argument("--experiment", default=None,
                         help="only backfill runs with this experiment tag "
                              "(e.g. lambda_sweep); default = all experiments")
@@ -194,7 +196,7 @@ def main():
         if not side or "run" not in side:
             continue
         r = side["run"]
-        if (r.get("region_mode") in args.region_modes
+        if ((args.region_modes is None or r.get("region_mode") in args.region_modes)
                 and _lam_matches(r, args.lam)
                 and (args.experiment is None
                      or r.get("experiment") == args.experiment)):
