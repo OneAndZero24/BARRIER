@@ -4,10 +4,15 @@ Collect DDPM InTAct lambda_interval-sweep results and render the three
 pairwise trade-off curves (UA vs RA, RA vs FID, UA vs FID), one point per
 lambda, connected by a line and annotated with the lambda value.
 
+Points are connected in ascending x-coordinate order so the line traces the
+pareto front monotonically (no zig-zags); pass --order_ua_vs_ra to force a
+specific sequence for the UA-vs-RA curve.
+
 Reads the per-run sidecars written by ablation_regions.py
 (<results_dir>/runs/*/rows.json), aggregates mean +- std over seeds, and
 writes PNG figures plus a summary CSV into <out_dir> (default
-<results_dir>/plots).
+<results_dir>/plots).  Alternatively reads an existing summary.csv via
+--from_csv.
 
 Note on metrics: for the DDPM class-forgetting setting the retain accuracy is
 stored in the "ta" column (the "ra" column is reserved for ResNet-18
@@ -16,6 +21,8 @@ classification); RA below refers to that retain/remaining-class accuracy.
 Usage:
     python scripts/plot_lambda_sweep.py \
         --results_dir /shared/results/common/miksa/intact/DDPM/lambda_sweep
+    python scripts/plot_lambda_sweep.py \
+        --from_csv ~/Downloads/summary.csv --exclude 2 5 10
 """
 
 import argparse
@@ -37,8 +44,10 @@ plt.rcParams.update({
     "legend.fontsize": 8, "xtick.labelsize": 9, "ytick.labelsize": 9,
 })
 
-# Swept values must match the SLURM array (sorted ascending for the curve).
-LAMBDAS = [0.01, 0.1, 1.0, 2.0, 5.0, 10.0, 100.0]
+# Canonical sweep set.  Points are connected in x-ascending order to trace the
+# pareto front monotonically (see _curve), so this list only controls which
+# lambdas are included and the summary-CSV row order.
+LAMBDAS = [0.01, 0.1, 1.0, 5.0, 10.0, 30.0, 50.0, 100.0]
 EXPERIMENT = "lambda_sweep"
 
 
@@ -102,6 +111,22 @@ def aggregate(rows):
     return out
 
 
+def load_summary_csv(csv_path):
+    """Load the aggregated {lam: {...}} structure from a summary.csv written
+    by write_summary (same schema as aggregate())."""
+    agg = {}
+    with open(csv_path, newline="") as f:
+        for row in csv.DictReader(f):
+            lam = float(row["lambda"])
+            agg[lam] = {
+                "n_seeds": int(float(row["n_seeds"])),
+                "ua": (float(row["UA_mean"]), float(row["UA_std"])),
+                "ra": (float(row["RA_mean"]), float(row["RA_std"])),
+                "fid": (float(row["FID_mean"]), float(row["FID_std"])),
+            }
+    return agg
+
+
 def _fmt(v):
     return f"{v:.3f}" if v == v else "-"
 
@@ -133,10 +158,15 @@ def write_summary(agg, out_dir):
     return path
 
 
-def _curve(agg, ykey, xkey):
-    """Return ordered (x_mean, x_err, y_mean, y_err, labels) for non-NaN pts."""
+def _curve(agg, ykey, xkey, order=None):
+    """Return ordered (x_mean, x_err, y_mean, y_err, labels) for non-NaN pts.
+    Default connection order = ascending x-coordinate, so the line traces the
+    pareto front monotonically (no zig-zags); pass `order` to force a specific
+    lambda sequence instead."""
+    if order is None:
+        order = sorted(agg, key=lambda lam: agg[lam][xkey][0])
     xs, xe, ys, ye, lbls = [], [], [], [], []
-    for lam in LAMBDAS:
+    for lam in order:
         if lam not in agg:
             continue
         a = agg[lam]
@@ -152,8 +182,8 @@ def _curve(agg, ykey, xkey):
     return np.asarray(xs), np.asarray(xe), np.asarray(ys), np.asarray(ye), lbls
 
 
-def plot_curve(agg, ykey, xkey, xlabel, ylabel, title, out_path):
-    xs, xe, ys, ye, lbls = _curve(agg, ykey, xkey)
+def plot_curve(agg, ykey, xkey, xlabel, ylabel, title, out_path, order=None):
+    xs, xe, ys, ye, lbls = _curve(agg, ykey, xkey, order=order)
     if len(xs) == 0:
         print(f"[skip] no data for {title}")
         return
@@ -178,29 +208,53 @@ def plot_curve(agg, ykey, xkey, xlabel, ylabel, title, out_path):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--results_dir", required=True)
+    p.add_argument("--results_dir", default=None,
+                   help="path to aggregated sidecars directory "
+                        "(optional if --from_csv is given)")
+    p.add_argument("--from_csv", default=None,
+                   help="read lambdas from a summary.csv instead of sidecars "
+                        "(e.g. already downloaded summary.csv)")
+    p.add_argument("--exclude", nargs="+", type=float, default=[],
+                   help="lambda values to drop from the curves")
+    p.add_argument("--order_ua_vs_ra", nargs="+", type=float, default=None,
+                   help="connection order for the UA-vs-RA curve "
+                        "(default: automatic ascending-RA pareto tracing)")
     p.add_argument("--out_dir", default=None,
                    help="output dir for figures/CSV (default <results_dir>/plots)")
     args = p.parse_args()
 
-    out_dir = args.out_dir or os.path.join(args.results_dir, "plots")
+    if not args.from_csv and not args.results_dir:
+        p.error("either --from_csv or --results_dir is required")
 
-    rows = load_runs(args.results_dir)
-    print(f"found {len(rows)} runs for experiment={EXPERIMENT}")
-    if not rows:
-        print("nothing to plot; run the SLURM array first")
-        return
+    out_dir = args.out_dir or os.path.join(args.results_dir or ".", "plots")
 
-    agg = aggregate(rows)
+    if args.from_csv:
+        agg = load_summary_csv(args.from_csv)
+        print(f"loaded {len(agg)} lambdas from {args.from_csv}")
+    else:
+        rows = load_runs(args.results_dir)
+        print(f"found {len(rows)} runs for experiment={EXPERIMENT}")
+        if not rows:
+            print("nothing to plot; run the SLURM array first")
+            return
+        agg = aggregate(rows)
+
+    agg = {lam: agg[lam] for lam in agg if lam in LAMBDAS}
+    for lam in args.exclude:
+        agg.pop(lam, None)
     present = sorted(agg)
-    print(f"lambdas present: {[f'{l:g}' for l in present]}")
+    print(f"lambdas plotted: {[f'{l:g}' for l in present]}")
+    if not present:
+        print("nothing left to plot after exclusions")
+        return
 
     summary_path = write_summary(agg, out_dir)
     print(f"wrote {summary_path}")
 
     plot_curve(agg, "ua", "ra", "RA (retain accuracy)",
                "UA (unlearning accuracy)",
-               "UA vs RA (lambda_interval sweep)", os.path.join(out_dir, "ua_vs_ra.png"))
+               "UA vs RA (lambda_interval sweep)", os.path.join(out_dir, "ua_vs_ra.png"),
+               order=args.order_ua_vs_ra)
     plot_curve(agg, "ra", "fid", "FID",
                "RA (retain accuracy)",
                "RA vs FID (lambda_interval sweep)", os.path.join(out_dir, "ra_vs_fid.png"))
