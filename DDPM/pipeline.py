@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import setup_cache  # noqa: E402  — must precede torch / HF imports
 
 import argparse
+import json
 import logging
 import pathlib
 from datetime import datetime
@@ -466,6 +467,13 @@ def main():
     log.info("Step 4: Logging to wandb")
     wandb.log(metrics)
     wandb.summary.update(metrics)
+
+    # Local metrics dump (added on ddpm-fid-repro): lets headless sweeps
+    # aggregate UA / TA / FID per run without relying on wandb.
+    metrics_path = os.path.join(unlearn_output, "metrics.json")
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=2)
+    log.info(f"Metrics dumped to {metrics_path}")
 
     # Log sample images — one panel per class (including forgotten)
     n_sample_imgs = eval_cfg.get("n_sample_images_per_class", 8)
