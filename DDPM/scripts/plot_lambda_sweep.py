@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-Collect DDPM InTAct lambda_interval-sweep results and render the three
-pairwise trade-off curves (UA vs RA, RA vs FID, UA vs FID), one point per
-lambda, connected by a line and annotated with the lambda value.
-
-Points are connected in ascending x-coordinate order so the line traces the
-pareto front monotonically (no zig-zags); pass --order_ua_vs_ra to force a
-specific sequence for the UA-vs-RA curve.
+Collect DDPM InTAct lambda_interval-sweep results and render three bar plots
+(UA, RA, FID) — one bar per lambda, mean over seeds with +- std error bars.
 
 Reads the per-run sidecars written by ablation_regions.py
 (<results_dir>/runs/*/rows.json), aggregates mean +- std over seeds, and
@@ -22,7 +17,7 @@ Usage:
     python scripts/plot_lambda_sweep.py \
         --results_dir /shared/results/common/miksa/intact/DDPM/lambda_sweep
     python scripts/plot_lambda_sweep.py \
-        --from_csv ~/Downloads/summary.csv --exclude 2 5 10
+        --from_csv ~/Downloads/summary.csv --exclude 2 5
 """
 
 import argparse
@@ -44,10 +39,8 @@ plt.rcParams.update({
     "legend.fontsize": 8, "xtick.labelsize": 9, "ytick.labelsize": 9,
 })
 
-# Canonical sweep set.  Points are connected in x-ascending order to trace the
-# pareto front monotonically (see _curve), so this list only controls which
-# lambdas are included and the summary-CSV row order.
-LAMBDAS = [0.01, 0.1, 1.0, 5.0, 10.0, 30.0, 50.0, 100.0]
+# Canonical sweep set (controls inclusion in plots + summary-CSV row order).
+LAMBDAS = [0.01, 0.1, 1.0, 10.0, 30.0, 50.0, 100.0]
 EXPERIMENT = "lambda_sweep"
 
 
@@ -132,8 +125,7 @@ def _fmt(v):
 
 
 def _lam_label(lam):
-    s = f"{lam:g}"
-    return s
+    return f"{lam:g}"
 
 
 def write_summary(agg, out_dir):
@@ -158,47 +150,35 @@ def write_summary(agg, out_dir):
     return path
 
 
-def _curve(agg, ykey, xkey, order=None):
-    """Return ordered (x_mean, x_err, y_mean, y_err, labels) for non-NaN pts.
-    Default connection order = ascending x-coordinate, so the line traces the
-    pareto front monotonically (no zig-zags); pass `order` to force a specific
-    lambda sequence instead."""
-    if order is None:
-        order = sorted(agg, key=lambda lam: agg[lam][xkey][0])
-    xs, xe, ys, ye, lbls = [], [], [], [], []
-    for lam in order:
-        if lam not in agg:
-            continue
-        a = agg[lam]
-        xm = a[xkey][0]
-        ym = a[ykey][0]
-        if xm != xm or ym != ym:
-            continue
-        xs.append(xm)
-        xe.append(a[xkey][1] if a[xkey][1] == a[xkey][1] else 0.0)
-        ys.append(ym)
-        ye.append(a[ykey][1] if a[ykey][1] == a[ykey][1] else 0.0)
-        lbls.append(lam)
-    return np.asarray(xs), np.asarray(xe), np.asarray(ys), np.asarray(ye), lbls
-
-
-def plot_curve(agg, ykey, xkey, xlabel, ylabel, title, out_path, order=None):
-    xs, xe, ys, ye, lbls = _curve(agg, ykey, xkey, order=order)
-    if len(xs) == 0:
+def bar_plot(agg, key, ylabel, title, out_path, color="#1f77b4"):
+    """Bar chart of one metric per lambda, mean +- std over seeds."""
+    lams = [lam for lam in LAMBDAS if lam in agg]
+    if not lams:
         print(f"[skip] no data for {title}")
         return
 
-    fig, ax = plt.subplots(figsize=(5.5, 4.5))
-    ax.errorbar(xs, ys, xerr=xe, yerr=ye, fmt="-o", color="#1f77b4",
-                lw=1.5, ms=5, capsize=3, zorder=2)
-    for x, y, lam in zip(xs, ys, lbls):
-        ax.annotate(rf"$\lambda$={_lam_label(lam)}", (x, y),
-                    textcoords="offset points", xytext=(6, 6), fontsize=8)
+    vals = [agg[lam][key][0] for lam in lams]
+    errs = [agg[lam][key][1] if agg[lam][key][1] == agg[lam][key][1] else 0.0
+            for lam in lams]
 
-    ax.set_xlabel(xlabel)
+    fig, ax = plt.subplots(figsize=(7.5, 4.2))
+    x = np.arange(len(lams))
+    ax.bar(x, vals, yerr=errs, width=0.55, color=color,
+           edgecolor="black", linewidth=0.6, capsize=3)
+    ax.set_xticks(x)
+    ax.set_xticklabels([_lam_label(lam) for lam in lams])
+    ax.set_xlabel(r"$\lambda_\mathrm{interval}$")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    ax.grid(True, alpha=0.3)
+
+    top = max(v + e for v, e in zip(vals, errs))
+    bot = min([v - e for v, e in zip(vals, errs)] + [0.0])
+    pad = 0.03 * max(top - bot, 1e-9) + 0.01
+    ax.set_ylim(bot - pad, top + pad * 4)
+    for xi, v, e in zip(x, vals, errs):
+        ax.text(float(xi), v + e + pad, f"{v:.3f}", ha="center", fontsize=8)
+
+    ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(out_path, bbox_inches="tight")
@@ -215,10 +195,7 @@ def main():
                    help="read lambdas from a summary.csv instead of sidecars "
                         "(e.g. already downloaded summary.csv)")
     p.add_argument("--exclude", nargs="+", type=float, default=[],
-                   help="lambda values to drop from the curves")
-    p.add_argument("--order_ua_vs_ra", nargs="+", type=float, default=None,
-                   help="connection order for the UA-vs-RA curve "
-                        "(default: automatic ascending-RA pareto tracing)")
+                   help="lambda values to drop from the plots")
     p.add_argument("--out_dir", default=None,
                    help="output dir for figures/CSV (default <results_dir>/plots)")
     args = p.parse_args()
@@ -251,16 +228,12 @@ def main():
     summary_path = write_summary(agg, out_dir)
     print(f"wrote {summary_path}")
 
-    plot_curve(agg, "ua", "ra", "RA (retain accuracy)",
-               "UA (unlearning accuracy)",
-               "UA vs RA (lambda_interval sweep)", os.path.join(out_dir, "ua_vs_ra.png"),
-               order=args.order_ua_vs_ra)
-    plot_curve(agg, "ra", "fid", "FID",
-               "RA (retain accuracy)",
-               "RA vs FID (lambda_interval sweep)", os.path.join(out_dir, "ra_vs_fid.png"))
-    plot_curve(agg, "ua", "fid", "FID",
-               "UA (unlearning accuracy)",
-               "UA vs FID (lambda_interval sweep)", os.path.join(out_dir, "ua_vs_fid.png"))
+    bar_plot(agg, "ua", "UA (unlearning accuracy)",
+             "UA by lambda_interval", os.path.join(out_dir, "ua.png"))
+    bar_plot(agg, "ra", "RA (retain accuracy)",
+             "RA by lambda_interval", os.path.join(out_dir, "ra.png"))
+    bar_plot(agg, "fid", "FID",
+             "FID by lambda_interval", os.path.join(out_dir, "fid.png"))
 
 
 if __name__ == "__main__":
