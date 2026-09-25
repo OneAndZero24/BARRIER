@@ -35,6 +35,11 @@
 #   python scripts/plot_lambda_sweep.py \
 #       --results_dir /shared/results/common/miksa/intact/DDPM/lambda_sweep
 #
+# Re-run any tasks that failed (e.g. landed on an RTX 5090 node whose sm_120
+# is unsupported by torch 2.1):
+#   bash scripts/rerun_failed_lambda_fid.sh          # prints + resubmits
+#   bash scripts/rerun_failed_lambda_fid.sh --dry-run   # only prints
+#
 # Usage:
 #   cd DDPM
 #   sbatch scripts/slurm_ddpm_lambda_sweep_fid.sh
@@ -48,8 +53,35 @@
 #SBATCH --partition=rtx4090_batch
 #SBATCH --array=0-34
 #SBATCH --time=12:00:00
+#SBATCH --requeue
 
 set -euo pipefail
+
+# ============================================================================
+# GPU guard: rtx4090_batch occasionally schedules RTX 5090 (sm_120/Blackwell)
+# nodes, but torch 2.1.0 in salun-ddpm has no sm_120 kernels ("no kernel image
+# is available for execution on the device").  Detect the GPU first and
+# requeue until the job lands on a pre-Blackwell node (4090, A100, ...).
+# SLURM_RESTART_COUNT increments on each requeue; MAX_REQUEUE caps the loop.
+# If the partition has usable node features you can skip the loop entirely:
+#   sinfo -p rtx4090_batch -N -o "%N %f"       # list node features
+#   #SBATCH --constraint=rtx4090
+# ============================================================================
+MAX_REQUEUE=${MAX_REQUEUE:-5}
+GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1)
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+echo "GPU: ${GPU_NAME}  (compute capability ${GPU_CAP:-unknown})"
+if [ -n "${GPU_CAP}" ] && [ "${GPU_CAP}" -ge 10 ]; then
+    ATTEMPT=${SLURM_RESTART_COUNT:-0}
+    echo "FATAL-REQUEUE: capability ${GPU_CAP}.x (Blackwell sm_120+) unsupported by torch 2.1 kernels"
+    if [ "${ATTEMPT}" -lt "${MAX_REQUEUE}" ]; then
+        echo "requeueing (attempt $((ATTEMPT + 1))/${MAX_REQUEUE}) ..."
+        scontrol requeue "${SLURM_JOB_ID}"
+        exit 0
+    fi
+    echo "giving up after ${MAX_REQUEUE} requeues - no usable GPU found"
+    exit 1
+fi
 
 CONDA_ENV=${CONDA_ENV:-salun-ddpm}
 RESULTS_DIR=${RESULTS_DIR:-/shared/results/common/miksa/intact/DDPM/lambda_sweep}

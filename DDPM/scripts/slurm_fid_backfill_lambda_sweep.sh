@@ -24,8 +24,26 @@
 #SBATCH --mem=64GB
 #SBATCH --partition=rtx4090_batch
 #SBATCH --time=02:00:00
+#SBATCH --requeue
 
 set -euo pipefail
+
+# Same GPU guard as slurm_ddpm_lambda_sweep_fid.sh (rtx4090_batch also
+# schedules RTX 5090 nodes; salun-ddpm's torch/tf have no sm_120 support).
+MAX_REQUEUE=${MAX_REQUEUE:-5}
+GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1)
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+echo "GPU: ${GPU_NAME}  (compute capability ${GPU_CAP:-unknown})"
+if [ -n "${GPU_CAP}" ] && [ "${GPU_CAP}" -ge 10 ]; then
+    ATTEMPT=${SLURM_RESTART_COUNT:-0}
+    echo "FATAL-REQUEUE: capability ${GPU_CAP}.x (Blackwell sm_120+) unsupported"
+    if [ "${ATTEMPT}" -lt "${MAX_REQUEUE}" ]; then
+        echo "requeueing (attempt $((ATTEMPT + 1))/${MAX_REQUEUE}) ..."
+        scontrol requeue "${SLURM_JOB_ID}"
+        exit 0
+    fi
+    exit 1
+fi
 
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ${CONDA_ENV:-salun-ddpm}

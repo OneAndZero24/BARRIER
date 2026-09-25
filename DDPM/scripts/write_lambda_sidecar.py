@@ -30,7 +30,8 @@ def main():
     metrics_paths = glob.glob(os.path.join(args.run_dir, "output", "*", "metrics.json"))
     if not metrics_paths:
         raise SystemExit(f"no metrics.json found under {args.run_dir}/output/*/")
-    metrics = json.load(open(metrics_paths[0]))
+    metrics_path = max(metrics_paths, key=os.path.getmtime)
+    metrics = json.load(open(metrics_path))
 
     def num(k):
         v = metrics.get(k)
