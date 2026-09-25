@@ -18,6 +18,7 @@
 # ============================================================================
 
 #SBATCH --job-name=fid-backfill-lambda
+#SBATCH --output=slurm-%A_%a.out
 #SBATCH --qos=batch
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8

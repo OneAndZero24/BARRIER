@@ -46,6 +46,7 @@
 # ============================================================================
 
 #SBATCH --job-name=ddpm-lambda-fid-repro
+#SBATCH --output=slurm-%A_%a.out
 #SBATCH --qos=batch
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8

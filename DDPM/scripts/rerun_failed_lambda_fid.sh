@@ -90,8 +90,10 @@ fi
 if [ ${#FAILED[@]} -gt 0 ]; then
     FAILED_LIST=$(IFS=,; echo "${FAILED[*]}")
     echo "resubmitting: sbatch --array=${FAILED_LIST} ${SCRIPT_DIR}/slurm_ddpm_lambda_sweep_fid.sh"
-    cd "${SCRIPT_DIR}"
-    sbatch --array="${FAILED_LIST}" "${SCRIPT_DIR}/slurm_ddpm_lambda_sweep_fid.sh"
+    # keep output files in the caller's directory (not scripts/), named like
+    # the original run (slurm-<arrayjob>_<task>.out)
+    sbatch -D "${PWD}" -o "${PWD}/slurm-%A_%a.out" \
+        --array="${FAILED_LIST}" "${SCRIPT_DIR}/slurm_ddpm_lambda_sweep_fid.sh"
 fi
 
 if [ ${#NEED_FID[@]} -gt 0 ]; then
