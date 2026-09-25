@@ -67,7 +67,7 @@ set -euo pipefail
 #   sinfo -p rtx4090_batch -N -o "%N %f"       # list node features
 #   #SBATCH --constraint=rtx4090
 # ============================================================================
-MAX_REQUEUE=${MAX_REQUEUE:-5}
+MAX_REQUEUE=${MAX_REQUEUE:-20}
 GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1)
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
 echo "GPU: ${GPU_NAME}  (compute capability ${GPU_CAP:-unknown})"

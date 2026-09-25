@@ -30,7 +30,7 @@ set -euo pipefail
 
 # Same GPU guard as slurm_ddpm_lambda_sweep_fid.sh (rtx4090_batch also
 # schedules RTX 5090 nodes; salun-ddpm's torch/tf have no sm_120 support).
-MAX_REQUEUE=${MAX_REQUEUE:-5}
+MAX_REQUEUE=${MAX_REQUEUE:-20}
 GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1)
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
 echo "GPU: ${GPU_NAME}  (compute capability ${GPU_CAP:-unknown})"
