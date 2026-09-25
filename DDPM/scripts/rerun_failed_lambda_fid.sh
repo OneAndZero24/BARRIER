@@ -17,6 +17,8 @@
 set -euo pipefail
 
 RESULTS_DIR=${RESULTS_DIR:-/shared/results/common/miksa/intact/DDPM/lambda_sweep}
+PARTITION=${PARTITION:-rtx4090_batch}
+QOS=${QOS:-}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DRY_RUN=0
@@ -92,7 +94,10 @@ if [ ${#FAILED[@]} -gt 0 ]; then
     echo "resubmitting: sbatch --array=${FAILED_LIST} ${SCRIPT_DIR}/slurm_ddpm_lambda_sweep_fid.sh"
     # keep output files in the caller's directory (not scripts/), named like
     # the original run (slurm-<arrayjob>_<task>.out)
-    sbatch -D "${PWD}" -o "${PWD}/slurm-%A_%a.out" \
+    SBATCH_EXTRA=()
+    [ -n "${PARTITION}" ] && SBATCH_EXTRA+=(--partition="${PARTITION}")
+    [ -n "${QOS}" ] && SBATCH_EXTRA+=(--qos="${QOS}")
+    sbatch -D "${PWD}" -o "${PWD}/slurm-%A_%a.out" "${SBATCH_EXTRA[@]}" \
         --array="${FAILED_LIST}" "${SCRIPT_DIR}/slurm_ddpm_lambda_sweep_fid.sh"
 fi
 
