@@ -53,7 +53,7 @@
 #SBATCH --mem=64GB
 #SBATCH --partition=rtx4090_batch
 #SBATCH --array=0-34
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --requeue
 
 set -euo pipefail
