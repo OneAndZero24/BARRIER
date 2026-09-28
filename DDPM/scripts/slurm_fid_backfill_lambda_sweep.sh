@@ -24,7 +24,6 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --partition=rtx4090_batch
-#SBATCH --time=02:00:00
 #SBATCH --requeue
 
 set -euo pipefail
