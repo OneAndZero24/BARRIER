@@ -32,6 +32,7 @@ import glob
 import json
 import os
 import random
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -59,8 +60,9 @@ def find_fid_dir(run_dir):
 
 def make_subset_dir(sample_dir, n_per_class, method, seed):
     files = sorted(
-        p for p in glob.glob(os.path.join(sample_dir, "*.png"))
-        if os.path.isfile(p)
+        (p for p in glob.glob(os.path.join(sample_dir, "*.png"))
+         if os.path.isfile(p)),
+        key=lambda p: int(os.path.basename(p).split(".")[0]),
     )
     expected = NUM_CLASSES * SAMPLE_BLOCK
     if len(files) < expected:
@@ -74,10 +76,16 @@ def make_subset_dir(sample_dir, n_per_class, method, seed):
         else:
             chosen.extend(block[:n_per_class])
 
-    tmp = f"/tmp/fid500_{os.path.basename(os.path.dirname(sample_dir))}_{os.getpid()}"
+    # keep the subset dir on the SAME filesystem as the samples (os.link
+    # fails across devices, e.g. /shared vs /tmp)
+    tmp = os.path.join(os.path.dirname(sample_dir),
+                       f".fid500_subset_{os.getpid()}")
     os.makedirs(tmp, exist_ok=True)
     for i, p in enumerate(chosen):
-        os.link(p, os.path.join(tmp, f"{i}.png"))
+        try:
+            os.link(p, os.path.join(tmp, f"{i}.png"))
+        except OSError:
+            shutil.copy2(p, os.path.join(tmp, f"{i}.png"))
     return tmp
 
 
