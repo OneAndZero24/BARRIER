@@ -27,6 +27,12 @@ def parse_args():
         default=0,
         help="will save all images *except* from this class label",
     )
+    parser.add_argument(
+        "--n_per_class",
+        type=int,
+        default=500,
+        help="images per class to save (cifar10 only; stl10 saves everything)",
+    )
     args = parser.parse_args()
     return args
 
@@ -44,7 +50,7 @@ def all_but_one_class_dataset(data_path, dataset, label_to_forget):
         idx = find_indices(dataset.targets, label_to_forget)
         filtered_set = torch.utils.data.Subset(dataset, idx)
 
-        num_samples_per_class = 500
+        num_samples_per_class = args.n_per_class
 
         subsets = []
         for class_idx in range(1, 10):
@@ -99,7 +105,8 @@ if __name__ == "__main__":
     dataloader = all_but_one_class_dataset(
         args.data_path, args.dataset, args.label_to_forget
     )
-    save_dir_root = f"./{args.dataset}_without_label_" + str(args.label_to_forget)
+    n_str = "" if args.n_per_class == 500 else f"_n{args.n_per_class}"
+    save_dir_root = f"./{args.dataset}_without_label_{args.label_to_forget}{n_str}"
     os.makedirs(save_dir_root, exist_ok=True)
 
     img_id = 0

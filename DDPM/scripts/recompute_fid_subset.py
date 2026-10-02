@@ -16,14 +16,17 @@ FID uses the ORIGINAL TF Inception-V3 graph (evaluator.py, pool_3
 are computed once and cached to <results_dir>/.fid500_ref_stats.npz.
 
 Results:
-  * each run dir gets rows.json["fid_500"] (plus "fid" = original 5000/class)
+  * each run dir gets rows.json["fid_<N>"] (plus "fid" = original 5000/class
+    vs the 500/class reference)
   * `--collect` aggregates all runs into
-        <results_dir>/fid500_grid.csv   (per-run: lambda, seed, fid_500, fid_5000)
-        <results_dir>/fid500_plot.csv   (per-lambda: n_seeds, FID_mean, FID_std)
+        <results_dir>/fid<N>_grid.csv   (per-run: lambda, seed, fid_N, fid)
+        <results_dir>/fid<N>_plot.csv   (per-lambda: n_seeds, FID_mean, FID_std)
 
 Usage:
     python scripts/recompute_fid_subset.py --results_dir /path/to/lambda_sweep
     python scripts/recompute_fid_subset.py --results_dir /path -n 500 --method random --seed 0
+    python scripts/recompute_fid_subset.py --results_dir /path --ref-stats-only  # warm cache
+    python scripts/recompute_fid_subset.py --results_dir /path --run-dir <one run>
     python scripts/recompute_fid_subset.py --results_dir /path --collect   # after compute
 """
 
@@ -141,7 +144,11 @@ def main():
     parser.add_argument("--method", choices=["block", "random"], default="block")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--collect", action="store_true",
-                        help="aggregate rows.json fid_500 into CSVs and exit")
+                        help="aggregate rows.json fid_<N> into CSVs and exit")
+    parser.add_argument("--ref-stats-only", action="store_true",
+                        help="only compute+cache the reference activations, then exit")
+    parser.add_argument("--run-dir", default=None,
+                        help="process only this run dir (array mode)")
     args = parser.parse_args()
 
     if args.collect:
@@ -152,8 +159,33 @@ def main():
     if not os.path.isdir(args.ref_dir):
         raise SystemExit(f"ref dataset not found: {args.ref_dir}")
 
-    stats_cache = os.path.join(args.results_dir, ".fid500_ref_stats.npz")
+    stats_cache = os.path.join(
+        args.results_dir,
+        f".fid_ref_stats_{os.path.basename(os.path.normpath(args.ref_dir))}.npz")
+
+    if args.ref_stats_only:
+        import tensorflow.compat.v1 as tf
+        from evaluator import Evaluator, read_images_folder
+        print(f"warmup: caching reference stats for {args.ref_dir} -> {stats_cache}")
+        ref_arr = read_images_folder(args.ref_dir)
+        config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
+        sess = tf.Session(config=config)
+        evaluator = Evaluator(sess)
+        evaluator.warmup()
+        ref_acts = evaluator.read_activations(ref_arr)
+        ref_stats, _ = evaluator.read_statistics(ref_acts)
+        sess.close()
+        os.makedirs(os.path.dirname(stats_cache), exist_ok=True)
+        np_savez(stats_cache, mu=ref_stats.mu, sigma=ref_stats.sigma)
+        print(f"cached reference stats: {stats_cache}")
+        return
+
     run_dirs = sorted(glob.glob(os.path.join(args.results_dir, "runs", "lam*_seed*")))
+    if args.run_dir:
+        run_dirs = [d for d in run_dirs if os.path.normpath(d) == os.path.normpath(args.run_dir)]
+        if not run_dirs:
+            raise SystemExit(f"run dir not found: {args.run_dir}")
     if not run_dirs:
         raise SystemExit(f"no runs under {args.results_dir}/runs/")
 
@@ -174,44 +206,55 @@ def main():
             fid = compute_fid(args.ref_dir, sub, stats_cache)
         finally:
             shutil_rmtree(sub)
-        row["fid_500"] = fid
-        row["fid_500_cfg"] = {"n_per_class": args.n_per_class,
-                              "method": args.method, "seed": args.seed}
+        key = f"fid_{args.n_per_class}"
+        row[key] = fid
+        row[f"{key}_cfg"] = {"n_per_class": args.n_per_class,
+                             "method": args.method, "seed": args.seed}
         json.dump(row, open(side, "w"), indent=2)
         old = row.get("fid")
-        print(f"  fid_500={fid:.4f}   (original fid_5000={old})")
+        print(f"  {key}={fid:.4f}   (original fid={old})")
 
 
 def collect(results_dir):
     run_dirs = sorted(glob.glob(os.path.join(results_dir, "runs", "lam*_seed*")))
-    grid, plot = [], {}
+    grid, plot, n_tag = [], {}, None
     for run_dir in run_dirs:
         side = os.path.join(run_dir, "rows.json")
         if not os.path.exists(side):
             continue
         row = json.load(open(side))
         lam, seed = parse_lam_seed(run_dir)
-        fid5 = row.get("fid_500")
         fid50 = row.get("fid")
-        if fid5 is None:
+        # figure out which fid_<N> key(s) exist; use most recent cfg if mixed
+        keys = [k for k in row if k.startswith("fid_") and k.endswith("_cfg")]
+        cfg = None
+        for k in keys:
+            cfg = row[k]  # take last written
+        n = cfg.get("n_per_class") if cfg else None
+        if n is None:
             continue
+        fidn = row.get(f"fid_{n}")
+        if fidn is None:
+            continue
+        if n_tag is None:
+            n_tag = n
         grid.append({"lambda": lam, "seed": seed,
-                     "fid_500": fid5, "fid_5000": fid50,
-                     "diff": (fid50 - fid5) if isinstance(fid50, (int, float)) else None})
-        plot.setdefault(lam, []).append(fid5)
+                     f"fid_{n}": fidn, "fid": fid50,
+                     "diff": (fid50 - fidn) if isinstance(fid50, (int, float)) else None})
+        plot.setdefault(lam, []).append(fidn)
 
     if not grid:
-        raise SystemExit("no fid_500 values found - run the compute step first")
+        raise SystemExit("no fid_<N> values found - run the compute step first")
 
-    grid_csv = os.path.join(results_dir, "fid500_grid.csv")
+    grid_csv = os.path.join(results_dir, f"fid{n_tag}_grid.csv")
     with open(grid_csv, "w") as f:
-        f.write("lambda,seed,fid_500,fid_5000,diff\n")
+        f.write(f"lambda,seed,fid_{n_tag},fid,diff\n")
         for g in sorted(grid, key=lambda g: (g["lambda"], g["seed"])):
-            f.write(f"{g['lambda']},{g['seed']},{g['fid_500']},"
-                    f"{g['fid_5000'] if g['fid_5000'] is not None else ''},"
+            f.write(f"{g['lambda']},{g['seed']},{g[f'fid_{n_tag}']},"
+                    f"{g['fid'] if g['fid'] is not None else ''},"
                     f"{'' if g['diff'] is None else round(g['diff'], 4)}\n")
 
-    plot_csv = os.path.join(results_dir, "fid500_plot.csv")
+    plot_csv = os.path.join(results_dir, f"fid{n_tag}_plot.csv")
     with open(plot_csv, "w") as f:
         f.write("lambda,n_seeds,FID_mean,FID_std\n")
         for lam in sorted(plot):
