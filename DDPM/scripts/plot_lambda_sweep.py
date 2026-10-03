@@ -40,7 +40,7 @@ plt.rcParams.update({
 })
 
 # Canonical sweep set (controls inclusion in plots + summary-CSV row order).
-LAMBDAS = [0.01, 0.1, 1.0, 10.0, 30.0, 50.0, 100.0]
+LAMBDAS = [0.01, 0.1, 1.0, 2.0, 5.0, 10.0, 30.0, 50.0, 100.0]
 EXPERIMENT = "lambda_sweep"
 
 
@@ -58,8 +58,9 @@ def load_runs(results_dir):
             payload = json.loads(p.read_text())
         except Exception:
             continue
-        r = payload.get("run")
-        if r and r.get("experiment") == EXPERIMENT:
+        r = dict(payload.get("run") or {})
+        r.update({k: v for k, v in payload.items() if k != "run"})
+        if r.get("experiment") == EXPERIMENT:
             rows.append(r)
     return rows
 
@@ -160,6 +161,9 @@ def bar_plot(agg, key, ylabel, title, out_path, color="#1f77b4"):
     vals = [agg[lam][key][0] for lam in lams]
     errs = [agg[lam][key][1] if agg[lam][key][1] == agg[lam][key][1] else 0.0
             for lam in lams]
+    if not any(v == v for v in vals):
+        print(f"[skip] all NaN for {title} (key={key} missing in sidecars?)")
+        return
 
     fig, ax = plt.subplots(figsize=(7.5, 4.2))
     x = np.arange(len(lams))
