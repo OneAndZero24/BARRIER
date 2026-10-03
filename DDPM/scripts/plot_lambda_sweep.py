@@ -80,7 +80,7 @@ def _mean_std(vals):
     return float(a.mean()), float(a.std())
 
 
-def aggregate(rows):
+def aggregate(rows, fid_key="fid"):
     """Group runs by lambda -> {ua, ra, fid} mean/std + seed count."""
     by_lam = {}
     for r in rows:
@@ -90,7 +90,7 @@ def aggregate(rows):
         by_lam.setdefault(lam, []).append({
             "ua": _f(r.get("ua")),
             "ra": _f(r.get("ta")),  # DDPM retain accuracy lives in "ta"
-            "fid": _f(r.get("fid")),
+            "fid": _f(r.get(fid_key)),
         })
 
     out = {}
@@ -186,6 +186,28 @@ def bar_plot(agg, key, ylabel, title, out_path, color="#1f77b4"):
     print(f"wrote {out_path}")
 
 
+def frontier_plot(agg, x_key, y_key, title, out_path):
+    """Pareto-style frontier: one point per lambda (seeds averaged),
+    annotated with the lambda value."""
+    xs = [agg[lam][x_key][0] for lam in sorted(agg)]
+    ys = [agg[lam][y_key][0] for lam in sorted(agg)]
+    fig, ax = plt.subplots(figsize=(7.5, 5.2))
+    ax.scatter(xs, ys, s=55, color="#1f77b4", zorder=3)
+    for lam, x, y in zip(sorted(agg), xs, ys):
+        ax.annotate(_lam_label(lam), (x, y), textcoords="offset points",
+                    xytext=(6, 6), fontsize=8)
+    xlab = {"ua": "UA (unlearning accuracy)", "ra": "RA (retain accuracy)",
+            "fid": "FID"}
+    ax.set_xlabel(xlab[x_key])
+    ax.set_ylabel(xlab[y_key])
+    ax.set_title(title)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"wrote {out_path}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--results_dir", default=None,
@@ -198,6 +220,9 @@ def main():
                    help="lambda values to drop from the plots")
     p.add_argument("--out_dir", default=None,
                    help="output dir for figures/CSV (default <results_dir>/plots)")
+    p.add_argument("--fid-key", default="fid",
+                   help="rows.json key holding the FID to plot "
+                        "(e.g. fid, fid_500, fid_5000)")
     args = p.parse_args()
 
     if not args.from_csv and not args.results_dir:
@@ -214,7 +239,7 @@ def main():
         if not rows:
             print("nothing to plot; run the SLURM array first")
             return
-        agg = aggregate(rows)
+        agg = aggregate(rows, args.fid_key)
 
     agg = {lam: agg[lam] for lam in agg if lam in LAMBDAS}
     for lam in args.exclude:
@@ -234,6 +259,13 @@ def main():
              "RA by lambda_interval", os.path.join(out_dir, "ra.png"))
     bar_plot(agg, "fid", "FID",
              "FID by lambda_interval", os.path.join(out_dir, "fid.png"))
+
+    frontier_plot(agg, "ua", "fid",
+                  "UA vs FID frontier", os.path.join(out_dir, "ua_vs_fid.png"))
+    frontier_plot(agg, "ua", "ra",
+                  "UA vs RA frontier", os.path.join(out_dir, "ua_vs_ra.png"))
+    frontier_plot(agg, "ra", "fid",
+                  "RA vs FID frontier", os.path.join(out_dir, "ra_vs_fid.png"))
 
 
 if __name__ == "__main__":
