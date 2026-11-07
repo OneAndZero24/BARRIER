@@ -316,14 +316,18 @@ def penalty_terms(cfg, meta, pca_info, model_new, snapshot, device):
 # =============================================================================
 
 def spearman_table(per_run):
+    """Spearman over checkpoints; NaNs dropped per pair, so penalty pairs only
+    use runs that have a pca_info.pth (n reported)."""
     from scipy.stats import spearmanr
     out = []
     for x, y in (("retain_drift", "FID"), ("retain_drift", "RA"),
-                 ("retain_drift", "lambda"), ("forget_drift", "UA")):
-        a = np.array([r[x] for r in per_run], dtype=float)
-        b = np.array([r[y] for r in per_run], dtype=float)
-        rho, p = spearmanr(a, b)
-        out.append({"x": x, "y": y, "n": len(a), "rho": rho, "p": p})
+                 ("retain_drift", "lambda"), ("forget_drift", "UA"),
+                 ("penalty", "retain_drift"), ("penalty", "FID")):
+        a = np.array([float(r[x]) for r in per_run], dtype=float)
+        b = np.array([float(r[y]) for r in per_run], dtype=float)
+        ok = np.isfinite(a) & np.isfinite(b)
+        rho, p = spearmanr(a[ok], b[ok]) if ok.sum() > 2 else (float("nan"), float("nan"))
+        out.append({"x": x, "y": y, "n": int(ok.sum()), "rho": rho, "p": p})
     return out
 
 
@@ -383,6 +387,9 @@ def main():
     p.add_argument("--batch_path", default="results/drift_eval_batch.pt")
     p.add_argument("--bs", type=int, default=128)
     p.add_argument("--out_dir", default="results")
+    p.add_argument("--from_csv", default=None,
+                   help="recompute stats + plots from an existing drift_per_run.csv "
+                        "(no forward passes)")
     args = p.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -392,6 +399,9 @@ def main():
     torch.backends.cudnn.benchmark = False
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.out_dir, exist_ok=True)
+    if args.from_csv:
+        report(read_per_run(args.from_csv), args.out_dir)
+        return
 
     cfg = yaml.safe_load(open(args.config))
     cfg["unlearn"]["label_to_forget"] = args.label_to_forget
@@ -464,21 +474,35 @@ def main():
                         "forget_drift": float(np.mean(list(fd.values())))})
         del new
 
-    def write(path, data, fields):
-        with open(path, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=fields)
-            w.writeheader()
-            w.writerows(data)
+    write_csv(os.path.join(args.out_dir, "drift.csv"), rows, COLUMNS)
+    write_csv(os.path.join(args.out_dir, "drift_per_run.csv"), per_run, COLUMNS)
+    write_csv(os.path.join(args.out_dir, "skipped.csv"), skipped, ["run", "reason"])
+    report(per_run, args.out_dir)
 
-    write(os.path.join(args.out_dir, "drift.csv"), rows, COLUMNS)
-    write(os.path.join(args.out_dir, "drift_per_run.csv"), per_run, COLUMNS)
-    write(os.path.join(args.out_dir, "skipped.csv"), skipped, ["run", "reason"])
 
+def write_csv(path, data, fields):
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(data)
+
+
+def read_per_run(path):
+    out = []
+    for r in csv.DictReader(open(path)):
+        for k in COLUMNS:
+            if k not in ("layer", "family", "run"):
+                r[k] = float(r[k]) if r[k] not in ("", None) else float("nan")
+        out.append(r)
+    return out
+
+
+def report(per_run, out_dir):
     sp = spearman_table(per_run)
-    write(os.path.join(args.out_dir, "spearman.csv"), sp, ["x", "y", "n", "rho", "p"])
+    write_csv(os.path.join(out_dir, "spearman.csv"), sp, ["x", "y", "n", "rho", "p"])
     print("\nSpearman over checkpoints (drift = mean over protected layers):")
     for r in sp:
-        print(f"  {r['x']:>12} vs {r['y']:<6}  n={r['n']:3d}  rho={r['rho']:+.3f}  p={r['p']:.2e}")
+        print(f"  {r['x']:>12} vs {r['y']:<12}  n={r['n']:3d}  rho={r['rho']:+.3f}  p={r['p']:.2e}")
 
     print("\nper-lambda (mean over seeds):")
     print("| lambda | n | retain drift | forget drift | penalty (unweighted) | UA | RA | FID |")
@@ -489,8 +513,8 @@ def main():
         print(f"| {lam:g} | {len(rr)} | {f('retain_drift'):.4f} | {f('forget_drift'):.4f} | "
               f"{f('penalty'):.4g} | {f('UA'):.3f} | {f('RA'):.4f} | {f('FID'):.2f} |")
 
-    make_plots(per_run, args.out_dir)
-    log.info(f"wrote drift.csv, drift_per_run.csv, skipped.csv, spearman.csv and plots to {args.out_dir}")
+    make_plots(per_run, out_dir)
+    log.info(f"wrote spearman.csv and plots to {out_dir}")
 
 
 if __name__ == "__main__":
