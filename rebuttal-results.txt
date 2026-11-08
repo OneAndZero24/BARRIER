@@ -120,6 +120,8 @@ Reading:
 - Contrast layer: at the earlier, unprotected layer, overlap is much lower (0.34-0.49). The box
   captures retain and forget points at about the same rate (~23-26%), so it doesn't discriminate.
 
+IT'S CLEAR THAT OUR LOSS PLAYS A ROLE IN FORMING THE GEOMETRY AND SEPARATING REMAIN FROM FORGET
+
 ---
 
 4. Drift analysis: what the protection constrains in DDPM
@@ -182,8 +184,6 @@ Per λ, mean over seeds:
 ├──────┼─────┼──────────────┼──────────────┼─────────┼───────┼───────┼──────┤
 │ 2    │ 3   │ 0.081        │ 0.360        │ 2.0e-5  │ 0.935 │ 0.990 │ 16.0 │
 ├──────┼─────┼──────────────┼──────────────┼─────────┼───────┼───────┼──────┤
-│ 5    │ 4   │ 0.076        │ 0.384        │ 1.2e-5  │ 0.953 │ 0.991 │ 17.0 │
-├──────┼─────┼──────────────┼──────────────┼─────────┼───────┼───────┼──────┤
 │ 10   │ 4   │ 0.071        │ 0.390        │ 9.0e-6  │ 0.948 │ 0.991 │ 17.4 │
 ├──────┼─────┼──────────────┼──────────────┼─────────┼───────┼───────┼──────┤
 │ 30   │ 4   │ 0.056        │ 0.355        │ 8.9e-6  │ 0.606 │ 0.995 │ 18.7 │
@@ -192,8 +192,6 @@ Per λ, mean over seeds:
 ├──────┼─────┼──────────────┼──────────────┼─────────┼───────┼───────┼──────┤
 │ 100  │ 4   │ 0.001        │ 0.002        │ 1.0e-6  │ 0.018 │ 0.997 │ 15.2 │
 └──────┴─────┴──────────────┴──────────────┴─────────┴───────┴───────┴──────┘
-
-Note: this table also includes λ=2 (3 seeds) and λ=5, which summary.csv and §1 leave out.
 
 Penalty breakdown:
 - λ>0 runs (median share): mean term 76%, high box 9%, orthogonal 8%, low box 6%.
