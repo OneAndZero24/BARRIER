@@ -16,7 +16,7 @@ def get_dataset(args):
     transform = transforms.Compose(
         [
             # transforms.Resize(32 if args.dataset == "cifar10" else 64),
-            transforms.Resize((224, 224)),
+            transforms.Resize((args.img_size, args.img_size)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
@@ -74,7 +74,7 @@ def get_dataset_image_folder(args):
     transform = transforms.Compose(
         [
             # transforms.Resize(32 if args.dataset == "cifar10" else 64),
-            transforms.Resize((224, 224)),
+            transforms.Resize((args.img_size, args.img_size)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
@@ -115,6 +115,10 @@ def parse_args():
         help="Freeze the convolution layers or not",
     )
     parser.add_argument("--n_epochs", type=int, default=10, help="Number of epochs")
+    parser.add_argument(
+        "--img_size", type=int, default=224, help="Input resolution (32 = native CIFAR)"
+    )
+    parser.add_argument("--out", type=str, default=None, help="Output checkpoint path")
     args = parser.parse_args()
     return args
 
@@ -197,4 +201,4 @@ if __name__ == "__main__":
         )
 
     print("Finished fine-tuning")
-    torch.save(model.state_dict(), f"{args.dataset}_resnet34.pth")
+    torch.save(model.state_dict(), args.out or f"{args.dataset}_resnet34.pth")

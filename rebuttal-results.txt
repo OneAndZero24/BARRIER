@@ -1,0 +1,231 @@
+Shared setup (DDPM)
+
+- Unlearning recipe (main code, ablation_regions.py, same as the paper's λ sweep):
+  - Random-Label objective: airplane-conditioned predictions are pushed toward the "automobile" prediction.
+  - Adam, lr 1e-4, 3000 steps, no remain-set loss (weight 0).
+  - Protection: k=32, two-corner boxes at the 5th/95th percentiles, infinity scale 20.
+- Metrics:
+  - UA (unlearning accuracy): share of the 500 airplane-conditioned samples that a ResNet-34 classifier does not call airplane. Higher means more forgetting.
+  - RA (remain accuracy): ResNet-34 accuracy on 4,500 samples conditioned on the 9 other classes (500 each).
+  - FID: 45k generated samples of the 9 remaining classes (guidance 2.0); lower is better. The unchanged model is about 15.2.
+  - The ResNet-34 resizes images to 224×224, same as the paper and the SEMU baseline.
+- λ sweep baseline (summary.csv): 4 seeds per λ (0, 1, 2, 1234).
+
+---
+
+1. λ=0 ablation: protection switched off
+
+What: the exact paper recipe on all 17 protected layers, with λ=0, so the penalty contributes nothing.
+Question: what does the protection actually buy?
+
+┌──────────────┬───────┬───────┬──────┐
+│     Run      │  UA   │  RA   │ FI
+├──────────────┼───────┼───────┼──────┤
+│ λ=0 (seed 0) │ 0.752 │ 0.845 │ 30
+├──────────────┼───────┼───────┼──────┤
+│ λ=0.01       │ 0.958 │ 0.985 │ 22
+├──────────────┼───────┼───────┼──────┤
+│ λ=0.1        │ 0.975 │ 0.993 │ 22
+├──────────────┼───────┼───────┼──────┤
+│ λ=1          │ 0.976 │ 0.992 │ 18
+├──────────────┼───────┼───────┼──────┤
+│ λ=10         │ 0.948 │ 0.991 │ 17
+├──────────────┼───────┼───────┼──────┤
+│ λ=30         │ 0.606 │ 0.995 │ 18
+├──────────────┼───────┼───────┼──────┤
+│ λ=50         │ 0.019 │ 0.997 │ 15
+├──────────────┼───────┼───────┼──────┤
+│ λ=100        │ 0.018 │ 0.997 │ 15
+└──────────────┴───────┴───────┴──────┘
+
+Without protection the model loses 15 points of RA and FID rises to 30. Even λ=0.01 brings RA and
+FID back close to the best values.  the layers, so nothing isforgotten. λ=0 is a single seed.
+
+---
+
+2. Single-layer unlearning (λ=0)
+
+What: the same recipe, but only one layer is trainable and all others are frozen. With λ=0 the
+protection plays no role.
+Question: how much forgetting can one layer achieve, and at what cost?
+
+┌───────────────────────────────────────────┬───────┬───────┬───────┐
+│              Trainable layer       FID  │
+├───────────────────────────────────────────┼───────┼───────┼───────┤
+│ cemb.dense.1 (class-embedding MLP 25.3  │
+├───────────────────────────────────────────┼───────┼───────┼───────┤
+│ mid.attn_1.v (bottleneck attentio 15.2  │
+├───────────────────────────────────────────┼───────┼───────┼───────┤
+│ down.1.attn.0.v (encoder attentio 91.4  │
+├───────────────────────────────────────────┼───────┼───────┼───────┤
+│ up.1.attn.1.v (decoder attention  104.5 │
+└───────────────────────────────────────────┴───────┴───────┴───────┘
+
+The class embedding alone forgets almost completely while keeping RA, with somewhat worse FID.
+The bottleneck attention can't forg decoder attention layers forgetonly partly and wreck the generator. Single seed each.
+
+---
+
+3. Overlap analysis: protected subspace vs retain data
+
+What: forward passes only, no training. ResNet-18 classifier with the paper's protection
+settings: the protected layer is fcinput dimension d=512), k=32.
+Question: does the forget subspace that BARRIER protects also hold the retain data, i.e. does
+protection inevitably constrain ret
+
+How it was computed (the repo's own
+1. Collect the inputs to fc for the 4,500 forget images. Run PCA centred on the forget mean μ to
+   get the top-32 basis U_k, and th95th percentile range on each of the 32 coordinates.
+2. Collect fc inputs for 10,000 ret
+3. Compute three quantities:
+   - overlap = ‖(A_r − mean A_r) U_the share of retain variance thatlies in the protected subspace.
+   - rand mean ± std: the same oversional subspaces. The expected value is k/d.
+   - box_frac: the % of retain poindinates all fall inside H_f.
+   - forget_box_frac: the same for the forget points themselves, as a reference.
+4. Settings:
+   - classwise: airplane forgotten.
+   - random: 4,500 random training it. These change with the seed, soseeds 0, 1 and 2 are used.
+5. Contrast row: the earlier layer ich is not protected in the paper.
+
+┌───────────┬─────────────────┬───────┬──────────┬─────────────────┐
+│           │                 │     │ Overlap │ Random │        │ box_frac │ forget_box_frac │
+│  Setting  │      Layer      │  d    │     %    │        %        │
+│           │                 │     │ seeds)  │        │        │          │                 │
+├───────────┼─────────────────┼───────┼──────────┼─────────────────┤
+│           │                 │     │ 0.944 – │ 0.059  │        │          │                 │
+│ classwise │ fc (protected)  │ 51225 │ 0.0      │ 17.6 – 18.3     │
+│           │                 │     │         │ 0.062  │        │          │                 │
+├───────────┼─────────────────┼───────┼──────────┼─────────────────┤
+│           │                 │     │         │ 0.059  │        │ 8.9 –    │                 │
+│ random    │ fc (protected)  │ 51225 │ 10.7     │ 9.3 – 11.1      │
+│           │                 │     │         │ 0.063  │        │          │                 │
+├───────────┼─────────────────┼───────┼──────────┼─────────────────┤
+│           │ layer4.0.conv1  │     │ 0.336 – │        │        │ 23.2 –   │                 │
+│ classwise │ (not protected, │ 2565  │ 25.0     │ 22.0 – 22.1     │
+│           │  contrast)      │     │         │        │        │          │                 │
+├───────────┼─────────────────┼───────┼──────────┼─────────────────┤
+│           │ layer4.0.conv1  │     │ 0.477 – │        │        │ 25.0 –   │                 │
+│ random    │ (not protected, │ 2565  │ 25.8     │ 25.3 – 25.6     │
+│           │  contrast)      │     │         │        │        │          │                 │
+└───────────┴─────────────────┴───────┴──────────┴─────────────────┘
+
+Reading:
+- Overlap. At fc, the forget subspace captures 94–99% of retain variance, about 15× the
+  random-subspace baseline. The subt-specific, so the protection doesconstrain directions that retain data uses.
+- Classwise box (0%). No retain poi box. The box is narrow enough toseparate the forget class, even though only 18% of forget points fall inside it on all 32
+  coordinates jointly.
+- Random-forget box. About 10% of retain points fall inside, the same rate as the forget points
+  themselves. Retain and forget comon, so they can't be separated.
+- Contrast layer. At the earlier, unprotected layer, overlap is much lower (0.34–0.49). The box
+  captures retain and forget points23–26%), so it doesn't discriminate.
+
+---
+
+4. Drift analysis: what the protect
+
+What: forward passes only on the ex runs of the paper's λ sweep plusthe λ=0 run, n=36.
+Question: does λ control how much t on retain inputs, and does thatchange predict the quality loss?
+
+How it was computed:
+1. One fixed evaluation batch, savevery checkpoint:
+   - 512 retain images (non-airplane, with their labels) and 512 airplane images;
+   - each at timesteps t ∈ {50, 250d noise and no conditioning dropout.
+2. Drift: for each of the 17 protected layers, its output on that batch from the unlearned model
+   vs the original model, as ‖out_n‖. This is averaged over timestepsand over the 17 layers.
+   - retain drift uses retain input
+   - forget drift uses airplane inputs: intended change.
+3. Penalty: the InTAct penalty withed for each checkpoint from thesaved pca_info.pth (the forget subspace and boxes from the original model). It is split into
+   four parts:
+   - mean term;
+   - orthogonal/residual term;
+   - low-corner box;
+   - high-corner box.
+4. Spearman rank correlation across the 36 checkpoints.
+5. Sanity check: the original models drift exactly 0.
+
+Spearman correlations (n=36):
+
+┌─────────────────────────┬────────
+│          Pair           │   ρ    │    p    │
+├─────────────────────────┼────────
+│ retain drift vs FID     │ +0.776 │ 2.6e-08 │
+├─────────────────────────┼────────
+│ retain drift vs RA      │ −0.758 │ 8.8e-08 │
+├─────────────────────────┼────────
+│ retain drift vs λ       │ −0.956 │ 1.3e-19 │
+├─────────────────────────┼────────
+│ forget drift vs UA      │ +0.765 │ 5.7e-08 │
+├─────────────────────────┼────────
+│ penalty vs retain drift │ +0.965 │ 2.1e-21 │
+├─────────────────────────┼────────
+│ penalty vs FID          │ +0.795 │ 6.9e-09 │
+└─────────────────────────┴────────
+
+Per λ, mean over seeds:
+
+┌──────┬─────┬──────────────┬──────┬───────┬──────┐
+│  λ   │  n  │ Retain drift │ Forget drift │ Penalty │  UA   │  RA   │ FID  │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 0    │ 1   │ 0.527        │ 0.846        │ 5.25    │ 0.752 │ 0.845 │ 30.2 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 0.01 │ 4   │ 0.143        │ 0.519        │ 1.6e-3  │ 0.958 │ 0.985 │ 22.2 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 0.1  │ 4   │ 0.105        │ 0.516        │ 3.0e-4  │ 0.975 │ 0.993 │ 22.4 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 1    │ 4   │ 0.097        │ 0.456        │ 4.4e-5  │ 0.976 │ 0.992 │ 18.3 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 2    │ 3   │ 0.081        │ 0.360        │ 2.0e-5  │ 0.935 │ 0.990 │ 16.0 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 5    │ 4   │ 0.076        │ 0.384        │ 1.2e-5  │ 0.953 │ 0.991 │ 17.0 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 10   │ 4   │ 0.071        │ 0.390        │ 9.0e-6  │ 0.948 │ 0.991 │ 17.4 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 30   │ 4   │ 0.056        │ 0.355        │ 8.9e-6  │ 0.606 │ 0.995 │ 18.7 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 50   │ 4   │ 0.010        │ 0.011        │ 1.2e-6  │ 0.019 │ 0.997 │ 15.3 │
+├──────┼─────┼──────────────┼──────┼───────┼──────┤
+│ 100  │ 4   │ 0.001        │ 0.002        │ 1.0e-6  │ 0.018 │ 0.997 │ 15.2 │
+└──────┴─────┴──────────────┴──────┴───────┴──────┘
+
+The per-λ table pools runs from two=2 and λ=5 values differ slightlyfrom §1. In particular λ=2 has 3 seeds here; §1 doesn't report λ=2 or λ=5.
+
+Penalty breakdown:
+- λ>0 runs (median share): mean teronal 8%, low box 6%.
+- λ=0: the orthogonal term is 83%. Unprotected layers drift mostly outside the forget subspace.
+
+Reading:
+- λ reliably controls retain-input cks that drift almost perfectly(ρ=0.97).
+- Retain drift in turn predicts FIDpredicts forgetting.
+- λ=0 has 3.7× the retain drift of λ=0.01 and the worst RA and FID.
+
+---
+
+5. Remain accuracy with a native 32×32 classifier (report separately)
+
+What: a robustness check for the RA metric. A ResNet-34 retrained on CIFAR-10 at native 32×32,
+with no upscaling (30 epochs, lr 1e It re-scores the saved classsamples of the λ-sweep runs.
+Why it's separate: a different clashe paper's 224 pipeline. Keep thesenumbers out of the main tables.
+
+┌──────┬─────┬───────────────┬──────────────────────────────────┐
+│  λ   │  n  │    RA @32     │ AirpA) │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 0.01 │ 4   │ 0.970 ± 0.002 │ 0.02   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 0.1  │ 4   │ 0.976 ± 0.003 │ 0.01   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 1    │ 4   │ 0.978 ± 0.003 │ 0.01   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 2    │ 3   │ 0.978 ± 0.002 │ 0.04   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 5    │ 4   │ 0.978 ± 0.002 │ 0.03   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 10   │ 4   │ 0.977 ± 0.002 │ 0.04   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 30   │ 4   │ 0.981 ± 0.002 │ 0.30   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 50   │ 4   │ 0.986 ± 0.002 │ 0.99   │
+├──────┼─────┼───────────────┼──────────────────────────────────┤
+│ 100  │ 4   │ 0.985 ± 0.001 │ 0.98   │
+└──────┴─────┴───────────────┴──────────────────────────────────┘
+
+This shows the same pattern as the 224 classifier: RA stays high for every λ>0, and forgetting collapses at λ≥50. The 32×32 numberer, consistent with thisclassifier's lower test accuracy.
